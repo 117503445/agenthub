@@ -1,0 +1,7 @@
+version: 3
+
+tasks:
+  clear:
+    desc: "准备运行目录"
+    cmds:
+      - mkdir -p ./data/web ./data/e2e/cases ./cmd/web/dist

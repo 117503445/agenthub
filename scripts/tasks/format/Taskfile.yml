@@ -1,0 +1,8 @@
+version: 3
+
+tasks:
+  all:
+    desc: "格式化 Go 和前端代码"
+    cmds:
+      - gofmt -w ./cmd ./internal
+      - pnpm --dir ./fe lint

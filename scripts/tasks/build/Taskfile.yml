@@ -1,0 +1,12 @@
+version: 3
+
+tasks:
+  web:
+    desc: "构建 Web 后端和前端资源"
+    deps: [":base:clear", ":fe:build"]
+    cmds:
+      - sh ./scripts/build-web.sh
+
+  all:
+    desc: "构建全部产物"
+    deps: [web]

@@ -1,0 +1,21 @@
+version: 3
+
+tasks:
+  install:
+    desc: "安装前端依赖"
+    dir: ./fe
+    cmds:
+      - pnpm install
+
+  dev:
+    desc: "运行前端开发服务器"
+    dir: ./fe
+    cmds:
+      - pnpm dev --host 0.0.0.0
+
+  build:
+    desc: "构建前端静态资源"
+    deps: [install]
+    dir: ./fe
+    cmds:
+      - pnpm build

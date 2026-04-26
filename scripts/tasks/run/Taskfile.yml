@@ -1,0 +1,7 @@
+version: 3
+
+tasks:
+  web:
+    desc: "运行 Go WebSocket 后端"
+    cmds:
+      - go run ./cmd/web
