@@ -4,9 +4,19 @@ tasks:
   web:
     desc: "构建 Web 后端和前端资源"
     deps: [":base:clear", ":fe:build"]
+    sources:
+      - ./cmd/**
+      - ./internal/**
+      - ./fe/dist/**
+      - ./go.mod
+      - ./go.sum
+      - ./scripts/go-scripts/**
+      - ./scripts/tasks/**
+    generates:
+      - ./data/web/web
     cmds:
-      - sh ./scripts/build-web.sh
+      - go run ./scripts/go-scripts build-web
 
   all:
     desc: "构建全部产物"
-    deps: [web]
+    deps: [":build:web"]

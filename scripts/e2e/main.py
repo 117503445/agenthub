@@ -5,6 +5,7 @@ import argparse
 import importlib.util
 import logging
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -15,19 +16,21 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 CASES_DIR = Path(__file__).resolve().parent / "cases"
-OUTPUT_BASE_DIR = ROOT_DIR / "data" / "e2e" / "cases"
+OUTPUT_BASE_DIR = ROOT_DIR / "data" / "e2e"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
 def find_free_port() -> int:
+    """查找可用于本次 E2E 服务的本地端口。"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])
 
 
 def wait_until_ready(base_url: str) -> None:
+    """等待 base_url 参数对应的服务健康检查通过。"""
     deadline = time.time() + 20
     last_error: Exception | None = None
     while time.time() < deadline:
@@ -42,10 +45,12 @@ def wait_until_ready(base_url: str) -> None:
 
 
 def discover_cases() -> list[str]:
+    """发现 cases 目录下所有可运行的 E2E 用例。"""
     return sorted(file.stem for file in CASES_DIR.glob("case_*.py"))
 
 
 def start_server(server_cmd: str, port: int, logs_dir: Path) -> subprocess.Popen[str]:
+    """使用 server_cmd 参数启动被测服务，并把日志写入 logs_dir 参数。"""
     env = os.environ.copy()
     env["PORT"] = str(port)
     log_file = open(logs_dir / "server.log", "w", encoding="utf-8")
@@ -62,6 +67,7 @@ def start_server(server_cmd: str, port: int, logs_dir: Path) -> subprocess.Popen
 
 
 def stop_server(process: subprocess.Popen[str] | None) -> None:
+    """停止 process 参数对应的被测服务进程。"""
     if process is None:
         return
     process.terminate()
@@ -76,9 +82,11 @@ def stop_server(process: subprocess.Popen[str] | None) -> None:
 
 
 def run_case(case_name: str, base_url: str) -> bool:
+    """运行 case_name 参数指定的用例，并把结果写入当前用例目录。"""
     case_file = CASES_DIR / f"{case_name}.py"
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    output_dir = OUTPUT_BASE_DIR / f"{timestamp}-{case_name}"
+    output_dir = OUTPUT_BASE_DIR / case_name
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
     screenshots_dir = output_dir / "screenshots"
     logs_dir = output_dir / "logs"
     screenshots_dir.mkdir(parents=True, exist_ok=True)
@@ -115,6 +123,7 @@ def run_case(case_name: str, base_url: str) -> bool:
 
 
 def main() -> int:
+    """解析命令行参数并运行 E2E 测试。"""
     parser = argparse.ArgumentParser(description="运行 WebSocket E2E 测试")
     parser.add_argument("--case", help="指定要运行的用例")
     parser.add_argument("--base-url", default=os.getenv("E2E_BASE_URL"), help="复用外部服务地址")

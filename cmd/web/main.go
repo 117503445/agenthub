@@ -8,12 +8,18 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/117503445/coding/internal/buildinfo"
+	"github.com/117503445/coding/internal/envloader"
 )
 
+// init 初始化日志并主动加载 .env 文件。
 func init() {
 	glog.InitZeroLog()
+	if err := envloader.LoadDefault(); err != nil {
+		log.Warn().Err(err).Msg("加载 .env 失败")
+	}
 }
 
+// main 读取端口配置并启动 WebSocket Web 服务。
 func main() {
 	log.Info().
 		Str("BuildTime", buildinfo.BuildTime).

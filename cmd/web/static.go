@@ -10,6 +10,7 @@ import (
 //go:embed all:dist
 var staticFS embed.FS
 
+// staticHandler 返回用于服务前端静态资源和 SPA 回退的处理器。
 func staticHandler() http.Handler {
 	distFS, err := fs.Sub(staticFS, "dist")
 	if err != nil {

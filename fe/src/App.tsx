@@ -16,10 +16,15 @@ import { getWebSocketUrl, type ServerMessage } from '@/lib/ws'
 type ConnectionState = 'connecting' | 'open' | 'closed' | 'error'
 
 interface LogEntry {
+  /** id 表示前端日志的唯一标识。 */
   id: string
+  /** source 表示消息来源。 */
   source: 'client' | 'server'
+  /** type 表示消息类型。 */
   type: string
+  /** text 表示展示文本。 */
   text: string
+  /** time 表示消息发生时间。 */
   time: string
 }
 
@@ -30,10 +35,12 @@ const stateText: Record<ConnectionState, string> = {
   error: '连接异常',
 }
 
+// createId 创建用于日志列表渲染的唯一标识。
 function createId() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`
 }
 
+// payloadText 把 message 参数中的 payload 转换为界面展示文本。
 function payloadText(message: ServerMessage) {
   const payload = message.payload ?? {}
   const echo = payload.echo
@@ -44,6 +51,7 @@ function payloadText(message: ServerMessage) {
   return String(text ?? message.type)
 }
 
+// App 渲染 WebSocket 控制台主界面。
 function App() {
   const wsRef = useRef<WebSocket | null>(null)
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting')
@@ -76,6 +84,7 @@ function App() {
     let retryTimer = 0
     let heartbeatTimer = 0
 
+    // appendLog 把 entry 参数追加到通信记录顶部。
     const appendLog = (entry: Omit<LogEntry, 'id' | 'time'>) => {
       setLogs((current) => [
         {
@@ -87,6 +96,7 @@ function App() {
       ].slice(0, 12))
     }
 
+    // connect 建立 WebSocket 连接，并在异常关闭时自动重连。
     const connect = () => {
       setConnectionState('connecting')
       const ws = new WebSocket(getWebSocketUrl())
@@ -138,6 +148,7 @@ function App() {
     }
   }, [])
 
+  // sendMessage 处理 event 参数对应的表单提交，并发送 WebSocket 消息。
   const sendMessage = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const text = inputValue.trim()
@@ -212,7 +223,11 @@ function App() {
               </CardHeader>
               <CardContent>
                 <form className="space-y-3" onSubmit={sendMessage}>
+                  <label htmlFor="message-input" className="block text-sm font-medium text-slate-700">
+                    消息内容
+                  </label>
                   <input
+                    id="message-input"
                     data-testid="message-input"
                     value={inputValue}
                     onChange={(event) => setInputValue(event.target.value)}
@@ -223,7 +238,7 @@ function App() {
                     data-testid="send-button"
                     type="submit"
                     disabled={connectionState !== 'open' || inputValue.trim().length === 0}
-                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                    className="inline-flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-medium text-white transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-300"
                   >
                     <Send className="h-4 w-4" />
                     发送
@@ -241,7 +256,7 @@ function App() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div data-testid="message-log" className="space-y-3">
+              <div data-testid="message-log" className="space-y-3" aria-live="polite">
                 {logs.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
                     等待 WebSocket 消息

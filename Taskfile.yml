@@ -13,5 +13,20 @@ includes:
     taskfile: ./scripts/tasks/fe
   e2e:
     taskfile: ./scripts/tasks/e2e
+  test:
+    taskfile: ./scripts/tasks/test
   format:
     taskfile: ./scripts/tasks/format
+
+tasks:
+  test:
+    desc: "运行所有测试"
+    cmds:
+      - task: test:all
+
+  e2e:
+    desc: "运行 E2E 测试"
+    cmds:
+      - task: e2e:all
+        vars:
+          CLI_ARGS: "{{.CLI_ARGS}}"

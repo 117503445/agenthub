@@ -17,5 +17,16 @@ tasks:
     desc: "构建前端静态资源"
     deps: [install]
     dir: ./fe
+    sources:
+      - ./package.json
+      - ./pnpm-lock.yaml
+      - ./index.html
+      - ./vite.config.ts
+      - ./tsconfig.json
+      - ./tsconfig.app.json
+      - ./tsconfig.node.json
+      - ./src/**
+    generates:
+      - ./dist/**
     cmds:
       - pnpm build

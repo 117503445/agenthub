@@ -13,6 +13,7 @@ import (
 	"github.com/117503445/coding/internal/wsapp"
 )
 
+// ListenAndServe 使用 ctx 参数记录日志，并在 port 参数指定的端口启动 HTTP 服务。
 func ListenAndServe(ctx context.Context, port string) error {
 	mux := http.NewServeMux()
 	wsServer := wsapp.NewServer(buildinfo.Version())

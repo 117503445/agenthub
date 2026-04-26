@@ -11,14 +11,17 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// Server 提供基于 coder/websocket 的消息处理服务。
 type Server struct {
 	version string
 }
 
+// NewServer 使用 version 参数创建 WebSocket 服务。
 func NewServer(version string) *Server {
 	return &Server{version: version}
 }
 
+// ServeWS 使用 w 和 r 参数升级 HTTP 请求并处理 WebSocket 消息。
 func (s *Server) ServeWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		OriginPatterns: []string{"localhost:*", "127.0.0.1:*"},
@@ -58,6 +61,7 @@ func (s *Server) ServeWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handle 根据 msg 参数中的类型处理连接 conn 上的业务消息。
 func (s *Server) handle(ctx context.Context, conn *websocket.Conn, msg ClientMessage) error {
 	switch msg.Type {
 	case "ping":
@@ -82,6 +86,7 @@ func (s *Server) handle(ctx context.Context, conn *websocket.Conn, msg ClientMes
 	}
 }
 
+// write 把 messageType 和 payload 参数封装为服务端消息并写入连接 conn。
 func (s *Server) write(ctx context.Context, conn *websocket.Conn, messageType string, payload map[string]any) error {
 	return wsjson.Write(ctx, conn, ServerMessage{
 		Type:       messageType,
@@ -91,6 +96,7 @@ func (s *Server) write(ctx context.Context, conn *websocket.Conn, messageType st
 	})
 }
 
+// isExpectedClose 判断 err 参数是否属于正常关闭。
 func isExpectedClose(err error) bool {
 	if err == nil {
 		return true

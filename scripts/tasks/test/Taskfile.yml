@@ -1,0 +1,10 @@
+version: 3
+
+tasks:
+  all:
+    desc: "运行所有测试"
+    deps:
+      - ":build:web"
+    cmds:
+      - go test ./...
+      - task: :e2e:all

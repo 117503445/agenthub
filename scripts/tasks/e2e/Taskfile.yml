@@ -8,12 +8,16 @@ tasks:
       - uv sync
       - uv run playwright install chromium
 
-  run:
+  all:
     desc: "运行全部 E2E 测试"
     deps: [":build:web"]
     dir: ./scripts/e2e
     cmds:
-      - uv run main.py
+      - uv run main.py {{.CLI_ARGS}}
+
+  run:
+    desc: "运行全部 E2E 测试"
+    deps: [":e2e:all"]
 
   case:
     desc: "运行指定 E2E 用例"
