@@ -12,6 +12,7 @@ def write_report(output_dir: Path, success: bool, steps: list[str]) -> None:
         "",
         f"- 结果: {status}",
         "- 日志: [test.log](logs/test.log)",
+        "- 服务日志: [server.log](logs/server.log)",
         "",
         "## 步骤",
         "",
@@ -39,10 +40,14 @@ def run_test(
     logger.info("打开页面: %s", base_url)
     steps: list[str] = []
     success = False
+    server_log_path = logs_dir / "server.log"
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 1366, "height": 900})
         try:
+            if not server_log_path.exists():
+                raise RuntimeError(f"未找到当前用例服务日志: {server_log_path}")
+
             page.goto(base_url, wait_until="networkidle")
             expect(page.get_by_test_id("connection-state")).to_contain_text("已连接", timeout=10000)
             page.screenshot(path=screenshots_dir / "01-connected.png", full_page=True)

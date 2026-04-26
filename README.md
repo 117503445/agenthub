@@ -35,6 +35,7 @@ go-task e2e
 ```
 
 运行单个或全部 E2E 测试。测试会自动启动构建后的后端服务，并验证 WebSocket 连接和消息回环。
+每个 E2E 用例会独立启动一套后端服务，服务日志写入该用例目录，例如 `data/e2e/case_ws/logs/server.log`，用例结束后会关闭服务。
 
 ```bash
 go-task test

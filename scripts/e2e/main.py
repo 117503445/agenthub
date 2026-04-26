@@ -11,7 +11,6 @@ import subprocess
 import sys
 import time
 import urllib.request
-from datetime import datetime
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -53,6 +52,7 @@ def start_server(server_cmd: str, port: int, logs_dir: Path) -> subprocess.Popen
     """使用 server_cmd 参数启动被测服务，并把日志写入 logs_dir 参数。"""
     env = os.environ.copy()
     env["PORT"] = str(port)
+    env["CODING_LOG_NO_COLOR"] = "true"
     log_file = open(logs_dir / "server.log", "w", encoding="utf-8")
     process = subprocess.Popen(
         server_cmd.split(),
@@ -81,8 +81,8 @@ def stop_server(process: subprocess.Popen[str] | None) -> None:
         log_file.close()
 
 
-def run_case(case_name: str, base_url: str) -> bool:
-    """运行 case_name 参数指定的用例，并把结果写入当前用例目录。"""
+def run_case(case_name: str, server_cmd: str) -> bool:
+    """运行 case_name 参数指定的用例，并为该用例独立启动 server_cmd 参数指定的服务。"""
     case_file = CASES_DIR / f"{case_name}.py"
     output_dir = OUTPUT_BASE_DIR / case_name
     if output_dir.exists():
@@ -96,7 +96,13 @@ def run_case(case_name: str, base_url: str) -> bool:
     file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
     logger.addHandler(file_handler)
 
+    server_process: subprocess.Popen[str] | None = None
     try:
+        port = find_free_port()
+        base_url = f"http://127.0.0.1:{port}"
+        server_process = start_server(server_cmd, port, logs_dir)
+        wait_until_ready(base_url)
+        logger.info("E2E 目标地址: %s", base_url)
         logger.info("开始运行用例: %s", case_name)
         spec = importlib.util.spec_from_file_location(case_name, case_file)
         if spec is None or spec.loader is None:
@@ -118,6 +124,7 @@ def run_case(case_name: str, base_url: str) -> bool:
         logger.exception("用例运行异常: %s", err)
         return False
     finally:
+        stop_server(server_process)
         logger.removeHandler(file_handler)
         file_handler.close()
 
@@ -126,7 +133,6 @@ def main() -> int:
     """解析命令行参数并运行 E2E 测试。"""
     parser = argparse.ArgumentParser(description="运行 WebSocket E2E 测试")
     parser.add_argument("--case", help="指定要运行的用例")
-    parser.add_argument("--base-url", default=os.getenv("E2E_BASE_URL"), help="复用外部服务地址")
     parser.add_argument("--server-cmd", default=str(ROOT_DIR / "data" / "web" / "web"), help="服务启动命令")
     args = parser.parse_args()
 
@@ -138,25 +144,10 @@ def main() -> int:
         logger.error("用例不存在: %s", ", ".join(missing_cases))
         return 1
 
-    server_process: subprocess.Popen[str] | None = None
-    base_url = args.base_url
-    run_logs_dir = OUTPUT_BASE_DIR / datetime.now().strftime("%Y%m%d-%H%M%S-run") / "logs"
-    run_logs_dir.mkdir(parents=True, exist_ok=True)
-
-    try:
-        if not base_url:
-            port = find_free_port()
-            base_url = f"http://127.0.0.1:{port}"
-            server_process = start_server(args.server_cmd, port, run_logs_dir)
-            wait_until_ready(base_url)
-        logger.info("E2E 目标地址: %s", base_url)
-
-        results = {case: run_case(case, base_url) for case in cases}
-        for case, success in results.items():
-            logger.info("%s: %s", case, "PASSED" if success else "FAILED")
-        return 0 if all(results.values()) else 1
-    finally:
-        stop_server(server_process)
+    results = {case: run_case(case, args.server_cmd) for case in cases}
+    for case, success in results.items():
+        logger.info("%s: %s", case, "PASSED" if success else "FAILED")
+    return 0 if all(results.values()) else 1
 
 
 if __name__ == "__main__":

@@ -1,10 +1,23 @@
 version: 3
 
 tasks:
+  ut:
+    desc: "运行单元测试"
+    cmds:
+      - go test ./...
+
+  it:
+    desc: "运行集成测试"
+    deps:
+      - ":build:web"
+    cmds:
+      - go test -tags=integration ./...
+
   all:
     desc: "运行所有测试"
     deps:
       - ":build:web"
     cmds:
-      - go test ./...
+      - task: :test:ut
+      - task: :test:it
       - task: :e2e:all

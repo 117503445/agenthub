@@ -13,8 +13,8 @@ import (
 	"github.com/117503445/coding/internal/wsapp"
 )
 
-// ListenAndServe 使用 ctx 参数记录日志，并在 port 参数指定的端口启动 HTTP 服务。
-func ListenAndServe(ctx context.Context, port string) error {
+// newHTTPHandler 使用 ctx 参数创建 WebSocket 服务的 HTTP 处理器。
+func newHTTPHandler(ctx context.Context) http.Handler {
 	mux := http.NewServeMux()
 	wsServer := wsapp.NewServer(buildinfo.Version())
 
@@ -29,6 +29,12 @@ func ListenAndServe(ctx context.Context, port string) error {
 	mux.HandleFunc("/ws", wsServer.ServeWS)
 	mux.Handle("/", staticHandler())
 
+	_ = ctx
+	return mux
+}
+
+// ListenAndServe 使用 ctx 参数记录日志，并在 port 参数指定的端口启动 HTTP 服务。
+func ListenAndServe(ctx context.Context, port string) error {
 	listener, err := net.Listen("tcp", ":"+port)
 	if err != nil {
 		log.Ctx(ctx).Error().Err(err).Msg("监听端口失败")
@@ -41,5 +47,5 @@ func ListenAndServe(ctx context.Context, port string) error {
 	}()
 
 	log.Ctx(ctx).Info().Str("addr", listener.Addr().String()).Msg("Web 服务已启动")
-	return http.Serve(listener, mux)
+	return http.Serve(listener, newHTTPHandler(ctx))
 }
