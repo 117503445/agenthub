@@ -4,19 +4,17 @@ tasks:
   ut:
     desc: "运行单元测试"
     cmds:
-      - go test ./...
+      - go run ./scripts/go-scripts ut
 
   it:
     desc: "运行集成测试"
     deps:
-      - ":build:web"
+      - ":fe:build"
     cmds:
-      - go test -tags=integration ./...
+      - go run ./scripts/go-scripts it
 
   all:
     desc: "运行所有测试"
-    deps:
-      - ":build:web"
     cmds:
       - task: :test:ut
       - task: :test:it
