@@ -194,7 +194,20 @@ func startServer(rootDir string, serverCmd string, port int, logsDir string) (*e
 
 	cmd := exec.Command(parts[0], parts[1:]...)
 	cmd.Dir = rootDir
-	cmd.Env = append(os.Environ(), fmt.Sprintf("PORT=%d", port), "CODING_LOG_NO_COLOR=true")
+	mockCodexCommand, mockClaudeCommand, err := prepareMockAgentCommands(rootDir, parts[0])
+	if err != nil {
+		_ = serverLog.Close()
+		return nil, nil, err
+	}
+	cmd.Env = withEnvOverride(os.Environ(), map[string]string{
+		"PORT":                       fmt.Sprintf("%d", port),
+		"CODING_LOG_NO_COLOR":        "true",
+		"CODING_MOCK_CODEX_COMMAND":  mockCodexCommand,
+		"CODING_MOCK_CLAUDE_COMMAND": mockClaudeCommand,
+		"ANTHROPIC_BASE_URL":         fmt.Sprintf("http://127.0.0.1:%d/mock/anthropic", port),
+		"ANTHROPIC_API_KEY":          "mock-key",
+		"ANTHROPIC_MODEL":            "mock-claude-sonnet",
+	})
 	cmd.Stdout = serverLog
 	cmd.Stderr = serverLog
 	if err := cmd.Start(); err != nil {
@@ -207,6 +220,63 @@ func startServer(rootDir string, serverCmd string, port int, logsDir string) (*e
 		_ = serverLog.Close()
 	}
 	return cmd, stop, nil
+}
+
+// prepareMockAgentCommands 使用 rootDir 和 serverPath 参数准备 E2E mock agent 命令。
+func prepareMockAgentCommands(rootDir string, serverPath string) (string, string, error) {
+	absServerPath, err := filepath.Abs(serverPath)
+	if err != nil {
+		return "", "", err
+	}
+	mockDir := filepath.Join(rootDir, "data", "e2e", "mock-agents")
+	if err := os.MkdirAll(mockDir, 0755); err != nil {
+		return "", "", err
+	}
+	mockCodexPath := filepath.Join(mockDir, "mock-codex")
+	mockClaudePath := filepath.Join(mockDir, "mock-claude")
+	if err := recreateMockAgentLink(absServerPath, mockCodexPath); err != nil {
+		return "", "", err
+	}
+	if err := recreateMockAgentLink(absServerPath, mockClaudePath); err != nil {
+		return "", "", err
+	}
+	return mockCodexPath, mockClaudePath, nil
+}
+
+// recreateMockAgentLink 使用 target 和 linkPath 参数重建 mock agent 链接。
+func recreateMockAgentLink(target string, linkPath string) error {
+	if err := os.Remove(linkPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.Symlink(target, linkPath); err == nil {
+		return nil
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(linkPath, data, 0755); err != nil {
+		return err
+	}
+	return nil
+}
+
+// withEnvOverride 使用 env 和 override 参数生成覆盖后的环境变量列表。
+func withEnvOverride(env []string, override map[string]string) []string {
+	result := make([]string, 0, len(env)+len(override))
+	for _, item := range env {
+		key, _, ok := strings.Cut(item, "=")
+		if ok {
+			if _, replaced := override[key]; replaced {
+				continue
+			}
+		}
+		result = append(result, item)
+	}
+	for key, value := range override {
+		result = append(result, key+"="+value)
+	}
+	return result
 }
 
 // waitUntilReady 使用 baseURL 参数等待健康检查通过。

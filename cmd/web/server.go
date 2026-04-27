@@ -19,7 +19,7 @@ import (
 // newHTTPHandler 使用 ctx 和 port 参数创建 WebSocket 服务的 HTTP 处理器。
 func newHTTPHandler(ctx context.Context, port string) http.Handler {
 	mux := http.NewServeMux()
-	wsServer := wsapp.NewServer(ctx, buildinfo.Version(), resolveAgentConfig(port))
+	wsServer := wsapp.NewServer(ctx, buildinfo.Version(), resolveAgentConfig())
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -48,29 +48,43 @@ func subpathHandler(wsServer *wsapp.Server, static http.Handler) http.Handler {
 	})
 }
 
-// resolveAgentConfig 使用 port 参数生成 Claude runtime 配置。
-func resolveAgentConfig(port string) wsapp.AgentConfig {
+// resolveAgentConfig 生成 agent runtime 配置。
+func resolveAgentConfig() wsapp.AgentConfig {
 	baseURL := strings.TrimSpace(os.Getenv("ANTHROPIC_BASE_URL"))
-	if baseURL == "" {
-		baseURL = "http://127.0.0.1:" + port + "/mock/anthropic"
-	}
 	model := strings.TrimSpace(os.Getenv("ANTHROPIC_MODEL"))
 	if model == "" {
 		model = "sonnet"
 	}
 	apiKey := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
-	if apiKey == "" {
-		apiKey = "mock-key"
-	}
 	command := strings.TrimSpace(os.Getenv("CODING_CLAUDE_COMMAND"))
 	if command == "" {
 		command = "claude"
 	}
+	codexCommand := strings.TrimSpace(os.Getenv("CODING_CODEX_COMMAND"))
+	if codexCommand == "" {
+		codexCommand = "codex"
+	}
+	mockClaudeCommand := strings.TrimSpace(os.Getenv("CODING_MOCK_CLAUDE_COMMAND"))
+	if mockClaudeCommand == "" {
+		mockClaudeCommand = command
+	}
+	mockCodexCommand := strings.TrimSpace(os.Getenv("CODING_MOCK_CODEX_COMMAND"))
+	if mockCodexCommand == "" {
+		mockCodexCommand = codexCommand
+	}
+	agentProviders := wsapp.AgentProviderOptions(wsapp.AgentOptionsConfig{
+		ClaudeDefaultModel: model,
+		CodexDefaultEffort: "xhigh",
+	})
 	return wsapp.AgentConfig{
-		Command:          command,
-		AnthropicBaseURL: baseURL,
-		AnthropicModel:   model,
-		AnthropicAPIKey:  apiKey,
+		Command:           command,
+		CodexCommand:      codexCommand,
+		MockClaudeCommand: mockClaudeCommand,
+		MockCodexCommand:  mockCodexCommand,
+		AnthropicBaseURL:  baseURL,
+		AnthropicModel:    model,
+		AnthropicAPIKey:   apiKey,
+		AgentProviders:    agentProviders,
 	}
 }
 

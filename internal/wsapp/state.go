@@ -32,6 +32,17 @@ const (
 )
 
 const (
+	// AgentProviderClaudeCode 表示 Claude Code CLI agent。
+	AgentProviderClaudeCode = "claude-code"
+	// AgentProviderCodex 表示 Codex CLI agent。
+	AgentProviderCodex = "codex"
+	// AgentProviderMockClaudeCode 表示连接 mock 模型服务的 Claude Code agent。
+	AgentProviderMockClaudeCode = "mock-claude-code"
+	// AgentProviderMockCodex 表示连接 mock 模型服务的 Codex agent。
+	AgentProviderMockCodex = "mock-codex"
+)
+
+const (
 	// MessageStatusComplete 表示消息已经完成。
 	MessageStatusComplete = "complete"
 	// MessageStatusStreaming 表示消息正在流式输出。
@@ -40,6 +51,15 @@ const (
 	MessageStatusStopped = "stopped"
 	// MessageStatusError 表示消息输出失败。
 	MessageStatusError = "error"
+)
+
+const (
+	// ToolCallStatusRunning 表示工具调用正在执行。
+	ToolCallStatusRunning = "running"
+	// ToolCallStatusComplete 表示工具调用已经完成。
+	ToolCallStatusComplete = "complete"
+	// ToolCallStatusError 表示工具调用失败。
+	ToolCallStatusError = "error"
 )
 
 var (
@@ -52,21 +72,33 @@ var (
 // Project 表示一个后端本机工作目录。
 type Project struct {
 	ID        string    `json:"id"`        // ID 表示 project 唯一标识。
-	Name      string    `json:"name"`      // Name 表示 project 展示名称。
+	Name      string    `json:"name"`      // Name 表示由工作目录最后一级派生的展示名称。
 	Path      string    `json:"path"`      // Path 表示 project 工作目录。
 	CreatedAt time.Time `json:"createdAt"` // CreatedAt 表示创建时间。
 	UpdatedAt time.Time `json:"updatedAt"` // UpdatedAt 表示更新时间。
 }
 
+// ToolCall 表示 assistant 消息中的一次工具调用。
+type ToolCall struct {
+	ID        string    `json:"id"`               // ID 表示工具调用唯一标识。
+	Name      string    `json:"name"`             // Name 表示工具名称。
+	Status    string    `json:"status"`           // Status 表示工具调用状态。
+	Input     string    `json:"input,omitempty"`  // Input 表示工具入参摘要。
+	Output    string    `json:"output,omitempty"` // Output 表示工具输出摘要。
+	CreatedAt time.Time `json:"createdAt"`        // CreatedAt 表示创建时间。
+	UpdatedAt time.Time `json:"updatedAt"`        // UpdatedAt 表示更新时间。
+}
+
 // ChatMessage 表示聊天页中的一条消息。
 type ChatMessage struct {
-	ID        string    `json:"id"`        // ID 表示消息唯一标识。
-	ChatID    string    `json:"chatId"`    // ChatID 表示消息所属聊天页。
-	Role      string    `json:"role"`      // Role 表示消息角色。
-	Text      string    `json:"text"`      // Text 表示消息文本。
-	Status    string    `json:"status"`    // Status 表示消息状态。
-	CreatedAt time.Time `json:"createdAt"` // CreatedAt 表示创建时间。
-	UpdatedAt time.Time `json:"updatedAt"` // UpdatedAt 表示更新时间。
+	ID        string     `json:"id"`                  // ID 表示消息唯一标识。
+	ChatID    string     `json:"chatId"`              // ChatID 表示消息所属聊天页。
+	Role      string     `json:"role"`                // Role 表示消息角色。
+	Text      string     `json:"text"`                // Text 表示消息文本。
+	Status    string     `json:"status"`              // Status 表示消息状态。
+	ToolCalls []ToolCall `json:"toolCalls,omitempty"` // ToolCalls 表示消息中的工具调用。
+	CreatedAt time.Time  `json:"createdAt"`           // CreatedAt 表示创建时间。
+	UpdatedAt time.Time  `json:"updatedAt"`           // UpdatedAt 表示更新时间。
 }
 
 // Chat 表示 project 下的一个聊天页。
@@ -75,7 +107,11 @@ type Chat struct {
 	ProjectID      string        `json:"projectId"`                // ProjectID 表示聊天页所属 project。
 	Title          string        `json:"title"`                    // Title 表示聊天页标题。
 	Status         string        `json:"status"`                   // Status 表示聊天页运行状态。
-	AgentSessionID string        `json:"agentSessionId,omitempty"` // AgentSessionID 表示 Claude 会话标识。
+	AgentProvider  string        `json:"agentProvider"`            // AgentProvider 表示当前聊天页使用的 agent 类型。
+	AgentModel     string        `json:"agentModel"`               // AgentModel 表示当前聊天页使用的模型。
+	AgentReasoning string        `json:"agentReasoning,omitempty"` // AgentReasoning 表示当前聊天页使用的推理级别。
+	AgentLocked    bool          `json:"agentLocked"`              // AgentLocked 表示会话开始后 agent 配置是否锁定。
+	AgentSessionID string        `json:"agentSessionId,omitempty"` // AgentSessionID 表示 agent 会话标识。
 	Messages       []ChatMessage `json:"messages"`                 // Messages 表示聊天消息列表。
 	CreatedAt      time.Time     `json:"createdAt"`                // CreatedAt 表示创建时间。
 	UpdatedAt      time.Time     `json:"updatedAt"`                // UpdatedAt 表示更新时间。
@@ -83,8 +119,9 @@ type Chat struct {
 
 // Snapshot 表示前端重连时需要恢复的完整内存状态。
 type Snapshot struct {
-	Projects []Project `json:"projects"` // Projects 表示所有 project。
-	Chats    []Chat    `json:"chats"`    // Chats 表示所有聊天页。
+	Projects       []Project             `json:"projects"`       // Projects 表示所有 project。
+	Chats          []Chat                `json:"chats"`          // Chats 表示所有聊天页。
+	AgentProviders []AgentProviderOption `json:"agentProviders"` // AgentProviders 表示可选 agent 和模型。
 }
 
 // Store 维护 project、聊天页和消息的内存状态。
@@ -93,20 +130,30 @@ type Store struct {
 	projects        map[string]Project
 	chats           map[string]Chat
 	nextChatOrdinal map[string]int
+	agentProviders  []AgentProviderOption
 }
 
-// NewStore 创建空的内存状态存储。
+// NewStore 创建使用默认 agent 选项的内存状态存储。
 func NewStore() *Store {
+	return NewStoreWithAgentProviders(DefaultAgentProviderOptions())
+}
+
+// NewStoreWithAgentProviders 使用 agentProviders 参数创建内存状态存储。
+func NewStoreWithAgentProviders(agentProviders []AgentProviderOption) *Store {
+	if len(agentProviders) == 0 {
+		agentProviders = DefaultAgentProviderOptions()
+	}
 	return &Store{
 		projects:        make(map[string]Project),
 		chats:           make(map[string]Chat),
 		nextChatOrdinal: make(map[string]int),
+		agentProviders:  cloneAgentProviderOptions(agentProviders),
 	}
 }
 
-// CreateProject 使用 name 和 projectPath 参数创建 project。
-func (s *Store) CreateProject(name string, projectPath string) (Project, error) {
-	normalizedName, normalizedPath, err := validateProjectInput(name, projectPath)
+// CreateProject 使用 projectPath 参数创建 project。
+func (s *Store) CreateProject(projectPath string) (Project, error) {
+	normalizedName, normalizedPath, err := validateProjectInput(projectPath)
 	if err != nil {
 		return Project{}, err
 	}
@@ -126,9 +173,9 @@ func (s *Store) CreateProject(name string, projectPath string) (Project, error) 
 	return project, nil
 }
 
-// UpdateProject 使用 id、name 和 projectPath 参数更新 project。
-func (s *Store) UpdateProject(id string, name string, projectPath string) (Project, error) {
-	normalizedName, normalizedPath, err := validateProjectInput(name, projectPath)
+// UpdateProject 使用 id 和 projectPath 参数更新 project。
+func (s *Store) UpdateProject(id string, projectPath string) (Project, error) {
+	normalizedName, normalizedPath, err := validateProjectInput(projectPath)
 	if err != nil {
 		return Project{}, err
 	}
@@ -177,15 +224,77 @@ func (s *Store) CreateChat(projectID string) (Chat, error) {
 	s.nextChatOrdinal[projectID]++
 	now := time.Now()
 	chat := Chat{
-		ID:        newID("chat"),
-		ProjectID: projectID,
-		Title:     fmt.Sprintf("聊天 %d", s.nextChatOrdinal[projectID]),
-		Status:    ChatStatusIdle,
-		Messages:  []ChatMessage{},
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:            newID("chat"),
+		ProjectID:     projectID,
+		Title:         fmt.Sprintf("聊天 %d", s.nextChatOrdinal[projectID]),
+		Status:        ChatStatusIdle,
+		AgentProvider: AgentProviderMockClaudeCode,
+		AgentModel:    DefaultAgentModel(AgentProviderMockClaudeCode, s.agentProviders),
+		Messages:      []ChatMessage{},
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 	s.chats[chat.ID] = chat
+	return cloneChat(chat), nil
+}
+
+// AddAgentModel 使用 provider、modelID 和 label 参数新增 agent 模型选项。
+func (s *Store) AddAgentModel(provider string, modelID string, label string) ([]AgentProviderOption, error) {
+	normalizedProvider := strings.TrimSpace(provider)
+	normalizedModelID := strings.TrimSpace(modelID)
+	normalizedLabel := strings.TrimSpace(label)
+	if normalizedProvider != AgentProviderClaudeCode {
+		return nil, fmt.Errorf("%w: 只允许更新 Claude Code 模型列表", ErrInvalidInput)
+	}
+	if normalizedModelID == "" {
+		return nil, fmt.Errorf("%w: 模型标识不能为空", ErrInvalidInput)
+	}
+	if normalizedLabel == "" {
+		normalizedLabel = normalizedModelID
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for providerIndex := range s.agentProviders {
+		option := &s.agentProviders[providerIndex]
+		if option.ID != normalizedProvider {
+			continue
+		}
+		for _, model := range option.Models {
+			if model.ID == normalizedModelID {
+				return nil, fmt.Errorf("%w: 模型已存在", ErrInvalidInput)
+			}
+		}
+		option.Models = append(option.Models, AgentModelOption{
+			ID:    normalizedModelID,
+			Label: normalizedLabel,
+		})
+		return cloneAgentProviderOptions(s.agentProviders), nil
+	}
+	return nil, fmt.Errorf("%w: 不支持的 agent: %s", ErrInvalidInput, provider)
+}
+
+// UpdateChatAgent 使用 chatID、provider、model 和 reasoning 参数更新聊天页 agent 配置。
+func (s *Store) UpdateChatAgent(chatID string, provider string, model string, reasoning string) (Chat, error) {
+	normalizedProvider, normalizedModel, normalizedReasoning, err := NormalizeAgentSelection(provider, model, reasoning, s.agentProviders)
+	if err != nil {
+		return Chat{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	chat, ok := s.chats[chatID]
+	if !ok {
+		return Chat{}, ErrNotFound
+	}
+	if chat.AgentLocked {
+		return Chat{}, fmt.Errorf("%w: agent 配置已锁定", ErrInvalidInput)
+	}
+	chat.AgentProvider = normalizedProvider
+	chat.AgentModel = normalizedModel
+	chat.AgentReasoning = normalizedReasoning
+	chat.UpdatedAt = time.Now()
+	s.chats[chatID] = chat
 	return cloneChat(chat), nil
 }
 
@@ -239,6 +348,7 @@ func (s *Store) AddRunMessages(chatID string, prompt string) (Chat, ChatMessage,
 	}
 	chat.Messages = append(chat.Messages, userMessage, assistantMessage)
 	chat.Status = ChatStatusRunning
+	chat.AgentLocked = true
 	chat.UpdatedAt = now
 	s.chats[chatID] = chat
 	return cloneChat(chat), userMessage, assistantMessage, nil
@@ -272,6 +382,58 @@ func (s *Store) AppendAssistantDelta(chatID string, messageID string, delta stri
 		return *message, true
 	}
 	return ChatMessage{}, false
+}
+
+// UpsertToolCall 使用 chatID、messageID 和 tool 参数插入或更新工具调用。
+func (s *Store) UpsertToolCall(chatID string, messageID string, tool ToolCall) (Chat, ChatMessage, bool) {
+	tool.Name = strings.TrimSpace(tool.Name)
+	if strings.TrimSpace(tool.ID) == "" {
+		tool.ID = newID("tool")
+	}
+	if strings.TrimSpace(tool.Status) == "" {
+		tool.Status = ToolCallStatusRunning
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	chat, ok := s.chats[chatID]
+	if !ok {
+		return Chat{}, ChatMessage{}, false
+	}
+	for messageIndex := range chat.Messages {
+		message := &chat.Messages[messageIndex]
+		if message.ID != messageID || message.Role != MessageRoleAssistant {
+			continue
+		}
+		now := time.Now()
+		updated := false
+		for toolIndex := range message.ToolCalls {
+			if message.ToolCalls[toolIndex].ID != tool.ID {
+				continue
+			}
+			existing := &message.ToolCalls[toolIndex]
+			existing.Name = firstNonEmpty(tool.Name, existing.Name)
+			existing.Status = firstNonEmpty(tool.Status, existing.Status)
+			existing.Input = firstNonEmpty(tool.Input, existing.Input)
+			existing.Output = firstNonEmpty(tool.Output, existing.Output)
+			existing.UpdatedAt = now
+			updated = true
+			break
+		}
+		if !updated {
+			if tool.Name == "" {
+				return Chat{}, ChatMessage{}, false
+			}
+			tool.CreatedAt = now
+			tool.UpdatedAt = now
+			message.ToolCalls = append(message.ToolCalls, tool)
+		}
+		message.UpdatedAt = now
+		chat.UpdatedAt = now
+		s.chats[chatID] = chat
+		return cloneChat(chat), cloneChatMessage(*message), true
+	}
+	return Chat{}, ChatMessage{}, false
 }
 
 // FinishAssistantMessage 使用 chatID、messageID 和 status 参数结束 assistant 消息。
@@ -404,16 +566,12 @@ func (s *Store) Snapshot() Snapshot {
 		return chats[i].CreatedAt.Before(chats[j].CreatedAt)
 	})
 
-	return Snapshot{Projects: projects, Chats: chats}
+	return Snapshot{Projects: projects, Chats: chats, AgentProviders: cloneAgentProviderOptions(s.agentProviders)}
 }
 
-// validateProjectInput 使用 name 和 projectPath 参数校验 project 输入。
-func validateProjectInput(name string, projectPath string) (string, string, error) {
-	normalizedName := strings.TrimSpace(name)
+// validateProjectInput 使用 projectPath 参数校验 project 输入，并返回派生名称和绝对路径。
+func validateProjectInput(projectPath string) (string, string, error) {
 	normalizedPath := strings.TrimSpace(projectPath)
-	if normalizedName == "" {
-		return "", "", fmt.Errorf("%w: project 名称不能为空", ErrInvalidInput)
-	}
 	if normalizedPath == "" {
 		return "", "", fmt.Errorf("%w: project 路径不能为空", ErrInvalidInput)
 	}
@@ -428,16 +586,39 @@ func validateProjectInput(name string, projectPath string) (string, string, erro
 	if !stat.IsDir() {
 		return "", "", fmt.Errorf("%w: project 路径不是目录", ErrInvalidInput)
 	}
-	return normalizedName, absPath, nil
+	return filepath.Base(absPath), absPath, nil
 }
 
 // cloneChat 使用 chat 参数创建不会共享消息切片的副本。
 func cloneChat(chat Chat) Chat {
-	chat.Messages = append([]ChatMessage(nil), chat.Messages...)
+	messages := chat.Messages
+	chat.Messages = make([]ChatMessage, 0, len(messages))
+	for _, message := range messages {
+		chat.Messages = append(chat.Messages, cloneChatMessage(message))
+	}
 	if chat.Messages == nil {
 		chat.Messages = []ChatMessage{}
 	}
 	return chat
+}
+
+// cloneChatMessage 使用 message 参数创建不会共享工具调用切片的副本。
+func cloneChatMessage(message ChatMessage) ChatMessage {
+	message.ToolCalls = append([]ToolCall(nil), message.ToolCalls...)
+	return message
+}
+
+// cloneAgentProviderOptions 使用 options 参数创建不会共享模型和推理级别切片的副本。
+func cloneAgentProviderOptions(options []AgentProviderOption) []AgentProviderOption {
+	result := make([]AgentProviderOption, 0, len(options))
+	for _, option := range options {
+		option.Models = append([]AgentModelOption(nil), option.Models...)
+		for index := range option.Models {
+			option.Models[index].ReasoningLevels = append([]AgentReasoningOption(nil), option.Models[index].ReasoningLevels...)
+		}
+		result = append(result, option)
+	}
+	return result
 }
 
 // newID 使用 prefix 参数生成短随机标识。

@@ -92,9 +92,117 @@ func clickTestID(page playwright.Page, id string) error {
 	return getByTestID(page, id).Click()
 }
 
+// selectTestID 使用 page、id 和 value 参数选择 data-testid 对应下拉框选项。
+func selectTestID(page playwright.Page, id string, value string) error {
+	_, err := getByTestID(page, id).SelectOption(playwright.SelectOptionValues{
+		Values: &[]string{value},
+	})
+	return err
+}
+
+// expectTestIDValue 使用 page、id、expected 和 timeout 参数等待表单元素值等于 expected。
+func expectTestIDValue(page playwright.Page, id string, expected string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastValue string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := getByTestID(page, id).InputValue()
+		if err == nil {
+			lastValue = value
+			if value == expected {
+				return nil
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待元素 %q 值为 %q 超时，最后错误: %w", id, expected, lastErr)
+	}
+	return fmt.Errorf("等待元素 %q 值为 %q 超时，实际值: %s", id, expected, lastValue)
+}
+
+// expectTestIDDisabled 使用 page、id、expected 和 timeout 参数等待元素禁用状态符合预期。
+func expectTestIDDisabled(page playwright.Page, id string, expected bool, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastDisabled bool
+	var lastErr error
+	for time.Now().Before(deadline) {
+		disabled, err := getByTestID(page, id).IsDisabled()
+		if err == nil {
+			lastDisabled = disabled
+			if disabled == expected {
+				return nil
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待元素 %q 禁用状态为 %v 超时，最后错误: %w", id, expected, lastErr)
+	}
+	return fmt.Errorf("等待元素 %q 禁用状态为 %v 超时，实际状态: %v", id, expected, lastDisabled)
+}
+
+// expectTestIDAttributeAbsent 使用 page、id、name 和 timeout 参数等待元素属性不存在。
+func expectTestIDAttributeAbsent(page playwright.Page, id string, name string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastHasAttribute bool
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := getByTestID(page, id).First().Evaluate(fmt.Sprintf("(element) => element.hasAttribute(%q)", name), nil)
+		if err == nil {
+			hasAttribute, ok := value.(bool)
+			if ok {
+				lastHasAttribute = hasAttribute
+			}
+			if ok && !hasAttribute {
+				return nil
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待元素 %q 属性 %q 不存在超时，最后错误: %w", id, name, lastErr)
+	}
+	return fmt.Errorf("等待元素 %q 属性 %q 不存在超时，实际存在: %v", id, name, lastHasAttribute)
+}
+
+// expectTestIDCount 使用 page、id 和 expected 参数等待元素数量符合预期。
+func expectTestIDCount(page playwright.Page, id string, expected int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastCount int
+	var lastErr error
+	for time.Now().Before(deadline) {
+		count, err := getByTestID(page, id).Count()
+		if err == nil {
+			lastCount = count
+			if count == expected {
+				return nil
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待元素 %q 数量为 %d 超时，最后错误: %w", id, expected, lastErr)
+	}
+	return fmt.Errorf("等待元素 %q 数量为 %d 超时，实际数量: %d", id, expected, lastCount)
+}
+
 // expectTestIDText 使用 page、id、expected 和 timeout 参数等待元素文本包含 expected。
 func expectTestIDText(page playwright.Page, id string, expected string, timeout time.Duration) error {
 	return expectLocatorText(getByTestID(page, id), expected, timeout)
+}
+
+// expectTestIDNotText 使用 page、id、unexpected 和 timeout 参数等待元素文本不包含 unexpected。
+func expectTestIDNotText(page playwright.Page, id string, unexpected string, timeout time.Duration) error {
+	return expectLocatorNotText(getByTestID(page, id), unexpected, timeout)
 }
 
 // expectLocatorText 使用 locator、expected 和 timeout 参数等待元素文本包含 expected。
@@ -118,6 +226,29 @@ func expectLocatorText(locator playwright.Locator, expected string, timeout time
 		return fmt.Errorf("等待文本 %q 超时，最后错误: %w", expected, lastErr)
 	}
 	return fmt.Errorf("等待文本 %q 超时，实际文本: %s", expected, lastText)
+}
+
+// expectLocatorNotText 使用 locator、unexpected 和 timeout 参数等待元素文本不包含 unexpected。
+func expectLocatorNotText(locator playwright.Locator, unexpected string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastText string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		text, err := locator.TextContent()
+		if err == nil {
+			lastText = text
+			if !strings.Contains(text, unexpected) {
+				return nil
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待文本不包含 %q 超时，最后错误: %w", unexpected, lastErr)
+	}
+	return fmt.Errorf("等待文本不包含 %q 超时，实际文本: %s", unexpected, lastText)
 }
 
 // writeFile 使用 path 和 content 参数写入文本文件。

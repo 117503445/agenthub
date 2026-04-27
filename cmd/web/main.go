@@ -34,6 +34,10 @@ func initLog() {
 
 // main 读取端口配置并启动 WebSocket Web 服务。
 func main() {
+	if runMockAgentCLIIfRequested(os.Args) {
+		return
+	}
+
 	log.Info().
 		Str("BuildTime", buildinfo.BuildTime).
 		Str("GitBranch", buildinfo.GitBranch).

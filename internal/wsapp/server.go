@@ -26,10 +26,14 @@ type Server struct {
 
 // NewServer 使用 ctx、version 和 agentConfig 参数创建 WebSocket 服务。
 func NewServer(ctx context.Context, version string, agentConfig AgentConfig) *Server {
+	agentProviders := agentConfig.AgentProviders
+	if len(agentProviders) == 0 {
+		agentProviders = DefaultAgentProviderOptions()
+	}
 	return &Server{
 		ctx:         ctx,
 		version:     version,
-		store:       NewStore(),
+		store:       NewStoreWithAgentProviders(agentProviders),
 		agents:      NewAgentManager(ctx, agentConfig),
 		subscribers: make(map[string]chan ServerMessage),
 	}
@@ -117,18 +121,23 @@ func (s *Server) handle(ctx context.Context, outbound chan ServerMessage, msg Cl
 		if err := decodePayload(msg, &payload); err != nil {
 			return err
 		}
-		project, err := s.store.CreateProject(payload.Name, payload.Path)
+		project, err := s.store.CreateProject(payload.Path)
+		if err != nil {
+			return err
+		}
+		chat, err := s.store.CreateChat(project.ID)
 		if err != nil {
 			return err
 		}
 		s.broadcast("project.changed", map[string]any{"project": project})
+		s.broadcast("chat.changed", map[string]any{"chat": chat})
 		return nil
 	case "project.update":
 		var payload ProjectMutationPayload
 		if err := decodePayload(msg, &payload); err != nil {
 			return err
 		}
-		project, err := s.store.UpdateProject(payload.ID, payload.Name, payload.Path)
+		project, err := s.store.UpdateProject(payload.ID, payload.Path)
 		if err != nil {
 			return err
 		}
@@ -158,6 +167,34 @@ func (s *Server) handle(ctx context.Context, outbound chan ServerMessage, msg Cl
 			return err
 		}
 		s.broadcast("chat.changed", map[string]any{"chat": chat})
+		return nil
+	case "chat.agent.update":
+		var payload ChatAgentUpdatePayload
+		if err := decodePayload(msg, &payload); err != nil {
+			return err
+		}
+		chat, err := s.store.UpdateChatAgent(payload.ChatID, payload.Provider, payload.Model, payload.Reasoning)
+		if err != nil {
+			return err
+		}
+		if chat.Status == ChatStatusRunning {
+			s.stopChatRun(payload.ChatID)
+			return nil
+		}
+		s.agents.Stop(payload.ChatID)
+		s.broadcast("chat.changed", map[string]any{"chat": chat})
+		return nil
+	case "agent.model.add":
+		var payload AgentModelAddPayload
+		if err := decodePayload(msg, &payload); err != nil {
+			return err
+		}
+		options, err := s.store.AddAgentModel(payload.Provider, payload.ID, payload.Label)
+		if err != nil {
+			return err
+		}
+		s.agents.SetAgentProviders(options)
+		s.broadcast("agent.providers.changed", map[string]any{"agentProviders": options})
 		return nil
 	case "chat.send":
 		var payload ChatSendPayload
@@ -212,6 +249,13 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string)
 				"text":      message.Text,
 			})
 		},
+		OnToolCall: func(tool ToolCall) {
+			updatedChat, _, ok := s.store.UpsertToolCall(chatID, assistantMessage.ID, tool)
+			if !ok {
+				return
+			}
+			s.broadcast("chat.changed", map[string]any{"chat": updatedChat})
+		},
 		OnDone: func() {
 			updatedChat, message, ok := s.store.FinishAssistantMessage(chatID, assistantMessage.ID, MessageStatusComplete)
 			if !ok {
@@ -238,6 +282,9 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string)
 	if err := s.agents.Send(ctx, AgentRunInput{
 		ChatID:             chatID,
 		ProjectPath:        project.Path,
+		Provider:           chat.AgentProvider,
+		Model:              chat.AgentModel,
+		Reasoning:          chat.AgentReasoning,
 		Prompt:             prompt,
 		SessionID:          chat.AgentSessionID,
 		AssistantMessageID: assistantMessage.ID,

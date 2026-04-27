@@ -47,8 +47,8 @@ func runWSCase(ctx E2EContext) (success bool) {
 	screenshot(page, filepath.Join(ctx.ScreenshotsDir, "01-connected.png"), true)
 	steps = append(steps, "页面从 /console/ 子路径打开后，WebSocket 状态变为已连接，并收到后端状态快照。")
 
-	projectName := fmt.Sprintf("WS Project %d", time.Now().Unix())
-	if err := fillTestID(page, "project-name-input", projectName); err != nil {
+	projectName := filepath.Base(ctx.RootDir)
+	if err := expectTestIDCount(page, "project-name-input", 0, 2*time.Second); err != nil {
 		return fail(err)
 	}
 	if err := fillTestID(page, "project-path-input", ctx.RootDir); err != nil {
@@ -58,6 +58,12 @@ func runWSCase(ctx E2EContext) (success bool) {
 		return fail(err)
 	}
 	if err := expectTestIDText(page, "project-list", projectName, 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDNotText(page, "project-list", ctx.RootDir, 2*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDText(page, "chat-tabs", "聊天 1", 10*time.Second); err != nil {
 		return fail(err)
 	}
 	hashValue, err := page.Evaluate("window.location.hash")
@@ -75,7 +81,7 @@ func runWSCase(ctx E2EContext) (success bool) {
 		return fail(err)
 	}
 	screenshot(page, filepath.Join(ctx.ScreenshotsDir, "02-restored.png"), true)
-	steps = append(steps, "创建 project 后 hash 路由指向 project，刷新页面仍从后端内存状态恢复。")
+	steps = append(steps, "创建 project 后自动打开聊天页，hash 路由指向 project，刷新页面仍从后端内存状态恢复。")
 	return true
 }
 

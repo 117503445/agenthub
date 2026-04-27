@@ -19,7 +19,6 @@ type ServerMessage struct {
 // ProjectMutationPayload 表示 project 创建和更新消息的参数。
 type ProjectMutationPayload struct {
 	ID   string `json:"id,omitempty"` // ID 表示要更新的 project 标识。
-	Name string `json:"name"`         // Name 表示 project 展示名称。
 	Path string `json:"path"`         // Path 表示 project 在后端机器上的工作目录。
 }
 
@@ -42,4 +41,19 @@ type ChatSendPayload struct {
 // ChatStopPayload 表示停止聊天页当前输出的请求参数。
 type ChatStopPayload struct {
 	ChatID string `json:"chatId"` // ChatID 表示目标聊天页标识。
+}
+
+// ChatAgentUpdatePayload 表示更新聊天页 agent 配置的请求参数。
+type ChatAgentUpdatePayload struct {
+	ChatID    string `json:"chatId"`    // ChatID 表示目标聊天页标识。
+	Provider  string `json:"provider"`  // Provider 表示 agent provider。
+	Model     string `json:"model"`     // Model 表示 agent 模型。
+	Reasoning string `json:"reasoning"` // Reasoning 表示 agent 推理级别。
+}
+
+// AgentModelAddPayload 表示新增 agent 模型选项的请求参数。
+type AgentModelAddPayload struct {
+	Provider string `json:"provider"` // Provider 表示目标 agent provider。
+	ID       string `json:"id"`       // ID 表示模型标识。
+	Label    string `json:"label"`    // Label 表示模型展示名称。
 }
