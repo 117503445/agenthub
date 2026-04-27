@@ -1,4 +1,5 @@
-package main
+// Package common 提供 go-scripts 子模块共享的基础工具。
+package common
 
 import (
 	"errors"
@@ -12,8 +13,8 @@ import (
 	"time"
 )
 
-// runWithWriters 执行 name 和 args 参数组成的命令，并写入 stdout 和 stderr 参数。
-func runWithWriters(stdout io.Writer, stderr io.Writer, name string, args ...string) error {
+// RunWithWriters 执行 name 和 args 参数组成的命令，并写入 stdout 和 stderr 参数。
+func RunWithWriters(stdout io.Writer, stderr io.Writer, name string, args ...string) error {
 	cmd := exec.Command(name, args...)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
@@ -24,8 +25,8 @@ func runWithWriters(stdout io.Writer, stderr io.Writer, name string, args ...str
 	return nil
 }
 
-// findFreeTCPPort 查找本机可用 TCP 端口。
-func findFreeTCPPort() (int, error) {
+// FindFreeTCPPort 查找本机可用 TCP 端口。
+func FindFreeTCPPort() (int, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return 0, fmt.Errorf("查找可用端口失败: %w", err)
@@ -39,8 +40,8 @@ func findFreeTCPPort() (int, error) {
 	return addr.Port, nil
 }
 
-// stopProcess 停止 cmd 参数对应的进程，超时后强制结束。
-func stopProcess(cmd *exec.Cmd) {
+// StopProcess 停止 cmd 参数对应的进程，超时后强制结束。
+func StopProcess(cmd *exec.Cmd) {
 	if cmd == nil || cmd.Process == nil {
 		return
 	}
@@ -65,8 +66,8 @@ func stopProcess(cmd *exec.Cmd) {
 	}
 }
 
-// recreateLogFile 重新创建 path 参数指定的日志文件。
-func recreateLogFile(path string) (*os.File, error) {
+// RecreateLogFile 重新创建 path 参数指定的日志文件。
+func RecreateLogFile(path string) (*os.File, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return nil, fmt.Errorf("创建日志目录失败: %w", err)
 	}
@@ -77,8 +78,8 @@ func recreateLogFile(path string) (*os.File, error) {
 	return file, nil
 }
 
-// copyDir 把 src 参数目录递归复制到 dst 参数目录。
-func copyDir(src string, dst string) error {
+// CopyDir 把 src 参数目录递归复制到 dst 参数目录。
+func CopyDir(src string, dst string) error {
 	info, err := os.Stat(src)
 	if err != nil {
 		return err
@@ -103,6 +104,24 @@ func copyDir(src string, dst string) error {
 	})
 }
 
+// RootDir 从当前工作目录向上查找 go.mod，并返回项目根目录。
+func RootDir() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("读取当前目录失败: %w", err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("未找到项目根目录")
+		}
+		dir = parent
+	}
+}
+
 // copyFile 把 src 参数文件复制到 dst 参数路径，并使用 mode 参数设置权限。
 func copyFile(src string, dst string, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
@@ -122,10 +141,4 @@ func copyFile(src string, dst string, mode os.FileMode) error {
 
 	_, err = io.Copy(output, input)
 	return err
-}
-
-// exitWithError 输出 err 参数并以失败状态退出。
-func exitWithError(err error) {
-	_, _ = fmt.Fprintln(os.Stderr, err)
-	os.Exit(1)
 }

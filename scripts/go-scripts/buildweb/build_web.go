@@ -1,4 +1,5 @@
-package main
+// Package buildweb 实现 Web 前端嵌入资源和后端二进制构建命令。
+package buildweb
 
 import (
 	"fmt"
@@ -8,15 +9,17 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/117503445/coding/scripts/go-scripts/common"
 )
 
-// buildWeb 构建前端嵌入资源和 WebSocket 后端二进制。
-func buildWeb() error {
-	return buildWebBinary(filepath.Join("data", "web", "web"), os.Stdout, os.Stderr)
+// Run 运行 build-web 命令。
+func Run() error {
+	return BuildBinary(filepath.Join("data", "web", "web"), os.Stdout, os.Stderr)
 }
 
-// buildWebBinary 构建包含前端资源的 WebSocket 后端二进制，outputPath 参数指定二进制输出路径，stdout 和 stderr 参数接收构建日志。
-func buildWebBinary(outputPath string, stdout io.Writer, stderr io.Writer) error {
+// BuildBinary 构建包含前端资源的 WebSocket 后端二进制，outputPath 参数指定二进制输出路径，stdout 和 stderr 参数接收构建日志。
+func BuildBinary(outputPath string, stdout io.Writer, stderr io.Writer) error {
 	distDir := filepath.Join("cmd", "web", "dist")
 	backupDir, err := os.MkdirTemp("", "coding-web-dist-*")
 	if err != nil {
@@ -24,13 +27,13 @@ func buildWebBinary(outputPath string, stdout io.Writer, stderr io.Writer) error
 	}
 	defer os.RemoveAll(backupDir)
 
-	if err := copyDir(distDir, filepath.Join(backupDir, "dist")); err != nil && !os.IsNotExist(err) {
+	if err := common.CopyDir(distDir, filepath.Join(backupDir, "dist")); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("备份静态资源失败: %w", err)
 	}
 	defer func() {
 		_ = os.RemoveAll(distDir)
 		_ = os.MkdirAll(distDir, 0755)
-		_ = copyDir(filepath.Join(backupDir, "dist"), distDir)
+		_ = common.CopyDir(filepath.Join(backupDir, "dist"), distDir)
 	}()
 
 	if err := os.RemoveAll(distDir); err != nil {
@@ -39,7 +42,7 @@ func buildWebBinary(outputPath string, stdout io.Writer, stderr io.Writer) error
 	if err := os.MkdirAll(distDir, 0755); err != nil {
 		return fmt.Errorf("创建静态资源目录失败: %w", err)
 	}
-	if err := copyDir(filepath.Join("fe", "dist"), distDir); err != nil {
+	if err := common.CopyDir(filepath.Join("fe", "dist"), distDir); err != nil {
 		return fmt.Errorf("复制前端产物失败: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
@@ -51,7 +54,7 @@ func buildWebBinary(outputPath string, stdout io.Writer, stderr io.Writer) error
 		args = append(args, "-ldflags", ldflags)
 	}
 	args = append(args, "./cmd/web")
-	return runWithWriters(stdout, stderr, "go", args...)
+	return common.RunWithWriters(stdout, stderr, "go", args...)
 }
 
 // buildLDFlags 生成构建信息注入参数。

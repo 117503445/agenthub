@@ -6,7 +6,7 @@
 
 - 后端：Go、`github.com/coder/websocket`、zerolog
 - 前端：React、TypeScript、Vite、Tailwind CSS、Lucide React
-- E2E：Python、uv、Playwright
+- E2E：Go、playwright-go、Chromium
 - 任务运行：go-task
 
 ## 常用命令
@@ -34,11 +34,11 @@ go-task e2e -- --case case_ws
 go-task e2e
 ```
 
-运行单个或全部 E2E 测试。测试会自动启动构建后的后端服务，并验证 WebSocket 连接和消息回环。
+运行单个或全部 E2E 测试。测试会自动启动构建后的后端服务，并验证 WebSocket 状态恢复、子路径加载和 agent 聊天流程。
 每个 E2E 用例会独立启动一套后端服务，服务日志写入该用例目录，例如 `data/e2e/case_ws/logs/server.log`，用例结束后会关闭服务。
 
 ```bash
 go-task test
 ```
 
-运行 Go 单元测试和全部 E2E 测试。
+运行 Go 单元测试、集成测试和全部 E2E 测试。

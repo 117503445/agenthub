@@ -1,4 +1,5 @@
-package main
+// Package it 实现 Web 后端集成测试命令。
+package it
 
 import (
 	"context"
@@ -16,26 +17,12 @@ import (
 	"github.com/coder/websocket/wsjson"
 
 	"github.com/117503445/coding/internal/wsapp"
+	"github.com/117503445/coding/scripts/go-scripts/buildweb"
+	"github.com/117503445/coding/scripts/go-scripts/common"
 )
 
-// runUnitTests 运行单元测试，并把日志写入 data/ut。
-func runUnitTests() error {
-	logPath := filepath.Join("data", "ut", "test.log")
-	logFile, err := recreateLogFile(logPath)
-	if err != nil {
-		return err
-	}
-	defer logFile.Close()
-
-	output := io.MultiWriter(os.Stdout, logFile)
-	if _, err := fmt.Fprintln(output, "运行单元测试: go test ./..."); err != nil {
-		return err
-	}
-	return runWithWriters(output, output, "go", "test", "./...")
-}
-
-// runIntegrationTests 编译并启动 Go 服务，再用 Go client 验证服务行为。
-func runIntegrationTests() error {
+// Run 编译并启动 Go 服务，再用 Go client 验证服务行为。
+func Run() error {
 	dir := filepath.Join("data", "it")
 	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("清理集成测试目录失败: %w", err)
@@ -44,7 +31,7 @@ func runIntegrationTests() error {
 		return fmt.Errorf("创建集成测试目录失败: %w", err)
 	}
 
-	buildLog, err := recreateLogFile(filepath.Join(dir, "build.log"))
+	buildLog, err := common.RecreateLogFile(filepath.Join(dir, "build.log"))
 	if err != nil {
 		return err
 	}
@@ -54,24 +41,24 @@ func runIntegrationTests() error {
 	if _, err := fmt.Fprintln(buildOutput, "编译集成测试服务"); err != nil {
 		return err
 	}
-	if err := buildWebBinary(binaryPath, buildOutput, buildOutput); err != nil {
+	if err := buildweb.BuildBinary(binaryPath, buildOutput, buildOutput); err != nil {
 		return err
 	}
 
-	serverLog, err := recreateLogFile(filepath.Join(dir, "server.log"))
+	serverLog, err := common.RecreateLogFile(filepath.Join(dir, "server.log"))
 	if err != nil {
 		return err
 	}
 	defer serverLog.Close()
 
-	clientLog, err := recreateLogFile(filepath.Join(dir, "client.log"))
+	clientLog, err := common.RecreateLogFile(filepath.Join(dir, "client.log"))
 	if err != nil {
 		return err
 	}
 	defer clientLog.Close()
 	clientOutput := io.MultiWriter(os.Stdout, clientLog)
 
-	port, err := findFreeTCPPort()
+	port, err := common.FindFreeTCPPort()
 	if err != nil {
 		return err
 	}
@@ -86,7 +73,7 @@ func runIntegrationTests() error {
 	if err := serverCmd.Start(); err != nil {
 		return fmt.Errorf("启动集成测试服务失败: %w", err)
 	}
-	defer stopProcess(serverCmd)
+	defer common.StopProcess(serverCmd)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

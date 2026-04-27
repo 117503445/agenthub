@@ -3,17 +3,14 @@ version: 3
 tasks:
   install:
     desc: "安装 E2E 依赖和浏览器"
-    dir: ./scripts/e2e
     cmds:
-      - uv sync
-      - uv run playwright install chromium
+      - go run ./scripts/go-scripts e2e-install
 
   all:
     desc: "运行全部 E2E 测试"
     deps: [":build:web"]
-    dir: ./scripts/e2e
     cmds:
-      - uv run main.py {{.CLI_ARGS}}
+      - go run ./scripts/go-scripts e2e {{.CLI_ARGS}}
 
   run:
     desc: "运行全部 E2E 测试"
@@ -22,6 +19,5 @@ tasks:
   case:
     desc: "运行指定 E2E 用例"
     deps: [":build:web"]
-    dir: ./scripts/e2e
     cmds:
-      - uv run main.py --case {{.CLI_ARGS}}
+      - go run ./scripts/go-scripts e2e --case {{.CLI_ARGS}}

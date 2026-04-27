@@ -13,9 +13,14 @@ tasks:
     cmds:
       - go run ./scripts/go-scripts it
 
+  e2e:
+    desc: "运行 E2E 测试"
+    cmds:
+      - task: :e2e:all
+
   all:
     desc: "运行所有测试"
     cmds:
       - task: :test:ut
       - task: :test:it
-      - task: :e2e:all
+      - task: :test:e2e
