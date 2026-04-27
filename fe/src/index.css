@@ -6,7 +6,7 @@
 }
 
 html {
-  background: #f8fafc;
+  background: #ffffff;
 }
 
 body {
@@ -14,7 +14,7 @@ body {
   min-height: 100vh;
   margin: 0;
   font-family: var(--font-sans);
-  color: #0f172a;
+  color: #1a1a1e;
 }
 
 button,
@@ -22,4 +22,259 @@ input,
 select,
 textarea {
   font: inherit;
+}
+
+.theme-paseo {
+  --paseo-surface-0: #ffffff;
+  --paseo-surface-1: #fafafa;
+  --paseo-surface-2: #f4f4f5;
+  --paseo-surface-3: #e4e4e7;
+  --paseo-surface-4: #d4d4d8;
+  --paseo-sidebar: #f4f4f5;
+  --paseo-sidebar-hover: #e9e9ec;
+  --paseo-border: #e4e4e7;
+  --paseo-border-accent: #ececf1;
+  --paseo-foreground: #1a1a1e;
+  --paseo-muted: #71717a;
+  --paseo-muted-2: #a1a1aa;
+  --paseo-accent: #20744a;
+  --paseo-accent-hover: #239956;
+  --paseo-accent-bright: #20744a;
+  --paseo-warning: #d97706;
+  --paseo-danger: #b04138;
+  --paseo-danger-muted: #fee2e2;
+  background: var(--paseo-surface-0) !important;
+  color: var(--paseo-foreground) !important;
+}
+
+.theme-paseo > aside {
+  background-color: var(--paseo-sidebar) !important;
+  border-color: var(--paseo-border) !important;
+  color: var(--paseo-foreground) !important;
+}
+
+.theme-paseo > section {
+  background-color: var(--paseo-surface-0) !important;
+}
+
+.theme-paseo header,
+.theme-paseo form {
+  background-color: var(--paseo-surface-0) !important;
+  border-color: var(--paseo-border) !important;
+}
+
+.theme-paseo aside form {
+  background-color: var(--paseo-sidebar) !important;
+}
+
+.theme-paseo header h1,
+.theme-paseo header h2,
+.theme-paseo h1,
+.theme-paseo h2 {
+  font-weight: 400 !important;
+}
+
+.theme-paseo h3,
+.theme-paseo label,
+.theme-paseo summary {
+  font-weight: 500 !important;
+}
+
+.theme-paseo .bg-slate-950 {
+  background-color: var(--paseo-sidebar) !important;
+}
+
+.theme-paseo button.bg-slate-950 {
+  background-color: var(--paseo-accent) !important;
+  border-color: var(--paseo-accent) !important;
+  color: #ffffff !important;
+}
+
+.theme-paseo .bg-slate-900 {
+  background-color: var(--paseo-surface-0) !important;
+}
+
+.theme-paseo .bg-slate-800,
+.theme-paseo .bg-slate-700,
+.theme-paseo .bg-slate-300 {
+  background-color: var(--paseo-surface-3) !important;
+}
+
+.theme-paseo .bg-slate-100,
+.theme-paseo .bg-slate-50 {
+  background-color: var(--paseo-surface-1) !important;
+}
+
+.theme-paseo .bg-white {
+  background-color: var(--paseo-surface-1) !important;
+}
+
+.theme-paseo [class*="bg-teal-"] {
+  background-color: var(--paseo-sidebar-hover) !important;
+}
+
+.theme-paseo button[class*="bg-teal-"],
+.theme-paseo button[class*="bg-slate-950"] {
+  background-color: var(--paseo-accent) !important;
+  border-color: var(--paseo-accent) !important;
+  color: #ffffff !important;
+}
+
+.theme-paseo [class*="bg-orange-"] {
+  background-color: var(--paseo-warning) !important;
+}
+
+.theme-paseo .bg-rose-50 {
+  background-color: var(--paseo-danger-muted) !important;
+}
+
+.theme-paseo [class*="disabled:bg-slate-"]:disabled {
+  background-color: var(--paseo-surface-3) !important;
+}
+
+.theme-paseo .text-slate-950,
+.theme-paseo .text-slate-900,
+.theme-paseo .text-slate-800,
+.theme-paseo .text-slate-200,
+.theme-paseo .text-slate-100,
+.theme-paseo .text-white {
+  color: var(--paseo-foreground) !important;
+}
+
+.theme-paseo .text-slate-700,
+.theme-paseo .text-slate-600,
+.theme-paseo .text-slate-500,
+.theme-paseo .text-slate-400,
+.theme-paseo .text-slate-300 {
+  color: var(--paseo-muted) !important;
+}
+
+.theme-paseo [class*="text-teal-"] {
+  color: var(--paseo-accent-bright) !important;
+}
+
+.theme-paseo [class*="text-orange-"] {
+  color: #f59e0b !important;
+}
+
+.theme-paseo [class*="text-rose-"] {
+  color: #fca5a5 !important;
+}
+
+.theme-paseo [class*="disabled:text-slate-"]:disabled {
+  color: var(--paseo-muted) !important;
+}
+
+.theme-paseo .border-slate-950,
+.theme-paseo .border-slate-800,
+.theme-paseo .border-slate-700,
+.theme-paseo .border-slate-400,
+.theme-paseo .border-slate-300,
+.theme-paseo .border-slate-200,
+.theme-paseo .border-slate-100,
+.theme-paseo .border-teal-500,
+.theme-paseo .border-teal-200,
+.theme-paseo .border-rose-200 {
+  border-color: var(--paseo-border) !important;
+}
+
+.theme-paseo .border-transparent {
+  border-color: transparent !important;
+}
+
+.theme-paseo input,
+.theme-paseo select,
+.theme-paseo textarea {
+  background-color: var(--paseo-surface-0) !important;
+  border-color: var(--paseo-border-accent) !important;
+  border-radius: 8px !important;
+  color: var(--paseo-foreground) !important;
+}
+
+.theme-paseo input::placeholder,
+.theme-paseo textarea::placeholder {
+  color: var(--paseo-muted) !important;
+}
+
+.theme-paseo input:focus,
+.theme-paseo select:focus,
+.theme-paseo textarea:focus {
+  border-color: var(--paseo-accent) !important;
+  box-shadow: 0 0 0 3px rgb(32 116 74 / 0.12) !important;
+}
+
+.theme-paseo button {
+  border-radius: 8px !important;
+  font-weight: 400 !important;
+}
+
+.theme-paseo button:disabled {
+  opacity: 0.5;
+}
+
+.theme-paseo [class*="hover:bg-slate-"]:hover,
+.theme-paseo [class*="hover:bg-teal-"]:hover {
+  background-color: var(--paseo-sidebar-hover) !important;
+}
+
+.theme-paseo [class*="hover:bg-rose-"]:hover {
+  background-color: var(--paseo-danger-muted) !important;
+}
+
+.theme-paseo [class*="hover:border-"]:hover {
+  border-color: var(--paseo-border-accent) !important;
+}
+
+.theme-paseo [class*="hover:text-"]:hover {
+  color: var(--paseo-foreground) !important;
+}
+
+.theme-paseo button[class*="bg-teal-"]:hover,
+.theme-paseo button[class*="bg-slate-950"]:hover {
+  background-color: var(--paseo-accent-hover) !important;
+  border-color: var(--paseo-accent-hover) !important;
+  color: #ffffff !important;
+}
+
+.theme-paseo button[class*="bg-orange-"]:hover {
+  background-color: #d97706 !important;
+}
+
+.theme-paseo .message-card {
+  box-shadow: none !important;
+}
+
+.theme-paseo .message-user {
+  max-width: min(720px, 78%);
+  margin-left: auto;
+  border-color: transparent !important;
+  border-radius: 16px 2px 16px 16px !important;
+  background-color: var(--paseo-surface-2) !important;
+}
+
+.theme-paseo .message-assistant {
+  border-color: transparent !important;
+  background-color: transparent !important;
+  padding-inline: 8px !important;
+}
+
+.theme-paseo .message-system {
+  border-color: rgb(198 79 67 / 0.32) !important;
+  background-color: var(--paseo-danger-muted) !important;
+}
+
+.theme-paseo details {
+  border-color: var(--paseo-border-accent) !important;
+  background-color: var(--paseo-surface-1) !important;
+  box-shadow: none !important;
+}
+
+.theme-paseo pre {
+  color: var(--paseo-foreground) !important;
+}
+
+.theme-paseo article,
+.theme-paseo form,
+.theme-paseo header {
+  box-shadow: none !important;
 }

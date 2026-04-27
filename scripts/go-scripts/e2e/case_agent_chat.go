@@ -43,6 +43,10 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDText(page, "connection-state", "已连接", 10*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := expectLocatorBackgroundLuminance(page.Locator("aside"), 235, 2*time.Second); err != nil {
+		return fail(err)
+	}
+	steps = append(steps, "前端使用 paseo 浅色工作台风格，侧栏保持低对比浅灰应用壳。")
 
 	projectPath := ctx.RootDir
 	projectDisplayName := filepath.Base(projectPath)

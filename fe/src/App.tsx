@@ -784,7 +784,7 @@ function App() {
     )
 
   return (
-    <main className="grid min-h-screen bg-slate-100 text-slate-950 lg:grid-cols-[320px_minmax(0,1fr)]">
+    <main className="theme-paseo grid min-h-screen bg-slate-100 text-slate-950 lg:grid-cols-[320px_minmax(0,1fr)]">
       <aside className="flex min-h-[280px] flex-col border-r border-slate-800 bg-slate-950 text-slate-100">
         <div className="flex items-center justify-between border-b border-slate-800 px-4 py-4">
           <div className="min-w-0">
@@ -1100,7 +1100,7 @@ function App() {
               {selectedChat.messages.map((message) => (
                 <article
                   key={message.id}
-                  className={`rounded-md border p-4 ${
+                  className={`message-card message-${message.role} rounded-md border p-4 ${
                     message.role === 'user'
                       ? 'border-teal-200 bg-teal-50'
                       : message.role === 'system'

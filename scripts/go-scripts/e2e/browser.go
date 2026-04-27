@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"time"
@@ -170,6 +171,56 @@ func expectTestIDAttributeAbsent(page playwright.Page, id string, name string, t
 		return fmt.Errorf("等待元素 %q 属性 %q 不存在超时，最后错误: %w", id, name, lastErr)
 	}
 	return fmt.Errorf("等待元素 %q 属性 %q 不存在超时，实际存在: %v", id, name, lastHasAttribute)
+}
+
+// expectLocatorBackgroundLuminance 使用 locator、minimum 和 timeout 参数等待背景亮度高于 minimum。
+func expectLocatorBackgroundLuminance(locator playwright.Locator, minimum float64, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastLuminance float64
+	var lastText string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := locator.First().Evaluate("(element) => getComputedStyle(element).backgroundColor", nil)
+		if err == nil {
+			text, ok := value.(string)
+			if ok {
+				lastText = text
+				lastLuminance = cssRGBLuminance(text)
+				if lastLuminance >= minimum {
+					return nil
+				}
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待背景亮度不低于 %.1f 超时，最后错误: %w", minimum, lastErr)
+	}
+	return fmt.Errorf("等待背景亮度不低于 %.1f 超时，实际亮度 %.1f，颜色 %s", minimum, lastLuminance, lastText)
+}
+
+// cssRGBLuminance 使用 text 参数解析 CSS rgb/rgba 文本并返回感知亮度。
+func cssRGBLuminance(text string) float64 {
+	start := strings.Index(text, "(")
+	end := strings.Index(text, ")")
+	if start == -1 || end == -1 || end <= start {
+		return 0
+	}
+	parts := strings.Split(text[start+1:end], ",")
+	if len(parts) < 3 {
+		return 0
+	}
+	values := make([]float64, 3)
+	for index := range 3 {
+		var value float64
+		if _, err := fmt.Sscanf(strings.TrimSpace(parts[index]), "%f", &value); err != nil {
+			return 0
+		}
+		values[index] = math.Max(0, math.Min(255, value))
+	}
+	return values[0]*0.299 + values[1]*0.587 + values[2]*0.114
 }
 
 // expectTestIDCount 使用 page、id 和 expected 参数等待元素数量符合预期。
