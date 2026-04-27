@@ -7,6 +7,7 @@ import (
 	"github.com/117503445/coding/scripts/go-scripts/buildweb"
 	"github.com/117503445/coding/scripts/go-scripts/e2e"
 	"github.com/117503445/coding/scripts/go-scripts/it"
+	"github.com/117503445/coding/scripts/go-scripts/runweb"
 	"github.com/117503445/coding/scripts/go-scripts/ut"
 )
 
@@ -19,6 +20,10 @@ func main() {
 	switch os.Args[1] {
 	case "build-web":
 		if err := buildweb.Run(); err != nil {
+			exitWithError(err)
+		}
+	case "prepare-run-web":
+		if err := runweb.Prepare(os.Stdout, os.Stderr); err != nil {
 			exitWithError(err)
 		}
 	case "ut":

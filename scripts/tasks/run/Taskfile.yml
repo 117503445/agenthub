@@ -5,4 +5,5 @@ tasks:
     desc: "运行本地 Web 服务"
     deps: [":build:web"]
     cmds:
+      - go run ./scripts/go-scripts prepare-run-web
       - ./data/web/web {{.CLI_ARGS}}
