@@ -19,6 +19,13 @@ includes:
     taskfile: ./scripts/tasks/format
 
 tasks:
+  run:
+    desc: "运行本地服务"
+    cmds:
+      - task: run:web
+        vars:
+          CLI_ARGS: "{{.CLI_ARGS}}"
+
   test:
     desc: "运行所有测试"
     cmds:

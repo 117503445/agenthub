@@ -2,6 +2,7 @@ version: 3
 
 tasks:
   web:
-    desc: "运行 Go WebSocket 后端"
+    desc: "运行本地 Web 服务"
+    deps: [":build:web"]
     cmds:
-      - go run ./cmd/web
+      - ./data/web/web {{.CLI_ARGS}}

@@ -100,7 +100,7 @@ func runIntegrationTests() error {
 	if err := verifyHealthz(ctx, baseURL, clientOutput); err != nil {
 		return err
 	}
-	if err := verifyWebSocketEcho(ctx, baseURL, clientOutput); err != nil {
+	if err := verifyWebSocketState(ctx, baseURL, clientOutput); err != nil {
 		return err
 	}
 	_, err = fmt.Fprintln(clientOutput, "集成测试通过")
@@ -166,8 +166,8 @@ func verifyHealthz(ctx context.Context, baseURL string, logWriter io.Writer) err
 	return err
 }
 
-// verifyWebSocketEcho 使用 ctx 参数控制 Go WebSocket client 调用，验证 baseURL 参数对应的消息回环，并把结果写入 logWriter 参数。
-func verifyWebSocketEcho(ctx context.Context, baseURL string, logWriter io.Writer) error {
+// verifyWebSocketState 使用 ctx 参数控制 Go WebSocket client 调用，验证 baseURL 参数对应的状态快照和 ping 响应，并把结果写入 logWriter 参数。
+func verifyWebSocketState(ctx context.Context, baseURL string, logWriter io.Writer) error {
 	wsURL := "ws" + strings.TrimPrefix(baseURL, "http") + "/ws"
 	conn, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
@@ -175,29 +175,27 @@ func verifyWebSocketEcho(ctx context.Context, baseURL string, logWriter io.Write
 	}
 	defer conn.CloseNow()
 
-	var hello wsapp.ServerMessage
-	if err := wsjson.Read(ctx, conn, &hello); err != nil {
-		return fmt.Errorf("读取欢迎消息失败: %w", err)
+	var snapshot wsapp.ServerMessage
+	if err := wsjson.Read(ctx, conn, &snapshot); err != nil {
+		return fmt.Errorf("读取状态快照失败: %w", err)
 	}
-	if hello.Type != "hello" {
-		return fmt.Errorf("欢迎消息类型异常: %s", hello.Type)
+	if snapshot.Type != "state.snapshot" {
+		return fmt.Errorf("状态快照消息类型异常: %s", snapshot.Type)
 	}
 
-	message := "集成测试消息"
 	if err := wsjson.Write(ctx, conn, wsapp.ClientMessage{
-		Type:    "echo",
-		Payload: message,
+		Type: "ping",
 	}); err != nil {
-		return fmt.Errorf("发送回环消息失败: %w", err)
+		return fmt.Errorf("发送 ping 消息失败: %w", err)
 	}
 
-	var echo wsapp.ServerMessage
-	if err := wsjson.Read(ctx, conn, &echo); err != nil {
-		return fmt.Errorf("读取回环消息失败: %w", err)
+	var pong wsapp.ServerMessage
+	if err := wsjson.Read(ctx, conn, &pong); err != nil {
+		return fmt.Errorf("读取 pong 消息失败: %w", err)
 	}
-	if echo.Type != "echo" || echo.Payload["echo"] != message {
-		return fmt.Errorf("回环消息异常: %+v", echo)
+	if pong.Type != "pong" {
+		return fmt.Errorf("pong 消息异常: %+v", pong)
 	}
-	_, err = fmt.Fprintf(logWriter, "WebSocket 回环通过: %s\n", message)
+	_, err = fmt.Fprintln(logWriter, "WebSocket 状态快照和 ping 通过")
 	return err
 }
