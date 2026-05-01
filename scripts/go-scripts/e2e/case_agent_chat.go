@@ -77,8 +77,11 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDCount(page, "chat-tab-add-button", 1, 2*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := expectTestIDPinnedToViewportBottom(page, "composer-taskbar", 2*time.Second); err != nil {
+		return fail(err)
+	}
 	screenshot(page, filepath.Join(ctx.ScreenshotsDir, "01-chat-created.png"), true)
-	steps = append(steps, "创建 project 后顶部展示完整路径和 git 信息，侧边栏只显示最后一级目录名。")
+	steps = append(steps, "创建 project 后顶部展示完整路径和 git 信息，侧边栏只显示最后一级目录名，任务栏固定在底部。")
 
 	if err := clickTestID(page, "agent-settings-button"); err != nil {
 		return fail(err)

@@ -173,6 +173,46 @@ func expectTestIDAttributeAbsent(page playwright.Page, id string, name string, t
 	return fmt.Errorf("等待元素 %q 属性 %q 不存在超时，实际存在: %v", id, name, lastHasAttribute)
 }
 
+// expectTestIDPinnedToViewportBottom 使用 page、id 和 timeout 参数等待元素固定在视口底部。
+func expectTestIDPinnedToViewportBottom(page playwright.Page, id string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastState string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := getByTestID(page, id).First().Evaluate(`(element) => {
+			const style = getComputedStyle(element);
+			const rect = element.getBoundingClientRect();
+			const gap = Math.abs(window.innerHeight - rect.bottom);
+			const bottom = Number.parseFloat(style.bottom);
+			const positionMatched = style.position === 'sticky' || style.position === 'fixed';
+			const bottomMatched = Number.isFinite(bottom) && Math.abs(bottom) <= 1;
+			if (positionMatched && bottomMatched && gap <= 2) {
+				return '';
+			}
+			return 'position=' + style.position +
+				', bottom=' + style.bottom +
+				', gap=' + gap.toFixed(2) +
+				', rectBottom=' + rect.bottom.toFixed(2) +
+				', viewport=' + window.innerHeight;
+		}`, nil)
+		if err == nil {
+			if text, ok := value.(string); ok {
+				lastState = text
+				if text == "" {
+					return nil
+				}
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待元素 %q 固定在视口底部超时，最后错误: %w", id, lastErr)
+	}
+	return fmt.Errorf("等待元素 %q 固定在视口底部超时，最后状态: %s", id, lastState)
+}
+
 // expectLocatorBackgroundLuminance 使用 locator、minimum 和 timeout 参数等待背景亮度高于 minimum。
 func expectLocatorBackgroundLuminance(locator playwright.Locator, minimum float64, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)

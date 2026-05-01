@@ -901,8 +901,8 @@ function App() {
     )
 
   return (
-    <main className="theme-paseo grid min-h-screen bg-slate-100 text-slate-950 lg:grid-cols-[320px_minmax(0,1fr)]">
-      <aside className="flex min-h-[280px] flex-col border-r border-slate-800 bg-slate-950 text-slate-100">
+    <main className="theme-paseo grid h-[100dvh] min-h-0 overflow-hidden bg-slate-100 text-slate-950 lg:grid-cols-[320px_minmax(0,1fr)]">
+      <aside className="flex h-full min-h-0 flex-col border-r border-slate-800 bg-slate-950 text-slate-100">
         <div className="flex items-center justify-between border-b border-slate-800 px-4 py-4">
           <div className="min-w-0">
             <h1 className="truncate text-base font-semibold">Coding Agent</h1>
@@ -1024,9 +1024,9 @@ function App() {
         </div>
       </aside>
 
-      <section className="flex min-h-screen min-w-0 flex-col">
+      <section className="flex h-full min-h-0 min-w-0 flex-col">
         {routeView === 'settings' ? (
-          <div className="flex min-h-screen min-w-0 flex-col" data-testid="agent-settings-page">
+          <div className="flex h-full min-h-0 min-w-0 flex-col" data-testid="agent-settings-page">
             <header className="flex min-h-16 items-center justify-between border-b border-slate-200 bg-white px-4">
               <div>
                 <h2 className="text-lg font-semibold">Agent 设置</h2>
@@ -1130,7 +1130,7 @@ function App() {
                   selectChat(chat)
                 }
               }}
-              className="min-h-0 flex-1"
+              className="min-h-0 flex-1 overflow-hidden"
             >
               <div className="flex min-h-11 items-stretch border-b border-slate-200 bg-slate-50 px-3" data-testid="chat-tabs">
                 <TabsList className="h-full flex-1">
@@ -1229,7 +1229,11 @@ function App() {
                     )}
                   </div>
 
-                  <form className="border-t border-slate-200 bg-white px-4 py-3" onSubmit={submitComposer}>
+                  <form
+                    data-testid="composer-taskbar"
+                    className="sticky bottom-0 z-10 shrink-0 border-t border-slate-200 bg-white px-4 py-3"
+                    onSubmit={submitComposer}
+                  >
                     <div className="mx-auto max-w-4xl">
                       <div className="relative">
                         <label htmlFor="message-input" className="sr-only">
