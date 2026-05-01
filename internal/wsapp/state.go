@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -62,6 +63,13 @@ const (
 	ToolCallStatusError = "error"
 )
 
+const (
+	// MessagePartTypeText 表示 assistant 文本片段。
+	MessagePartTypeText = "text"
+	// MessagePartTypeToolCall 表示 assistant 工具调用片段。
+	MessagePartTypeToolCall = "tool_call"
+)
+
 var (
 	// ErrNotFound 表示目标资源不存在。
 	ErrNotFound = errors.New("资源不存在")
@@ -74,8 +82,17 @@ type Project struct {
 	ID        string    `json:"id"`        // ID 表示 project 唯一标识。
 	Name      string    `json:"name"`      // Name 表示由工作目录最后一级派生的展示名称。
 	Path      string    `json:"path"`      // Path 表示 project 工作目录。
+	Git       GitInfo   `json:"git"`       // Git 表示 project 当前 Git 摘要。
 	CreatedAt time.Time `json:"createdAt"` // CreatedAt 表示创建时间。
 	UpdatedAt time.Time `json:"updatedAt"` // UpdatedAt 表示更新时间。
+}
+
+// GitInfo 表示 project 工作目录的 Git 摘要。
+type GitInfo struct {
+	IsRepo bool   `json:"isRepo"` // IsRepo 表示当前目录是否位于 Git 仓库中。
+	Branch string `json:"branch"` // Branch 表示当前分支或 HEAD 状态。
+	Commit string `json:"commit"` // Commit 表示当前短提交哈希。
+	Dirty  bool   `json:"dirty"`  // Dirty 表示工作区是否有未提交内容。
 }
 
 // ToolCall 表示 assistant 消息中的一次工具调用。
@@ -89,16 +106,27 @@ type ToolCall struct {
 	UpdatedAt time.Time `json:"updatedAt"`        // UpdatedAt 表示更新时间。
 }
 
+// MessagePart 表示 assistant 消息中的一个顺序片段。
+type MessagePart struct {
+	ID        string    `json:"id"`                 // ID 表示片段唯一标识。
+	Type      string    `json:"type"`               // Type 表示片段类型。
+	Text      string    `json:"text,omitempty"`     // Text 表示文本片段内容。
+	ToolCall  *ToolCall `json:"toolCall,omitempty"` // ToolCall 表示工具调用片段。
+	CreatedAt time.Time `json:"createdAt"`          // CreatedAt 表示创建时间。
+	UpdatedAt time.Time `json:"updatedAt"`          // UpdatedAt 表示更新时间。
+}
+
 // ChatMessage 表示聊天页中的一条消息。
 type ChatMessage struct {
-	ID        string     `json:"id"`                  // ID 表示消息唯一标识。
-	ChatID    string     `json:"chatId"`              // ChatID 表示消息所属聊天页。
-	Role      string     `json:"role"`                // Role 表示消息角色。
-	Text      string     `json:"text"`                // Text 表示消息文本。
-	Status    string     `json:"status"`              // Status 表示消息状态。
-	ToolCalls []ToolCall `json:"toolCalls,omitempty"` // ToolCalls 表示消息中的工具调用。
-	CreatedAt time.Time  `json:"createdAt"`           // CreatedAt 表示创建时间。
-	UpdatedAt time.Time  `json:"updatedAt"`           // UpdatedAt 表示更新时间。
+	ID        string        `json:"id"`                  // ID 表示消息唯一标识。
+	ChatID    string        `json:"chatId"`              // ChatID 表示消息所属聊天页。
+	Role      string        `json:"role"`                // Role 表示消息角色。
+	Text      string        `json:"text"`                // Text 表示消息文本。
+	Status    string        `json:"status"`              // Status 表示消息状态。
+	ToolCalls []ToolCall    `json:"toolCalls,omitempty"` // ToolCalls 表示消息中的工具调用。
+	Parts     []MessagePart `json:"parts,omitempty"`     // Parts 表示 assistant 内容与工具调用的顺序片段。
+	CreatedAt time.Time     `json:"createdAt"`           // CreatedAt 表示创建时间。
+	UpdatedAt time.Time     `json:"updatedAt"`           // UpdatedAt 表示更新时间。
 }
 
 // Chat 表示 project 下的一个聊天页。
@@ -163,6 +191,7 @@ func (s *Store) CreateProject(projectPath string) (Project, error) {
 		ID:        newID("project"),
 		Name:      normalizedName,
 		Path:      normalizedPath,
+		Git:       resolveGitInfo(normalizedPath),
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -188,6 +217,7 @@ func (s *Store) UpdateProject(id string, projectPath string) (Project, error) {
 	}
 	project.Name = normalizedName
 	project.Path = normalizedPath
+	project.Git = resolveGitInfo(normalizedPath)
 	project.UpdatedAt = time.Now()
 	s.projects[id] = project
 	return project, nil
@@ -288,7 +318,9 @@ func (s *Store) UpdateChatAgent(chatID string, provider string, model string, re
 		return Chat{}, ErrNotFound
 	}
 	if chat.AgentLocked {
-		return Chat{}, fmt.Errorf("%w: agent 配置已锁定", ErrInvalidInput)
+		if chat.AgentProvider != normalizedProvider {
+			return Chat{}, fmt.Errorf("%w: agent 已锁定，不能切换 provider", ErrInvalidInput)
+		}
 	}
 	chat.AgentProvider = normalizedProvider
 	chat.AgentModel = normalizedModel
@@ -376,6 +408,19 @@ func (s *Store) AppendAssistantDelta(chatID string, messageID string, delta stri
 		}
 		now := time.Now()
 		message.Text += delta
+		if len(message.Parts) > 0 && message.Parts[len(message.Parts)-1].Type == MessagePartTypeText {
+			part := &message.Parts[len(message.Parts)-1]
+			part.Text += delta
+			part.UpdatedAt = now
+		} else {
+			message.Parts = append(message.Parts, MessagePart{
+				ID:        newID("part"),
+				Type:      MessagePartTypeText,
+				Text:      delta,
+				CreatedAt: now,
+				UpdatedAt: now,
+			})
+		}
 		message.UpdatedAt = now
 		chat.UpdatedAt = now
 		s.chats[chatID] = chat
@@ -407,6 +452,7 @@ func (s *Store) UpsertToolCall(chatID string, messageID string, tool ToolCall) (
 		}
 		now := time.Now()
 		updated := false
+		var mergedTool ToolCall
 		for toolIndex := range message.ToolCalls {
 			if message.ToolCalls[toolIndex].ID != tool.ID {
 				continue
@@ -417,6 +463,7 @@ func (s *Store) UpsertToolCall(chatID string, messageID string, tool ToolCall) (
 			existing.Input = firstNonEmpty(tool.Input, existing.Input)
 			existing.Output = firstNonEmpty(tool.Output, existing.Output)
 			existing.UpdatedAt = now
+			mergedTool = *existing
 			updated = true
 			break
 		}
@@ -427,7 +474,9 @@ func (s *Store) UpsertToolCall(chatID string, messageID string, tool ToolCall) (
 			tool.CreatedAt = now
 			tool.UpdatedAt = now
 			message.ToolCalls = append(message.ToolCalls, tool)
+			mergedTool = tool
 		}
+		upsertMessageToolPart(message, mergedTool, now)
 		message.UpdatedAt = now
 		chat.UpdatedAt = now
 		s.chats[chatID] = chat
@@ -605,7 +654,44 @@ func cloneChat(chat Chat) Chat {
 // cloneChatMessage 使用 message 参数创建不会共享工具调用切片的副本。
 func cloneChatMessage(message ChatMessage) ChatMessage {
 	message.ToolCalls = append([]ToolCall(nil), message.ToolCalls...)
+	message.Parts = cloneMessageParts(message.Parts)
 	return message
+}
+
+// cloneMessageParts 使用 parts 参数创建不会共享工具调用指针的片段副本。
+func cloneMessageParts(parts []MessagePart) []MessagePart {
+	if len(parts) == 0 {
+		return nil
+	}
+	result := make([]MessagePart, 0, len(parts))
+	for _, part := range parts {
+		if part.ToolCall != nil {
+			tool := *part.ToolCall
+			part.ToolCall = &tool
+		}
+		result = append(result, part)
+	}
+	return result
+}
+
+// upsertMessageToolPart 使用 message、tool 和 now 参数更新消息中的工具调用片段。
+func upsertMessageToolPart(message *ChatMessage, tool ToolCall, now time.Time) {
+	for index := range message.Parts {
+		part := &message.Parts[index]
+		if part.Type != MessagePartTypeToolCall || part.ToolCall == nil || part.ToolCall.ID != tool.ID {
+			continue
+		}
+		part.ToolCall = &tool
+		part.UpdatedAt = now
+		return
+	}
+	message.Parts = append(message.Parts, MessagePart{
+		ID:        newID("part"),
+		Type:      MessagePartTypeToolCall,
+		ToolCall:  &tool,
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
 }
 
 // cloneAgentProviderOptions 使用 options 参数创建不会共享模型和推理级别切片的副本。
@@ -628,4 +714,31 @@ func newID(prefix string) string {
 		return fmt.Sprintf("%s_%d", prefix, time.Now().UnixNano())
 	}
 	return prefix + "_" + hex.EncodeToString(bytes[:])
+}
+
+// resolveGitInfo 使用 projectPath 参数读取 Git 仓库摘要。
+func resolveGitInfo(projectPath string) GitInfo {
+	if _, err := gitOutput(projectPath, "rev-parse", "--show-toplevel"); err != nil {
+		return GitInfo{}
+	}
+	branch, _ := gitOutput(projectPath, "rev-parse", "--abbrev-ref", "HEAD")
+	commit, _ := gitOutput(projectPath, "rev-parse", "--short", "HEAD")
+	status, _ := gitOutput(projectPath, "status", "--short")
+	return GitInfo{
+		IsRepo: true,
+		Branch: strings.TrimSpace(branch),
+		Commit: strings.TrimSpace(commit),
+		Dirty:  strings.TrimSpace(status) != "",
+	}
+}
+
+// gitOutput 使用 projectPath 和 args 参数运行 Git 命令并返回裁剪后的输出。
+func gitOutput(projectPath string, args ...string) (string, error) {
+	fullArgs := append([]string{"-C", projectPath}, args...)
+	cmd := exec.Command("git", fullArgs...)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
 }

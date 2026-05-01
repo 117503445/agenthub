@@ -27,6 +27,8 @@ type AgentConfig struct {
 	AnthropicBaseURL  string                // AnthropicBaseURL 表示 Anthropic 兼容接口地址。
 	AnthropicModel    string                // AnthropicModel 表示 Claude 使用的模型。
 	AnthropicAPIKey   string                // AnthropicAPIKey 表示 Anthropic API Key。
+	OpenAIBaseURL     string                // OpenAIBaseURL 表示 OpenAI 兼容接口地址。
+	OpenAIAPIKey      string                // OpenAIAPIKey 表示 OpenAI API Key。
 	AgentProviders    []AgentProviderOption // AgentProviders 表示可用 agent 和模型选项。
 }
 
@@ -307,16 +309,7 @@ func (r *AgentRuntime) isAlive() bool {
 
 // start 使用 ctx 参数启动 Claude 子进程。
 func (r *AgentRuntime) start(ctx context.Context) error {
-	args := []string{
-		"--dangerously-skip-permissions",
-		"--print",
-		"--input-format", "stream-json",
-		"--output-format", "stream-json",
-		"--include-partial-messages",
-		"--replay-user-messages",
-		"--verbose",
-		"--model", r.model,
-	}
+	args := r.claudeArgs()
 	if strings.TrimSpace(r.sessionID) != "" {
 		args = append(args, "--resume", r.sessionID)
 	}
@@ -358,6 +351,7 @@ func (r *AgentRuntime) start(ctx context.Context) error {
 
 	log.Ctx(ctx).Info().
 		Str("chatID", r.chatID).
+		Str("command", command).
 		Str("cwd", r.projectPath).
 		Str("baseURL", r.manager.config.AnthropicBaseURL).
 		Str("model", r.model).
@@ -369,6 +363,23 @@ func (r *AgentRuntime) start(ctx context.Context) error {
 	return nil
 }
 
+// claudeArgs 返回当前 Claude runtime 的启动参数。
+func (r *AgentRuntime) claudeArgs() []string {
+	args := []string{
+		"--print",
+		"--input-format", "stream-json",
+		"--output-format", "stream-json",
+		"--include-partial-messages",
+		"--replay-user-messages",
+		"--verbose",
+		"--model", r.model,
+	}
+	if r.provider == AgentProviderMockClaudeCode {
+		return append([]string{"--bare", "--setting-sources", "local"}, args...)
+	}
+	return append([]string{"--dangerously-skip-permissions"}, args...)
+}
+
 // startCodex 使用 ctx 参数启动 Codex CLI 单轮运行。
 func (r *AgentRuntime) startCodex(ctx context.Context, prompt string) error {
 	args := []string{"exec"}
@@ -376,7 +387,10 @@ func (r *AgentRuntime) startCodex(ctx context.Context, prompt string) error {
 	if resumeSessionID != "" {
 		args = append(args, "resume")
 	}
-	if r.model == "gpt-5.5" && strings.TrimSpace(r.reasoning) != "" {
+	if r.provider == AgentProviderMockCodex {
+		args = append(args, r.mockCodexConfigArgs()...)
+	}
+	if strings.TrimSpace(r.reasoning) != "" {
 		args = append(args, "-c", fmt.Sprintf("model_reasoning_effort=%q", r.reasoning))
 	}
 	args = append(args,
@@ -398,7 +412,7 @@ func (r *AgentRuntime) startCodex(ctx context.Context, prompt string) error {
 	}
 	cmd := exec.CommandContext(r.ctx, command, args...)
 	cmd.Dir = r.projectPath
-	cmd.Env = os.Environ()
+	cmd.Env = r.codexEnv()
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -420,7 +434,9 @@ func (r *AgentRuntime) startCodex(ctx context.Context, prompt string) error {
 
 	log.Ctx(ctx).Info().
 		Str("chatID", r.chatID).
+		Str("command", command).
 		Str("cwd", r.projectPath).
+		Str("baseURL", r.codexBaseURL()).
 		Str("model", r.model).
 		Str("reasoning", r.reasoning).
 		Msg("Codex runtime 已启动")
@@ -528,6 +544,9 @@ func (r *AgentRuntime) childEnv() []string {
 	if strings.TrimSpace(r.manager.config.AnthropicAPIKey) != "" {
 		env["ANTHROPIC_API_KEY"] = r.manager.config.AnthropicAPIKey
 	}
+	if r.provider == AgentProviderMockClaudeCode {
+		env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+	}
 	env["DISABLE_AUTOUPDATER"] = "1"
 
 	result := make([]string, 0, len(env))
@@ -535,6 +554,65 @@ func (r *AgentRuntime) childEnv() []string {
 		result = append(result, key+"="+value)
 	}
 	return result
+}
+
+// codexEnv 返回当前 Codex runtime 子进程使用的环境变量。
+func (r *AgentRuntime) codexEnv() []string {
+	env := map[string]string{}
+	for _, pair := range os.Environ() {
+		key, value, ok := strings.Cut(pair, "=")
+		if ok {
+			env[key] = value
+		}
+	}
+	if r.provider == AgentProviderMockCodex {
+		if baseURL := r.codexBaseURL(); baseURL != "" {
+			env["OPENAI_BASE_URL"] = baseURL
+		}
+		apiKey := strings.TrimSpace(r.manager.config.OpenAIAPIKey)
+		if apiKey == "" {
+			apiKey = strings.TrimSpace(r.manager.config.AnthropicAPIKey)
+		}
+		if apiKey != "" {
+			env["OPENAI_API_KEY"] = apiKey
+		}
+	}
+
+	result := make([]string, 0, len(env))
+	for key, value := range env {
+		result = append(result, key+"="+value)
+	}
+	return result
+}
+
+// mockCodexConfigArgs 返回 mock Codex 使用的真实 CLI 配置参数。
+func (r *AgentRuntime) mockCodexConfigArgs() []string {
+	baseURL := r.codexBaseURL()
+	if baseURL == "" {
+		return nil
+	}
+	providerConfig := fmt.Sprintf(
+		`{name="Coding Mock OpenAI", base_url=%q, env_key="OPENAI_API_KEY", wire_api="responses"}`,
+		baseURL,
+	)
+	return []string{
+		"--ignore-user-config",
+		"-c", `model_provider="coding_mock"`,
+		"-c", "model_providers.coding_mock=" + providerConfig,
+	}
+}
+
+// codexBaseURL 返回 mock Codex 使用的 OpenAI 兼容接口地址。
+func (r *AgentRuntime) codexBaseURL() string {
+	baseURL := strings.TrimRight(strings.TrimSpace(r.manager.config.OpenAIBaseURL), "/")
+	if baseURL != "" {
+		return baseURL
+	}
+	anthropicBaseURL := strings.TrimRight(strings.TrimSpace(r.manager.config.AnthropicBaseURL), "/")
+	if strings.HasSuffix(anthropicBaseURL, "/mock/anthropic") {
+		return strings.TrimSuffix(anthropicBaseURL, "/mock/anthropic") + "/mock/openai/v1"
+	}
+	return ""
 }
 
 // scanStdout 使用 stdout 参数读取并解析 Claude JSON 行输出。
@@ -904,10 +982,21 @@ func parseCodexOutputLine(line []byte) (ClaudeOutputEvent, error) {
 	if strings.Contains(method, "turn/completed") || strings.Contains(method, "turn_completed") || method == "turn.completed" || method == "done" {
 		event.Done = true
 	}
-	if errText := firstNonEmpty(stringValue(raw["error"]), stringValue(params["error"])); errText != "" {
+	if errText := firstNonEmpty(codexErrorText(raw["error"]), codexErrorText(params["error"]), stringValue(raw["message"]), stringValue(params["message"])); errText != "" {
 		event.Error = errText
 	}
 	return event, nil
+}
+
+// codexErrorText 使用 value 参数提取 Codex 错误文本。
+func codexErrorText(value any) string {
+	if text := stringValue(value); text != "" {
+		return text
+	}
+	if block := mapValue(value); block != nil {
+		return firstNonEmpty(stringValue(block["message"]), stringValue(block["error"]))
+	}
+	return ""
 }
 
 // extractStreamEventDelta 使用 value 参数提取 Claude stream_event 文本增量。

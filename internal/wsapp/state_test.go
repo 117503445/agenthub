@@ -57,7 +57,14 @@ func TestStoreProjectChatLifecycle(t *testing.T) {
 		t.Fatalf("聊天页开始运行后应该锁定 agent: %#v", chat)
 	}
 	if _, err := store.UpdateChatAgent(chat.ID, AgentProviderClaudeCode, "sonnet", ""); !errors.Is(err, ErrInvalidInput) {
-		t.Fatalf("agent 锁定后不应允许更新: %v", err)
+		t.Fatalf("agent 锁定后不应允许切换 provider: %v", err)
+	}
+	chat, err = store.UpdateChatAgent(chat.ID, AgentProviderCodex, "gpt-5.4", "")
+	if err != nil {
+		t.Fatalf("agent 锁定后仍应允许更新模型: %v", err)
+	}
+	if chat.AgentModel != "gpt-5.4" {
+		t.Fatalf("锁定后的模型未更新: %#v", chat)
 	}
 
 	if _, ok := store.AppendAssistantDelta(chat.ID, assistantMessage.ID, "Mock "); !ok {
@@ -95,6 +102,12 @@ func TestStoreProjectChatLifecycle(t *testing.T) {
 	}
 	if chat.Status != ChatStatusIdle || assistantMessage.Text != "Mock Claude" {
 		t.Fatalf("assistant 完成状态不正确: chat=%#v message=%#v", chat, assistantMessage)
+	}
+	if len(assistantMessage.Parts) != 3 {
+		t.Fatalf("assistant 事件分段数量不正确: %#v", assistantMessage.Parts)
+	}
+	if assistantMessage.Parts[0].Type != MessagePartTypeText || assistantMessage.Parts[1].Type != MessagePartTypeToolCall || assistantMessage.Parts[2].Type != MessagePartTypeText {
+		t.Fatalf("assistant 事件分段顺序不正确: %#v", assistantMessage.Parts)
 	}
 
 	if updatedChat, ok := store.SetChatSessionID(chat.ID, "session-1"); !ok || updatedChat.AgentSessionID != "session-1" {

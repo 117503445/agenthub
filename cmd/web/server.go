@@ -31,6 +31,8 @@ func newHTTPHandler(ctx context.Context, port string) http.Handler {
 	})
 	mux.HandleFunc("/mock/anthropic/v1/messages/count_tokens", wsapp.ServeMockAnthropicCountTokens)
 	mux.HandleFunc("/mock/anthropic/v1/messages", wsapp.ServeMockAnthropicMessages)
+	mux.HandleFunc("/mock/openai/v1/responses", wsapp.ServeMockOpenAIResponses)
+	mux.HandleFunc("/mock/openai/responses", wsapp.ServeMockOpenAIResponses)
 	mux.HandleFunc("/ws", wsServer.ServeWS)
 	mux.Handle("/", subpathHandler(wsServer, staticHandler()))
 
@@ -51,11 +53,16 @@ func subpathHandler(wsServer *wsapp.Server, static http.Handler) http.Handler {
 // resolveAgentConfig 生成 agent runtime 配置。
 func resolveAgentConfig() wsapp.AgentConfig {
 	baseURL := strings.TrimSpace(os.Getenv("ANTHROPIC_BASE_URL"))
+	openAIBaseURL := strings.TrimSpace(os.Getenv("OPENAI_BASE_URL"))
 	model := strings.TrimSpace(os.Getenv("ANTHROPIC_MODEL"))
 	if model == "" {
 		model = "sonnet"
 	}
 	apiKey := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
+	openAIAPIKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+	if openAIAPIKey == "" {
+		openAIAPIKey = apiKey
+	}
 	command := strings.TrimSpace(os.Getenv("CODING_CLAUDE_COMMAND"))
 	if command == "" {
 		command = "claude"
@@ -84,6 +91,8 @@ func resolveAgentConfig() wsapp.AgentConfig {
 		AnthropicBaseURL:  baseURL,
 		AnthropicModel:    model,
 		AnthropicAPIKey:   apiKey,
+		OpenAIBaseURL:     openAIBaseURL,
+		OpenAIAPIKey:      openAIAPIKey,
 		AgentProviders:    agentProviders,
 	}
 }

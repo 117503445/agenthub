@@ -3,6 +3,8 @@ import {
   ArrowUp,
   Clock3,
   Folder,
+  GitBranch,
+  GitCommit,
   Loader2,
   MessageSquare,
   Pencil,
@@ -17,6 +19,11 @@ import {
   X,
 } from 'lucide-react'
 import { getWebSocketUrl, sendClientMessage, type ServerMessage } from './lib/ws'
+import { Button } from './components/ui/button'
+import { Input } from './components/ui/input'
+import { Select } from './components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs'
+import { Textarea } from './components/ui/textarea'
 
 type ConnectionState = 'connecting' | 'open' | 'closed' | 'error'
 type ChatStatus = 'idle' | 'running' | 'error'
@@ -62,10 +69,23 @@ interface Project {
   name: string
   /** path 表示后端本机工作目录。 */
   path: string
+  /** git 表示 project 当前 Git 摘要。 */
+  git?: ProjectGitInfo
   /** createdAt 表示创建时间。 */
   createdAt: string
   /** updatedAt 表示更新时间。 */
   updatedAt: string
+}
+
+interface ProjectGitInfo {
+  /** isRepo 表示当前目录是否位于 Git 仓库中。 */
+  isRepo: boolean
+  /** branch 表示当前分支或 HEAD 状态。 */
+  branch: string
+  /** commit 表示当前短提交哈希。 */
+  commit: string
+  /** dirty 表示工作区是否有未提交内容。 */
+  dirty: boolean
 }
 
 interface ToolCall {
@@ -85,6 +105,21 @@ interface ToolCall {
   updatedAt: string
 }
 
+interface MessagePart {
+  /** id 表示片段唯一标识。 */
+  id: string
+  /** type 表示片段类型。 */
+  type: 'text' | 'tool_call'
+  /** text 表示文本片段内容。 */
+  text?: string
+  /** toolCall 表示工具调用片段。 */
+  toolCall?: ToolCall
+  /** createdAt 表示创建时间。 */
+  createdAt: string
+  /** updatedAt 表示更新时间。 */
+  updatedAt: string
+}
+
 interface ChatMessage {
   /** id 表示消息唯一标识。 */
   id: string
@@ -98,6 +133,8 @@ interface ChatMessage {
   status: MessageStatus
   /** toolCalls 表示消息中的工具调用。 */
   toolCalls?: ToolCall[]
+  /** parts 表示 assistant 内容与工具调用的顺序片段。 */
+  parts?: MessagePart[]
   /** createdAt 表示创建时间。 */
   createdAt: string
   /** updatedAt 表示更新时间。 */
@@ -166,6 +203,8 @@ interface ChatMessageDeltaPayload {
   delta: string
   /** text 表示服务端当前完整文本。 */
   text: string
+  /** message 表示服务端当前完整消息。 */
+  message?: ChatMessage
 }
 
 interface ChatMessageDonePayload {
@@ -337,6 +376,82 @@ function projectDisplayName(project: Project) {
   return normalized.split('/').filter(Boolean).pop() || project.name || project.path
 }
 
+// projectGitText 使用 project 参数返回顶部 Git 信息文案。
+function projectGitText(project: Project | null) {
+  if (!project) {
+    return 'git: -'
+  }
+  if (!project.git?.isRepo) {
+    return 'git: none'
+  }
+  const branch = project.git.branch && project.git.branch !== 'HEAD' ? project.git.branch : 'detached'
+  const commit = project.git.commit || 'no commit'
+  const state = project.git.dirty ? 'dirty' : 'clean'
+  return `git: ${branch} · ${commit} · ${state}`
+}
+
+// chatHasStarted 使用 chat 参数判断当前聊天页是否已经发送过消息。
+function chatHasStarted(chat: Chat | null) {
+  return Boolean(chat?.messages.some((message) => message.role === 'user'))
+}
+
+// compactToolInput 使用 input 参数生成工具调用标题中的命令摘要。
+function compactToolInput(input = '') {
+  const trimmed = input.trim()
+  if (!trimmed) {
+    return ''
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>
+    const command = parsed.command ?? parsed.cmd ?? parsed.url ?? parsed.file_path
+    if (typeof command === 'string' && command.trim()) {
+      return command.trim()
+    }
+  } catch {
+    return trimmed
+  }
+  return trimmed
+}
+
+// toolCommandTitle 使用 tool 参数返回折叠状态可见的工具调用标题。
+function toolCommandTitle(tool: ToolCall) {
+  const command = compactToolInput(tool.input)
+  if (!command) {
+    return tool.name
+  }
+  if (tool.name === 'exec_command' || tool.name === 'command_execution') {
+    return command
+  }
+  return `${tool.name}: ${command}`
+}
+
+// messagePartsForRender 使用 message 参数返回兼容旧数据的渲染片段。
+function messagePartsForRender(message: ChatMessage): MessagePart[] {
+  if (message.parts?.length) {
+    return message.parts
+  }
+  const parts: MessagePart[] = []
+  for (const toolCall of message.toolCalls ?? []) {
+    parts.push({
+      id: `legacy-tool-${toolCall.id}`,
+      type: 'tool_call',
+      toolCall,
+      createdAt: toolCall.createdAt,
+      updatedAt: toolCall.updatedAt,
+    })
+  }
+  if (message.text || message.status === 'streaming') {
+    parts.push({
+      id: `legacy-text-${message.id}`,
+      type: 'text',
+      text: message.text || (message.status === 'streaming' ? '正在等待输出...' : ''),
+      createdAt: message.createdAt,
+      updatedAt: message.updatedAt,
+    })
+  }
+  return parts
+}
+
 // defaultModelForProvider 使用 providers 和 provider 参数返回默认模型。
 function defaultModelForProvider(providers: AgentProviderOption[], provider: AgentProvider) {
   const models = providers.find((item) => item.id === provider)?.models ?? []
@@ -426,7 +541,9 @@ function App() {
   const selectedAgentModelOption = selectedAgentModels.find((model) => model.id === selectedAgentModel) ?? null
   const selectedAgentReasoning =
     selectedChat?.agentReasoning || defaultReasoningForModel(agentProviders, selectedAgentProvider, selectedAgentModel)
-  const agentConfigLocked = Boolean(selectedChat?.agentLocked || isRunning)
+  const providerLocked = chatHasStarted(selectedChat) || isRunning
+  const agentControlsDisabled = !selectedChat || connectionState !== 'open'
+  const modelControlsDisabled = agentControlsDisabled || isRunning
   const selectedAgentLabel = agentProviders.find((provider) => provider.id === selectedAgentProvider)?.label ?? 'Agent'
   const claudeCodeModels = agentProviders.find((provider) => provider.id === 'claude-code')?.models ?? []
 
@@ -563,7 +680,7 @@ function App() {
             return {
               ...chat,
               messages: chat.messages.map((item) =>
-                item.id === payload.messageId ? { ...item, text: payload.text, status: 'streaming' } : item,
+                item.id === payload.messageId ? { ...(payload.message ?? item), text: payload.text, status: 'streaming' } : item,
               ),
             }
           }),
@@ -822,7 +939,7 @@ function App() {
           <label htmlFor="project-path-input" className="mb-1 block text-xs font-medium text-slate-400">
             工作目录
           </label>
-          <input
+          <Input
             id="project-path-input"
             data-testid="project-path-input"
             value={projectPath}
@@ -948,7 +1065,7 @@ function App() {
                   <label htmlFor="agent-model-id-input" className="mt-4 block text-xs font-medium text-slate-500">
                     模型标识
                   </label>
-                  <input
+                  <Input
                     id="agent-model-id-input"
                     data-testid="agent-model-id-input"
                     value={newClaudeModelID}
@@ -959,7 +1076,7 @@ function App() {
                   <label htmlFor="agent-model-label-input" className="mt-3 block text-xs font-medium text-slate-500">
                     展示名称
                   </label>
-                  <input
+                  <Input
                     id="agent-model-label-input"
                     data-testid="agent-model-label-input"
                     value={newClaudeModelLabel}
@@ -982,214 +1099,247 @@ function App() {
           </div>
         ) : (
           <>
-        <header className="flex min-h-16 items-center justify-between border-b border-slate-200 bg-white px-4">
-          <div className="min-w-0">
-            <h2 className="truncate text-lg font-semibold">{selectedProject ? projectDisplayName(selectedProject) : '选择或创建 Project'}</h2>
-            <p className="truncate font-mono text-xs text-slate-500">{selectedProject?.path ?? 'Project 会作为 agent 的工作目录'}</p>
-          </div>
-          <div className="flex shrink-0 items-center gap-3">
-            <div className="flex items-center gap-2" data-testid="agent-config-panel">
-              <label htmlFor="agent-provider-select" className="text-xs font-medium text-slate-500">
-                Agent
-              </label>
-              <select
-                id="agent-provider-select"
-                data-testid="agent-provider-select"
-                value={selectedAgentProvider}
-                onChange={(event) => changeAgentProvider(event.target.value as AgentProvider)}
-                disabled={!selectedChat || agentConfigLocked || connectionState !== 'open'}
-                className="h-9 rounded-md border border-slate-300 bg-white px-2 text-sm text-slate-900 outline-none transition focus:border-teal-600 focus:ring-2 focus:ring-teal-100 disabled:cursor-not-allowed disabled:bg-slate-100"
-              >
-                {agentProviders.map((provider) => (
-                  <option key={provider.id} value={provider.id}>
-                    {provider.label}
-                  </option>
-                ))}
-              </select>
-              <label htmlFor="agent-model-select" className="sr-only">
-                模型
-              </label>
-              <select
-                id="agent-model-select"
-                data-testid="agent-model-select"
-                value={selectedAgentModel}
-                onChange={(event) => changeAgentModel(event.target.value)}
-                disabled={!selectedChat || agentConfigLocked || connectionState !== 'open'}
-                className="h-9 max-w-40 rounded-md border border-slate-300 bg-white px-2 text-sm text-slate-900 outline-none transition focus:border-teal-600 focus:ring-2 focus:ring-teal-100 disabled:cursor-not-allowed disabled:bg-slate-100"
-              >
-                {selectedAgentModels.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.label}
-                  </option>
-                ))}
-              </select>
-              {selectedAgentModelOption?.reasoningLevels?.length ? (
-                <>
-                  <label htmlFor="agent-reasoning-select" className="sr-only">
-                    推理级别
-                  </label>
-                  <select
-                    id="agent-reasoning-select"
-                    data-testid="agent-reasoning-select"
-                    value={selectedAgentReasoning}
-                    onChange={(event) => changeAgentReasoning(event.target.value)}
-                    disabled={!selectedChat || agentConfigLocked || connectionState !== 'open'}
-                    className="h-9 max-w-36 rounded-md border border-slate-300 bg-white px-2 text-sm text-slate-900 outline-none transition focus:border-teal-600 focus:ring-2 focus:ring-teal-100 disabled:cursor-not-allowed disabled:bg-slate-100"
-                  >
-                    {selectedAgentModelOption.reasoningLevels.map((level) => (
-                      <option key={level.id} value={level.id}>
-                        {level.label}
-                      </option>
-                    ))}
-                  </select>
-                </>
-              ) : null}
-              {selectedChat?.agentLocked ? (
-                <span data-testid="agent-lock-state" className="text-xs font-medium text-slate-500">
-                  已锁定
-                </span>
-              ) : null}
-            </div>
-            <button
-              data-testid="chat-new-button"
-              type="button"
-              onClick={createChat}
-              disabled={!activeProjectId || connectionState !== 'open'}
-              className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md bg-slate-950 px-3 text-sm font-medium text-white transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:cursor-not-allowed disabled:bg-slate-300"
-            >
-              <Plus className="h-4 w-4" />
-              新建聊天
-            </button>
-          </div>
-        </header>
-
-        <div className="flex min-h-12 items-center gap-2 overflow-x-auto border-b border-slate-200 bg-slate-50 px-3" data-testid="chat-tabs">
-          {projectChats.length === 0 ? (
-            <span className="text-sm text-slate-500">当前 Project 还没有聊天页</span>
-          ) : (
-            projectChats.map((chat) => (
-              <button
-                key={chat.id}
-                type="button"
-                onClick={() => selectChat(chat)}
-                className={`inline-flex h-9 shrink-0 cursor-pointer items-center gap-2 rounded-md border px-3 text-sm transition ${
-                  chat.id === selectedChat?.id
-                    ? 'border-slate-950 bg-white text-slate-950'
-                    : 'border-slate-200 bg-transparent text-slate-600 hover:border-slate-400 hover:text-slate-950'
-                }`}
-              >
-                <MessageSquare className="h-4 w-4" />
-                <span>{chat.title}</span>
-                {chat.status === 'running' ? <span className="h-2 w-2 rounded-full bg-orange-500" /> : null}
-              </button>
-            ))
-          )}
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5" data-testid="message-log" aria-live="polite">
-          {!selectedChat ? (
-            <div className="mx-auto mt-20 max-w-md rounded-md border border-dashed border-slate-300 bg-white px-5 py-10 text-center text-sm text-slate-500">
-              创建聊天页后开始输入 prompt
-            </div>
-          ) : selectedChat.messages.length === 0 ? (
-            <div className="mx-auto mt-20 max-w-md rounded-md border border-dashed border-slate-300 bg-white px-5 py-10 text-center text-sm text-slate-500">
-              这个聊天页还没有消息
-            </div>
-          ) : (
-            <div className="mx-auto flex max-w-4xl flex-col gap-4">
-              {selectedChat.messages.map((message) => (
-                <article
-                  key={message.id}
-                  className={`message-card message-${message.role} rounded-md border p-4 ${
-                    message.role === 'user'
-                      ? 'border-teal-200 bg-teal-50'
-                      : message.role === 'system'
-                        ? 'border-rose-200 bg-rose-50'
-                        : 'border-slate-200 bg-white'
-                  }`}
-                >
-                  <div className="mb-2 flex items-center justify-between gap-3">
-                    <span className="text-sm font-semibold text-slate-800">
-                      {message.role === 'user' ? '你' : message.role === 'assistant' ? selectedAgentLabel : '系统'}
+            <header className="flex min-h-16 items-center justify-between border-b border-slate-200 bg-white px-4" data-testid="project-meta">
+              <div className="min-w-0">
+                <h2 className="truncate font-mono text-sm font-medium text-slate-900">
+                  {selectedProject?.path ?? '选择或创建 Project'}
+                </h2>
+                <div className="mt-1 flex min-w-0 items-center gap-3 text-xs text-slate-500">
+                  <span className="inline-flex min-w-0 items-center gap-1">
+                    <GitBranch className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">{projectGitText(selectedProject)}</span>
+                  </span>
+                  {selectedProject?.git?.isRepo ? (
+                    <span className="inline-flex items-center gap-1 font-mono">
+                      <GitCommit className="h-3.5 w-3.5" />
+                      {selectedProject.git.commit || '-'}
                     </span>
-                    <span className="inline-flex items-center gap-2 text-xs text-slate-500">
-                      {message.status === 'streaming' ? <Loader2 className="h-3.5 w-3.5 animate-spin text-orange-500" /> : null}
-                      {message.status === 'stopped' ? '已停止' : message.status === 'error' ? '失败' : formatTime(message.updatedAt)}
-                    </span>
-                  </div>
-                  <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-6 text-slate-800">
-                    {message.text || (message.status === 'streaming' ? '正在等待输出...' : '')}
-                  </pre>
-                  {message.toolCalls?.length ? (
-                    <div className="mt-3 space-y-2" data-testid="tool-call-list">
-                      {message.toolCalls.map((tool) => (
-                        <details key={tool.id} data-testid="tool-call-details" className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-                          <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
-                            <span className="inline-flex min-w-0 items-center gap-2 text-sm font-medium text-slate-800">
-                              <Wrench className="h-4 w-4 shrink-0 text-slate-500" />
-                              <span className="shrink-0 text-slate-500">工具调用</span>
-                              <span className="truncate">{tool.name}</span>
-                            </span>
-                            <span className="shrink-0 text-xs text-slate-500">
-                              {tool.status === 'running' ? '运行中' : tool.status === 'error' ? '失败' : '完成'}
-                            </span>
-                          </summary>
-                          {tool.input ? <pre className="mt-2 truncate font-mono text-xs text-slate-500">{tool.input}</pre> : null}
-                          {tool.output ? (
-                            <pre data-testid="tool-call-output" className="mt-2 whitespace-pre-wrap break-words font-mono text-xs text-slate-600">
-                              {tool.output}
-                            </pre>
-                          ) : null}
-                        </details>
-                      ))}
-                    </div>
                   ) : null}
-                </article>
-              ))}
-            </div>
-          )}
-        </div>
+                </div>
+              </div>
+              <div data-testid="agent-config-panel" className="text-xs text-slate-500">
+                {selectedAgentLabel}
+              </div>
+            </header>
 
-        <form className="border-t border-slate-200 bg-white px-4 py-4" onSubmit={submitComposer}>
-          <div className="mx-auto flex max-w-4xl items-end gap-3">
-            <div className="min-w-0 flex-1">
-              <label htmlFor="message-input" className="sr-only">
-                Prompt
-              </label>
-              <textarea
-                id="message-input"
-                data-testid="message-input"
-                value={composerValue}
-                onChange={(event) => setComposerValue(event.target.value)}
-                onKeyDown={handleComposerKeyDown}
-                disabled={!selectedChat || connectionState !== 'open'}
-                rows={1}
-                className="max-h-40 min-h-12 w-full resize-none rounded-md border border-slate-300 bg-white px-3 py-3 text-sm leading-5 text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-teal-600 focus:ring-2 focus:ring-teal-100 disabled:cursor-not-allowed disabled:bg-slate-100"
-                placeholder={selectedChat ? '输入 prompt，Enter 发送，Shift+Enter 换行' : '先创建聊天页'}
-              />
-            </div>
-            <button
-              data-testid="send-button"
-              type="submit"
-              disabled={!selectedChat || connectionState !== 'open' || (!composerValue.trim() && !isRunning)}
-              className={`inline-flex h-12 min-w-24 cursor-pointer items-center justify-center gap-2 rounded-md px-4 text-sm font-semibold text-white transition focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-300 ${
-                isRunning ? 'bg-orange-600 hover:bg-orange-500 focus:ring-orange-300' : 'bg-teal-600 hover:bg-teal-500 focus:ring-teal-300'
-              }`}
+            <Tabs
+              value={selectedChat?.id ?? ''}
+              onValueChange={(chatId) => {
+                const chat = projectChats.find((item) => item.id === chatId)
+                if (chat) {
+                  selectChat(chat)
+                }
+              }}
+              className="min-h-0 flex-1"
             >
-              {isRunning ? <Square className="h-4 w-4" fill="currentColor" /> : <ArrowUp className="h-4 w-4" />}
-              {isRunning ? '停止' : '发送'}
-            </button>
-          </div>
-          {selectedChat?.agentSessionId ? (
-            <div className="mx-auto mt-2 flex max-w-4xl items-center gap-2 text-xs text-slate-500">
-              <Clock3 className="h-3.5 w-3.5" />
-              <span className="truncate font-mono">
-                {selectedChat.agentProvider} · {selectedChat.agentModel}
-                {selectedChat.agentReasoning ? `/${selectedChat.agentReasoning}` : ''} · session {selectedChat.agentSessionId}
-              </span>
-            </div>
-          ) : null}
-        </form>
+              <div className="flex min-h-11 items-stretch border-b border-slate-200 bg-slate-50 px-3" data-testid="chat-tabs">
+                <TabsList className="h-full flex-1">
+                  {projectChats.length === 0 ? (
+                    <span className="flex items-center text-sm text-slate-500">没有聊天页</span>
+                  ) : (
+                    projectChats.map((chat) => (
+                      <TabsTrigger key={chat.id} value={chat.id}>
+                        <MessageSquare className="h-4 w-4" />
+                        <span>{chat.title}</span>
+                        {chat.status === 'running' ? <span className="h-2 w-2 rounded-full bg-orange-500" /> : null}
+                      </TabsTrigger>
+                    ))
+                  )}
+                  <Button
+                    data-testid="chat-tab-add-button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={createChat}
+                    disabled={!activeProjectId || connectionState !== 'open'}
+                    className="my-1 h-8 w-8 shrink-0"
+                    aria-label="新建聊天"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </TabsList>
+              </div>
+
+              {selectedChat ? (
+                <TabsContent value={selectedChat.id}>
+                  <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5" data-testid="message-log" aria-live="polite">
+                    {selectedChat.messages.length === 0 ? (
+                      <div className="mx-auto mt-20 max-w-md rounded-md border border-dashed border-slate-300 bg-white px-5 py-10 text-center text-sm text-slate-500">
+                        还没有消息
+                      </div>
+                    ) : (
+                      <div className="mx-auto flex max-w-4xl flex-col gap-3">
+                        {selectedChat.messages.map((message) => (
+                          <article
+                            key={message.id}
+                            className={`message-card message-${message.role} rounded-md border p-4 ${
+                              message.role === 'user'
+                                ? 'border-teal-200 bg-teal-50'
+                                : message.role === 'system'
+                                  ? 'border-rose-200 bg-rose-50'
+                                  : 'border-transparent bg-transparent'
+                            }`}
+                          >
+                            <div className="mb-2 flex items-center justify-between gap-3">
+                              <span className="text-sm font-medium text-slate-800">
+                                {message.role === 'user' ? '你' : message.role === 'assistant' ? selectedAgentLabel : '系统'}
+                              </span>
+                              <span className="inline-flex items-center gap-2 text-xs text-slate-500">
+                                {message.status === 'streaming' ? <Loader2 className="h-3.5 w-3.5 animate-spin text-orange-500" /> : null}
+                                {message.status === 'stopped' ? '已停止' : message.status === 'error' ? '失败' : formatTime(message.updatedAt)}
+                              </span>
+                            </div>
+                            {message.role === 'assistant' ? (
+                              <div className="space-y-2">
+                                {messagePartsForRender(message).map((part) =>
+                                  part.type === 'tool_call' && part.toolCall ? (
+                                    <details
+                                      key={part.id}
+                                      data-testid="tool-call-details"
+                                      className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"
+                                    >
+                                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+                                        <span className="inline-flex min-w-0 items-center gap-2 text-sm font-medium text-slate-800">
+                                          <Wrench className="h-4 w-4 shrink-0 text-slate-500" />
+                                          <span className="truncate font-mono text-xs">{toolCommandTitle(part.toolCall)}</span>
+                                        </span>
+                                        <span className="shrink-0 text-xs text-slate-500">
+                                          {part.toolCall.status === 'running' ? '运行中' : part.toolCall.status === 'error' ? '失败' : '完成'}
+                                        </span>
+                                      </summary>
+                                      {part.toolCall.input ? <pre className="mt-2 truncate font-mono text-xs text-slate-500">{part.toolCall.input}</pre> : null}
+                                      {part.toolCall.output ? (
+                                        <pre data-testid="tool-call-output" className="mt-2 whitespace-pre-wrap break-words font-mono text-xs text-slate-600">
+                                          {part.toolCall.output}
+                                        </pre>
+                                      ) : null}
+                                    </details>
+                                  ) : (
+                                    <pre key={part.id} className="whitespace-pre-wrap break-words font-sans text-sm leading-6 text-slate-800">
+                                      {part.text}
+                                    </pre>
+                                  ),
+                                )}
+                              </div>
+                            ) : (
+                              <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-6 text-slate-800">{message.text}</pre>
+                            )}
+                          </article>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <form className="border-t border-slate-200 bg-white px-4 py-3" onSubmit={submitComposer}>
+                    <div className="mx-auto max-w-4xl">
+                      <div className="relative">
+                        <label htmlFor="message-input" className="sr-only">
+                          Prompt
+                        </label>
+                        <Textarea
+                          id="message-input"
+                          data-testid="message-input"
+                          value={composerValue}
+                          onChange={(event) => setComposerValue(event.target.value)}
+                          onKeyDown={handleComposerKeyDown}
+                          disabled={!selectedChat || connectionState !== 'open'}
+                          rows={2}
+                          className="max-h-40 min-h-24 pr-14"
+                          placeholder={selectedChat ? '输入消息' : '先创建聊天'}
+                        />
+                        {composerValue.trim() || isRunning ? (
+                          <Button
+                            data-testid="send-button"
+                            type="submit"
+                            size="icon"
+                            disabled={!selectedChat || connectionState !== 'open' || (!composerValue.trim() && !isRunning)}
+                            className={`absolute bottom-3 right-3 h-9 w-9 rounded-full ${
+                              isRunning && !composerValue.trim() ? 'bg-orange-600 hover:bg-orange-500' : ''
+                            }`}
+                            aria-label={isRunning && !composerValue.trim() ? '停止' : '发送'}
+                          >
+                            {isRunning && !composerValue.trim() ? <Square className="h-4 w-4" fill="currentColor" /> : <ArrowUp className="h-4 w-4" />}
+                          </Button>
+                        ) : null}
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="composer-agent-config">
+                        <label htmlFor="agent-provider-select" className="text-xs font-medium text-slate-500">
+                          Agent
+                        </label>
+                        <Select
+                          id="agent-provider-select"
+                          data-testid="agent-provider-select"
+                          value={selectedAgentProvider}
+                          onChange={(event) => changeAgentProvider(event.target.value as AgentProvider)}
+                          disabled={agentControlsDisabled || providerLocked}
+                          className="max-w-44"
+                        >
+                          {agentProviders.map((provider) => (
+                            <option key={provider.id} value={provider.id}>
+                              {provider.label}
+                            </option>
+                          ))}
+                        </Select>
+                        <label htmlFor="agent-model-select" className="sr-only">
+                          模型
+                        </label>
+                        <Select
+                          id="agent-model-select"
+                          data-testid="agent-model-select"
+                          value={selectedAgentModel}
+                          onChange={(event) => changeAgentModel(event.target.value)}
+                          disabled={modelControlsDisabled}
+                          className="max-w-44"
+                        >
+                          {selectedAgentModels.map((model) => (
+                            <option key={model.id} value={model.id}>
+                              {model.label}
+                            </option>
+                          ))}
+                        </Select>
+                        {selectedAgentModelOption?.reasoningLevels?.length ? (
+                          <>
+                            <label htmlFor="agent-reasoning-select" className="sr-only">
+                              推理级别
+                            </label>
+                            <Select
+                              id="agent-reasoning-select"
+                              data-testid="agent-reasoning-select"
+                              value={selectedAgentReasoning}
+                              onChange={(event) => changeAgentReasoning(event.target.value)}
+                              disabled={modelControlsDisabled}
+                              className="max-w-36"
+                            >
+                              {selectedAgentModelOption.reasoningLevels.map((level) => (
+                                <option key={level.id} value={level.id}>
+                                  {level.label}
+                                </option>
+                              ))}
+                            </Select>
+                          </>
+                        ) : null}
+                        {providerLocked ? (
+                          <span data-testid="agent-lock-state" className="text-xs text-slate-500">
+                            已锁定
+                          </span>
+                        ) : null}
+                        {selectedChat?.agentSessionId ? (
+                          <span className="inline-flex min-w-0 items-center gap-1 text-xs text-slate-500">
+                            <Clock3 className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate font-mono">session {selectedChat.agentSessionId}</span>
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                  </form>
+                </TabsContent>
+              ) : (
+                <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5" data-testid="message-log" aria-live="polite">
+                  <div className="mx-auto mt-20 max-w-md rounded-md border border-dashed border-slate-300 bg-white px-5 py-10 text-center text-sm text-slate-500">
+                    创建聊天后开始
+                  </div>
+                </div>
+              )}
+            </Tabs>
           </>
         )}
       </section>

@@ -116,6 +116,22 @@ func TestParseCodexOutputLine(t *testing.T) {
 	if !event.Done {
 		t.Fatalf("Codex 完成事件不正确: %#v", event)
 	}
+
+	event, err = parseCodexOutputLine([]byte(`{"type":"error","message":"mock codex error: forced failure\n"}`))
+	if err != nil {
+		t.Fatalf("解析 Codex 错误事件失败: %v", err)
+	}
+	if event.Error != "mock codex error: forced failure\n" {
+		t.Fatalf("Codex 错误事件不正确: %#v", event)
+	}
+
+	event, err = parseCodexOutputLine([]byte(`{"type":"turn.failed","error":{"message":"mock codex error: forced failure\n"}}`))
+	if err != nil {
+		t.Fatalf("解析 Codex 失败事件失败: %v", err)
+	}
+	if event.Error != "mock codex error: forced failure\n" {
+		t.Fatalf("Codex 失败事件不正确: %#v", event)
+	}
 }
 
 // TestBuildClaudeUserMessage 验证发送给 Claude stdin 的用户消息结构。

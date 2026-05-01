@@ -194,19 +194,14 @@ func startServer(rootDir string, serverCmd string, port int, logsDir string) (*e
 
 	cmd := exec.Command(parts[0], parts[1:]...)
 	cmd.Dir = rootDir
-	mockCodexCommand, mockClaudeCommand, err := prepareMockAgentCommands(rootDir, parts[0])
-	if err != nil {
-		_ = serverLog.Close()
-		return nil, nil, err
-	}
 	cmd.Env = withEnvOverride(os.Environ(), map[string]string{
-		"PORT":                       fmt.Sprintf("%d", port),
-		"CODING_LOG_NO_COLOR":        "true",
-		"CODING_MOCK_CODEX_COMMAND":  mockCodexCommand,
-		"CODING_MOCK_CLAUDE_COMMAND": mockClaudeCommand,
-		"ANTHROPIC_BASE_URL":         fmt.Sprintf("http://127.0.0.1:%d/mock/anthropic", port),
-		"ANTHROPIC_API_KEY":          "mock-key",
-		"ANTHROPIC_MODEL":            "mock-claude-sonnet",
+		"PORT":                fmt.Sprintf("%d", port),
+		"CODING_LOG_NO_COLOR": "true",
+		"ANTHROPIC_BASE_URL":  fmt.Sprintf("http://127.0.0.1:%d/mock/anthropic", port),
+		"ANTHROPIC_API_KEY":   "mock-key",
+		"ANTHROPIC_MODEL":     "mock-claude-sonnet",
+		"OPENAI_BASE_URL":     fmt.Sprintf("http://127.0.0.1:%d/mock/openai/v1", port),
+		"OPENAI_API_KEY":      "mock-key",
 	})
 	cmd.Stdout = serverLog
 	cmd.Stderr = serverLog

@@ -68,3 +68,56 @@ func TestExtractLastUserPromptStripsSystemReminder(t *testing.T) {
 		t.Fatalf("prompt 提取不正确: %q", prompt)
 	}
 }
+
+// TestServeMockOpenAIResponsesNonStream 验证非流式 OpenAI Responses mock 响应。
+func TestServeMockOpenAIResponsesNonStream(t *testing.T) {
+	body := strings.NewReader(`{"model":"gpt-5.5","input":[{"role":"user","content":[{"type":"input_text","text":"你好 Codex"}]}]}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", body)
+	recorder := httptest.NewRecorder()
+
+	ServeMockOpenAIResponses(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("状态码不正确: %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Model  string `json:"model"`
+		Output []struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"output"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+	if response.Model != "gpt-5.5" {
+		t.Fatalf("模型不正确: %s", response.Model)
+	}
+	if len(response.Output) != 1 || len(response.Output[0].Content) != 1 || !strings.Contains(response.Output[0].Content[0].Text, "Mock Codex 正在回复：你好 Codex") {
+		t.Fatalf("响应文本不正确: %#v", response.Output)
+	}
+}
+
+// TestServeMockOpenAIResponsesStream 验证流式 OpenAI Responses mock 响应。
+func TestServeMockOpenAIResponsesStream(t *testing.T) {
+	body := strings.NewReader(`{"model":"gpt-5.5","stream":true,"input":"流式 Codex"}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", body)
+	recorder := httptest.NewRecorder()
+
+	ServeMockOpenAIResponses(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("状态码不正确: %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	text := recorder.Body.String()
+	if !strings.Contains(text, "event: response.created") {
+		t.Fatalf("缺少 response.created 事件: %s", text)
+	}
+	if !strings.Contains(text, "event: response.output_text.delta") || !strings.Contains(text, "Mock Cod") {
+		t.Fatalf("缺少流式文本事件: %s", text)
+	}
+	if !strings.Contains(text, "event: response.completed") {
+		t.Fatalf("缺少 response.completed 事件: %s", text)
+	}
+}

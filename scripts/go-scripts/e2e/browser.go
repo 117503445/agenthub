@@ -251,6 +251,56 @@ func expectTestIDText(page playwright.Page, id string, expected string, timeout 
 	return expectLocatorText(getByTestID(page, id), expected, timeout)
 }
 
+// expectTestIDTextOrder 使用 page、id、before、after 和 timeout 参数等待文本顺序符合预期。
+func expectTestIDTextOrder(page playwright.Page, id string, before string, after string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastText string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		text, err := getByTestID(page, id).TextContent()
+		if err == nil {
+			lastText = text
+			beforeIndex := strings.Index(text, before)
+			afterIndex := strings.Index(text, after)
+			if beforeIndex >= 0 && afterIndex >= 0 && beforeIndex < afterIndex {
+				return nil
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待文本 %q 位于 %q 前超时，最后错误: %w", before, after, lastErr)
+	}
+	return fmt.Errorf("等待文本 %q 位于 %q 前超时，实际文本: %s", before, after, lastText)
+}
+
+// expectToolCallSummaryText 使用 page、expected 和 timeout 参数等待工具调用标题包含 expected。
+func expectToolCallSummaryText(page playwright.Page, expected string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastText string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := getByTestID(page, "tool-call-details").First().Evaluate("(element) => element.querySelector('summary')?.textContent ?? ''", nil)
+		if err == nil {
+			if text, ok := value.(string); ok {
+				lastText = text
+				if strings.Contains(text, expected) {
+					return nil
+				}
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待工具调用标题包含 %q 超时，最后错误: %w", expected, lastErr)
+	}
+	return fmt.Errorf("等待工具调用标题包含 %q 超时，实际标题: %s", expected, lastText)
+}
+
 // expectTestIDNotText 使用 page、id、unexpected 和 timeout 参数等待元素文本不包含 unexpected。
 func expectTestIDNotText(page playwright.Page, id string, unexpected string, timeout time.Duration) error {
 	return expectLocatorNotText(getByTestID(page, id), unexpected, timeout)

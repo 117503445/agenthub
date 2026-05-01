@@ -247,6 +247,7 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string)
 				"messageId": message.ID,
 				"delta":     delta,
 				"text":      message.Text,
+				"message":   message,
 			})
 		},
 		OnToolCall: func(tool ToolCall) {

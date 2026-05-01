@@ -24,6 +24,14 @@ type MockAnthropicMessage struct {
 	Content any    `json:"content"` // Content 表示消息内容。
 }
 
+// MockOpenAIResponsesRequest 表示 OpenAI Responses mock 请求体。
+type MockOpenAIResponsesRequest struct {
+	Model  string           `json:"model"`  // Model 表示请求模型。
+	Stream bool             `json:"stream"` // Stream 表示是否使用 SSE 流式返回。
+	Input  any              `json:"input"`  // Input 表示 Responses API 输入。
+	Tools  []map[string]any `json:"tools"`  // Tools 表示请求携带的工具定义。
+}
+
 // ServeMockAnthropicCountTokens 使用 w 和 r 参数返回固定 token 统计。
 func ServeMockAnthropicCountTokens(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -70,6 +78,277 @@ func ServeMockAnthropicMessages(w http.ResponseWriter, r *http.Request) {
 		"stop_reason":   "end_turn",
 		"stop_sequence": nil,
 		"usage":         map[string]int{"input_tokens": 42, "output_tokens": len([]rune(responseText)) / 2},
+	})
+}
+
+// ServeMockOpenAIResponses 使用 w 和 r 参数提供 OpenAI Responses 兼容接口。
+func ServeMockOpenAIResponses(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var request MockOpenAIResponsesRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	prompt := extractMockOpenAIInputPrompt(request.Input)
+	if prompt == "" {
+		prompt = "空输入"
+	}
+	log.Ctx(r.Context()).Info().Strs("tools", mockOpenAIToolNames(request.Tools)).Msg("收到 OpenAI mock 请求")
+	if strings.Contains(prompt, "MOCK_AGENT_ERROR") {
+		http.Error(w, "mock codex error: forced failure", http.StatusBadRequest)
+		return
+	}
+	responseText := buildMockOpenAIResponse(prompt)
+	model := request.Model
+	if model == "" {
+		model = "gpt-5.5"
+	}
+
+	if request.Stream {
+		if mockOpenAIShouldCallTool(request.Input, request.Tools) {
+			serveMockOpenAIToolCallStream(w, r, model)
+			return
+		}
+		serveMockOpenAIResponsesStream(w, r, model, responseText)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(mockOpenAICompletedResponse(model, responseText))
+}
+
+// serveMockOpenAIToolCallStream 使用 w、r 和 model 参数返回一次 exec_command 工具调用。
+func serveMockOpenAIToolCallStream(w http.ResponseWriter, r *http.Request, model string) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "stream unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	responseID := "resp_mock_tool"
+	callID := "call_mock_pwd"
+	itemID := "fc_mock_pwd"
+	arguments := `{"cmd":"pwd","yield_time_ms":1000,"max_output_tokens":2000}`
+	sequence := 0
+	writeSSE := func(event string, payload any) bool {
+		data, err := json.Marshal(payload)
+		if err != nil {
+			log.Ctx(r.Context()).Error().Err(err).Msg("编码 OpenAI mock 工具 SSE 失败")
+			return false
+		}
+		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
+	response := mockOpenAIBaseResponse(responseID, model, "in_progress", nil)
+	if !writeSSE("response.created", map[string]any{"type": "response.created", "response": response}) {
+		return
+	}
+	if !writeSSE("response.in_progress", map[string]any{"type": "response.in_progress", "response": response}) {
+		return
+	}
+	if !writeSSE("response.output_item.added", map[string]any{
+		"type":         "response.output_item.added",
+		"output_index": 0,
+		"item":         mockOpenAIFunctionCallItem(itemID, callID, "exec_command", "", "in_progress"),
+	}) {
+		return
+	}
+	sequence++
+	if !writeSSE("response.function_call_arguments.delta", map[string]any{
+		"type":            "response.function_call_arguments.delta",
+		"item_id":         itemID,
+		"output_index":    0,
+		"delta":           arguments,
+		"sequence_number": sequence,
+	}) {
+		return
+	}
+	sequence++
+	if !writeSSE("response.function_call_arguments.done", map[string]any{
+		"type":            "response.function_call_arguments.done",
+		"item_id":         itemID,
+		"output_index":    0,
+		"name":            "exec_command",
+		"arguments":       arguments,
+		"sequence_number": sequence,
+	}) {
+		return
+	}
+	sequence++
+	toolItem := mockOpenAIFunctionCallItem(itemID, callID, "exec_command", arguments, "completed")
+	if !writeSSE("response.output_item.done", map[string]any{
+		"type":            "response.output_item.done",
+		"output_index":    0,
+		"item":            toolItem,
+		"sequence_number": sequence,
+	}) {
+		return
+	}
+	sequence++
+	_ = writeSSE("response.completed", map[string]any{
+		"type":            "response.completed",
+		"response":        mockOpenAIBaseResponse(responseID, model, "completed", []any{toolItem}),
+		"sequence_number": sequence,
+	})
+}
+
+// mockOpenAIToolNames 使用 tools 参数提取工具名称列表。
+func mockOpenAIToolNames(tools []map[string]any) []string {
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		name := firstNonEmpty(stringValue(tool["name"]), stringValue(tool["type"]))
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// mockOpenAIShouldCallTool 使用 input 和 tools 参数判断是否需要先返回工具调用。
+func mockOpenAIShouldCallTool(input any, tools []map[string]any) bool {
+	if mockOpenAIHasFunctionOutput(input) {
+		return false
+	}
+	for _, name := range mockOpenAIToolNames(tools) {
+		if name == "exec_command" {
+			return true
+		}
+	}
+	return false
+}
+
+// mockOpenAIHasFunctionOutput 使用 input 参数判断请求是否已经携带工具结果。
+func mockOpenAIHasFunctionOutput(input any) bool {
+	items, ok := input.([]any)
+	if !ok {
+		return false
+	}
+	for _, item := range items {
+		block, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if stringValue(block["type"]) == "function_call_output" {
+			return true
+		}
+	}
+	return false
+}
+
+// serveMockOpenAIResponsesStream 使用 w、r、model 和 responseText 参数返回 Responses API SSE。
+func serveMockOpenAIResponsesStream(w http.ResponseWriter, r *http.Request, model string, responseText string) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "stream unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	responseID := "resp_mock"
+	messageID := "msg_mock"
+	sequence := 0
+	writeSSE := func(event string, payload any) bool {
+		data, err := json.Marshal(payload)
+		if err != nil {
+			log.Ctx(r.Context()).Error().Err(err).Msg("编码 OpenAI mock SSE 失败")
+			return false
+		}
+		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
+	response := mockOpenAIBaseResponse(responseID, model, "in_progress", nil)
+	if !writeSSE("response.created", map[string]any{"type": "response.created", "response": response}) {
+		return
+	}
+	if !writeSSE("response.in_progress", map[string]any{"type": "response.in_progress", "response": response}) {
+		return
+	}
+	if !writeSSE("response.output_item.added", map[string]any{
+		"type":         "response.output_item.added",
+		"output_index": 0,
+		"item":         mockOpenAIMessageItem(messageID, "in_progress", ""),
+	}) {
+		return
+	}
+	sequence++
+	if !writeSSE("response.content_part.added", map[string]any{
+		"type":            "response.content_part.added",
+		"item_id":         messageID,
+		"output_index":    0,
+		"content_index":   0,
+		"part":            map[string]any{"type": "output_text", "text": "", "annotations": []any{}},
+		"sequence_number": sequence,
+	}) {
+		return
+	}
+
+	for _, chunk := range splitMockResponse(responseText) {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(120 * time.Millisecond):
+		}
+		sequence++
+		if !writeSSE("response.output_text.delta", map[string]any{
+			"type":            "response.output_text.delta",
+			"item_id":         messageID,
+			"output_index":    0,
+			"content_index":   0,
+			"delta":           chunk,
+			"sequence_number": sequence,
+		}) {
+			return
+		}
+	}
+
+	sequence++
+	_ = writeSSE("response.output_text.done", map[string]any{
+		"type":            "response.output_text.done",
+		"item_id":         messageID,
+		"output_index":    0,
+		"content_index":   0,
+		"text":            responseText,
+		"sequence_number": sequence,
+	})
+	sequence++
+	_ = writeSSE("response.content_part.done", map[string]any{
+		"type":            "response.content_part.done",
+		"item_id":         messageID,
+		"output_index":    0,
+		"content_index":   0,
+		"part":            map[string]any{"type": "output_text", "text": responseText, "annotations": []any{}},
+		"sequence_number": sequence,
+	})
+	sequence++
+	_ = writeSSE("response.output_item.done", map[string]any{
+		"type":            "response.output_item.done",
+		"output_index":    0,
+		"item":            mockOpenAIMessageItem(messageID, "completed", responseText),
+		"sequence_number": sequence,
+	})
+	sequence++
+	_ = writeSSE("response.completed", map[string]any{
+		"type":            "response.completed",
+		"response":        mockOpenAIBaseResponse(responseID, model, "completed", []any{mockOpenAIMessageItem(messageID, "completed", responseText)}),
+		"sequence_number": sequence,
 	})
 }
 
@@ -206,6 +485,129 @@ func buildMockAnthropicResponse(prompt string) string {
 		"Mock Claude 正在回复：%s\n\n这是来自后端 ANTHROPIC 兼容 mock 服务的流式内容，用于验证会话恢复和停止发送流程。",
 		prompt,
 	)
+}
+
+// buildMockOpenAIResponse 使用 prompt 参数构造 Codex mock 回复文本。
+func buildMockOpenAIResponse(prompt string) string {
+	return fmt.Sprintf(
+		"Mock Codex 正在回复：%s\n\n这是来自后端 OpenAI Responses 兼容 mock 服务的流式内容，用于验证 Codex CLI 和工具调用展示。",
+		prompt,
+	)
+}
+
+// extractMockOpenAIInputPrompt 使用 input 参数提取 Responses API 最后一条用户文本。
+func extractMockOpenAIInputPrompt(input any) string {
+	switch typed := input.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case []any:
+		for index := len(typed) - 1; index >= 0; index-- {
+			message, ok := typed[index].(map[string]any)
+			if !ok {
+				continue
+			}
+			if role := stringValue(message["role"]); role != "" && role != "user" {
+				continue
+			}
+			text := extractMockOpenAIContentText(message["content"])
+			if strings.TrimSpace(text) != "" {
+				return strings.TrimSpace(text)
+			}
+		}
+		return ""
+	default:
+		return ""
+	}
+}
+
+// extractMockOpenAIContentText 使用 content 参数提取 Responses API 文本。
+func extractMockOpenAIContentText(content any) string {
+	switch typed := content.(type) {
+	case string:
+		return typed
+	case []any:
+		parts := make([]string, 0, len(typed))
+		for _, item := range typed {
+			block, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			blockType := stringValue(block["type"])
+			if blockType != "" && blockType != "input_text" && blockType != "text" {
+				continue
+			}
+			if text := stringValue(block["text"]); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.Join(parts, "")
+	default:
+		return ""
+	}
+}
+
+// mockOpenAICompletedResponse 使用 model 和 responseText 参数构造完整 Responses API 响应。
+func mockOpenAICompletedResponse(model string, responseText string) map[string]any {
+	return mockOpenAIBaseResponse("resp_mock", model, "completed", []any{mockOpenAIMessageItem("msg_mock", "completed", responseText)})
+}
+
+// mockOpenAIBaseResponse 使用 id、model、status 和 output 参数构造 Responses API 基础响应。
+func mockOpenAIBaseResponse(id string, model string, status string, output []any) map[string]any {
+	if output == nil {
+		output = []any{}
+	}
+	return map[string]any{
+		"id":                   id,
+		"object":               "response",
+		"created_at":           time.Now().Unix(),
+		"status":               status,
+		"error":                nil,
+		"incomplete_details":   nil,
+		"instructions":         nil,
+		"max_output_tokens":    nil,
+		"model":                model,
+		"output":               output,
+		"parallel_tool_calls":  true,
+		"previous_response_id": nil,
+		"reasoning":            map[string]any{"effort": nil, "summary": nil},
+		"store":                false,
+		"temperature":          1.0,
+		"text":                 map[string]any{"format": map[string]string{"type": "text"}},
+		"tool_choice":          "auto",
+		"tools":                []any{},
+		"top_p":                1.0,
+		"truncation":           "disabled",
+		"usage":                map[string]any{"input_tokens": 42, "output_tokens": len([]rune(fmt.Sprint(output))) / 2, "total_tokens": 42 + len([]rune(fmt.Sprint(output)))/2},
+		"user":                 nil,
+		"metadata":             map[string]any{},
+	}
+}
+
+// mockOpenAIMessageItem 使用 id、status 和 text 参数构造 Responses API 消息项。
+func mockOpenAIMessageItem(id string, status string, text string) map[string]any {
+	content := []any{}
+	if text != "" {
+		content = append(content, map[string]any{"type": "output_text", "text": text, "annotations": []any{}})
+	}
+	return map[string]any{
+		"id":      id,
+		"type":    "message",
+		"status":  status,
+		"role":    "assistant",
+		"content": content,
+	}
+}
+
+// mockOpenAIFunctionCallItem 使用 id、callID、name、arguments 和 status 参数构造函数调用项。
+func mockOpenAIFunctionCallItem(id string, callID string, name string, arguments string, status string) map[string]any {
+	return map[string]any{
+		"id":        id,
+		"type":      "function_call",
+		"call_id":   callID,
+		"name":      name,
+		"arguments": arguments,
+		"status":    status,
+	}
 }
 
 // splitMockResponse 使用 text 参数拆分 mock 流式输出片段。

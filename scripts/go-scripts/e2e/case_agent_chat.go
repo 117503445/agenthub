@@ -65,11 +65,20 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDNotText(page, "project-list", projectPath, 2*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := expectTestIDText(page, "project-meta", projectPath, 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDText(page, "project-meta", "git", 10*time.Second); err != nil {
+		return fail(err)
+	}
 	if err := expectTestIDText(page, "chat-tabs", "聊天 1", 10*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := expectTestIDCount(page, "chat-tab-add-button", 1, 2*time.Second); err != nil {
+		return fail(err)
+	}
 	screenshot(page, filepath.Join(ctx.ScreenshotsDir, "01-chat-created.png"), true)
-	steps = append(steps, "创建 project 只需要输入目录，侧边栏只显示最后一级目录名，并自动打开第一个聊天页。")
+	steps = append(steps, "创建 project 后顶部展示完整路径和 git 信息，侧边栏只显示最后一级目录名。")
 
 	if err := clickTestID(page, "agent-settings-button"); err != nil {
 		return fail(err)
@@ -112,51 +121,54 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDValue(page, "agent-reasoning-select", "xhigh", 10*time.Second); err != nil {
 		return fail(err)
 	}
-	steps = append(steps, "聊天页可以选择 Mock Codex gpt-5.5 和推理级别。")
+	if err := expectTestIDCount(page, "send-button", 0, 2*time.Second); err != nil {
+		return fail(err)
+	}
+	steps = append(steps, "聊天框下方可以选择 agent、模型和推理级别，未输入时不显示发送按钮。")
 
 	firstPrompt := "第一条流式测试"
 	if err := fillTestID(page, "message-input", firstPrompt); err != nil {
 		return fail(err)
 	}
-	if err := page.Keyboard().Press("Enter"); err != nil {
+	if err := expectTestIDCount(page, "send-button", 1, 2*time.Second); err != nil {
 		return fail(err)
 	}
-	if err := expectTestIDText(page, "send-button", "停止", 10*time.Second); err != nil {
+	if err := page.Keyboard().Press("Enter"); err != nil {
 		return fail(err)
 	}
 	if err := expectTestIDText(page, "message-log", firstPrompt, 10*time.Second); err != nil {
 		return fail(err)
 	}
-	if err := expectTestIDText(page, "message-log", "Mock Claude", 20*time.Second); err != nil {
+	if err := expectTestIDText(page, "message-log", "Mock Codex", 20*time.Second); err != nil {
 		return fail(err)
 	}
-	if err := expectTestIDText(page, "message-log", "工具调用", 20*time.Second); err != nil {
+	if err := expectToolCallSummaryText(page, "pwd", 20*time.Second); err != nil {
 		return fail(err)
 	}
-	if err := expectTestIDText(page, "message-log", "exec_command", 20*time.Second); err != nil {
+	if err := expectTestIDTextOrder(page, "message-log", "pwd", "正在回复", 20*time.Second); err != nil {
 		return fail(err)
 	}
 	if err := expectTestIDAttributeAbsent(page, "tool-call-details", "open", 5*time.Second); err != nil {
 		return fail(err)
 	}
 	screenshot(page, filepath.Join(ctx.ScreenshotsDir, "02-streaming.png"), true)
-	steps = append(steps, "首次输入 prompt 后后端启动 Mock Codex，流式返回文本并默认折叠工具调用结果。")
+	steps = append(steps, "Mock Codex 通过真实 Codex CLI 请求后端 mock 模型服务，工具调用标题直接展示命令并排在输出前。")
 
-	if err := expectTestIDText(page, "send-button", "发送", 30*time.Second); err != nil {
+	if err := expectTestIDCount(page, "send-button", 0, 30*time.Second); err != nil {
 		return fail(err)
 	}
 	if err := expectTestIDDisabled(page, "agent-provider-select", true, 5*time.Second); err != nil {
 		return fail(err)
 	}
-	if err := expectTestIDDisabled(page, "agent-model-select", true, 5*time.Second); err != nil {
+	if err := expectTestIDDisabled(page, "agent-model-select", false, 5*time.Second); err != nil {
 		return fail(err)
 	}
-	if err := expectTestIDDisabled(page, "agent-reasoning-select", true, 5*time.Second); err != nil {
+	if err := expectTestIDDisabled(page, "agent-reasoning-select", false, 5*time.Second); err != nil {
 		return fail(err)
 	}
-	steps = append(steps, "聊天页开始会话后，agent、模型和推理级别被锁定。")
+	steps = append(steps, "聊天页开始会话后只锁定 agent，模型和推理级别仍然可调整。")
 
-	if err := clickTestID(page, "chat-new-button"); err != nil {
+	if err := clickTestID(page, "chat-tab-add-button"); err != nil {
 		return fail(err)
 	}
 	if err := expectTestIDText(page, "chat-tabs", "聊天 2", 10*time.Second); err != nil {
@@ -180,9 +192,6 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDText(page, "message-log", secondPrompt, 10*time.Second); err != nil {
 		return fail(err)
 	}
-	if err := expectTestIDText(page, "send-button", "停止", 10*time.Second); err != nil {
-		return fail(err)
-	}
 	thirdPrompt := "第三条打断测试"
 	if err := fillTestID(page, "message-input", thirdPrompt); err != nil {
 		return fail(err)
@@ -191,9 +200,6 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 		return fail(err)
 	}
 	if err := expectTestIDText(page, "message-log", thirdPrompt, 10*time.Second); err != nil {
-		return fail(err)
-	}
-	if err := expectTestIDText(page, "send-button", "停止", 10*time.Second); err != nil {
 		return fail(err)
 	}
 	steps = append(steps, "agent 正在输出时直接输入并回车，会停止上一轮并发送新的 prompt。")
@@ -216,12 +222,12 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	screenshot(page, filepath.Join(ctx.ScreenshotsDir, "03-restored.png"), true)
 	steps = append(steps, "刷新页面后仍能从后端恢复 project、聊天和 mock Claude 正在输出的会话。")
 
-	if err := expectTestIDText(page, "send-button", "发送", 30*time.Second); err != nil {
+	if err := expectTestIDCount(page, "send-button", 0, 30*time.Second); err != nil {
 		return fail(err)
 	}
 	steps = append(steps, "agent 输出完成后，停止按钮重新变回发送按钮。")
 
-	if err := clickTestID(page, "chat-new-button"); err != nil {
+	if err := clickTestID(page, "chat-tab-add-button"); err != nil {
 		return fail(err)
 	}
 	if err := selectTestID(page, "agent-provider-select", "mock-codex"); err != nil {
