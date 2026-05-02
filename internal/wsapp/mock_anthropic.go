@@ -482,7 +482,7 @@ func stripMockSystemReminder(text string) string {
 // buildMockAnthropicResponse 使用 prompt 参数构造 mock 回复文本。
 func buildMockAnthropicResponse(prompt string) string {
 	return fmt.Sprintf(
-		"Mock Claude 正在回复：%s\n\n这是来自后端 ANTHROPIC 兼容 mock 服务的流式内容，用于验证会话恢复和停止发送流程。",
+		"## Mock Claude\n\n正在回复：%s\n\n- 来自后端 ANTHROPIC 兼容 mock 服务。\n- 用于验证会话恢复和停止发送流程。",
 		prompt,
 	)
 }
@@ -490,7 +490,7 @@ func buildMockAnthropicResponse(prompt string) string {
 // buildMockOpenAIResponse 使用 prompt 参数构造 Codex mock 回复文本。
 func buildMockOpenAIResponse(prompt string) string {
 	return fmt.Sprintf(
-		"Mock Codex 正在回复：%s\n\n这是来自后端 OpenAI Responses 兼容 mock 服务的流式内容，用于验证 Codex CLI 和工具调用展示。",
+		"## Mock Codex\n\n正在回复：%s\n\n- 来自后端 OpenAI Responses 兼容 mock 服务。\n- 用于验证 Codex CLI 和工具调用展示。",
 		prompt,
 	)
 }

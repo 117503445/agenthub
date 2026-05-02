@@ -7,6 +7,7 @@ import {
   GitCommit,
   Loader2,
   MessageSquare,
+  Monitor,
   Pencil,
   Plus,
   Save,
@@ -24,6 +25,7 @@ import { Input } from './components/ui/input'
 import { Select } from './components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs'
 import { Textarea } from './components/ui/textarea'
+import { MarkdownRenderer } from './components/MarkdownRenderer'
 
 type ConnectionState = 'connecting' | 'open' | 'closed' | 'error'
 type ChatStatus = 'idle' | 'running' | 'error'
@@ -506,7 +508,7 @@ function App() {
   const wsRef = useRef<WebSocket | null>(null)
   const pendingCreatedChatProjectIdRef = useRef('')
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting')
-  const [version, setVersion] = useState('dev')
+  const [hostname, setHostname] = useState('')
   const [projects, setProjects] = useState<Project[]>([])
   const [chats, setChats] = useState<Chat[]>([])
   const [agentProviders, setAgentProviders] = useState<AgentProviderOption[]>(fallbackAgentProviders)
@@ -617,7 +619,7 @@ function App() {
   // handleServerMessage 使用 message 参数把服务端事件归并到前端状态。
   const handleServerMessage = useCallback(
     (message: ServerMessage) => {
-      setVersion(message.version)
+      setHostname(message.hostname || window.location.hostname || 'unknown')
       if (message.type === 'state.snapshot') {
         const payload = message.payload as SnapshotPayload
         const nextProjects = sortByCreatedAt(payload.projects ?? [])
@@ -903,23 +905,11 @@ function App() {
   return (
     <main className="theme-paseo grid h-[100dvh] min-h-0 overflow-hidden bg-slate-100 text-slate-950 lg:grid-cols-[320px_minmax(0,1fr)]">
       <aside className="flex h-full min-h-0 flex-col border-r border-slate-800 bg-slate-950 text-slate-100">
-        <div className="flex items-center justify-between border-b border-slate-800 px-4 py-4">
+        <div className="border-b border-slate-800 px-4 py-4">
           <div className="min-w-0">
             <h1 className="truncate text-base font-semibold">Coding Agent</h1>
-            <div data-testid="connection-state" className="mt-1 flex items-center gap-2 text-xs text-slate-400">
-              {connectionIcon}
-              <span>{connectionText[connectionState]}</span>
-              <span className="truncate font-mono">{version}</span>
-            </div>
+            <p className="mt-1 text-xs text-slate-400">Projects</p>
           </div>
-          <button
-            type="button"
-            onClick={() => resetProjectForm(null)}
-            className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md border border-slate-700 text-slate-300 transition hover:border-teal-500 hover:text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
-            aria-label="新建 Project"
-          >
-            <Plus className="h-4 w-4" />
-          </button>
         </div>
 
         <form className="border-b border-slate-800 p-4" onSubmit={saveProject}>
@@ -958,22 +948,6 @@ function App() {
           </button>
           {errorText ? <p className="mt-3 text-sm text-rose-300">{errorText}</p> : null}
         </form>
-
-        <div className="border-b border-slate-800 p-2">
-          <button
-            data-testid="agent-settings-button"
-            type="button"
-            onClick={openAgentSettings}
-            className={`inline-flex h-9 w-full cursor-pointer items-center gap-2 rounded-md px-3 text-sm transition ${
-              routeView === 'settings'
-                ? 'bg-teal-500/15 text-white'
-                : 'text-slate-300 hover:bg-slate-900 hover:text-white'
-            }`}
-          >
-            <Settings className="h-4 w-4" />
-            Agent 设置
-          </button>
-        </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-2 py-3" data-testid="project-list">
           {projects.length === 0 ? (
@@ -1021,6 +995,45 @@ function App() {
               </div>
             ))
           )}
+        </div>
+
+        <div data-testid="sidebar-footer" className="border-t border-slate-800 p-3">
+          <div className="mb-3 space-y-1.5">
+            <div data-testid="connection-state" className="flex min-w-0 items-center gap-2 text-xs text-slate-500">
+              {connectionIcon}
+              <span>{connectionText[connectionState]}</span>
+            </div>
+            <div className="flex min-w-0 items-center gap-2 text-xs text-slate-500">
+              <Monitor className="h-3.5 w-3.5 shrink-0" />
+              <span data-testid="machine-name" className="truncate font-mono">
+                {hostname}
+              </span>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              data-testid="project-add-button"
+              type="button"
+              variant="outline"
+              onClick={() => resetProjectForm(null)}
+              className="h-9 flex-1 px-0"
+              aria-label="新建 Project"
+              title="新建 Project"
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+            <Button
+              data-testid="agent-settings-button"
+              type="button"
+              variant={routeView === 'settings' ? 'default' : 'outline'}
+              onClick={openAgentSettings}
+              className="h-9 flex-1 px-0"
+              aria-label="设置"
+              title="设置"
+            >
+              <Settings className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </aside>
 
@@ -1099,12 +1112,12 @@ function App() {
           </div>
         ) : (
           <>
-            <header className="flex min-h-16 items-center justify-between border-b border-slate-200 bg-white px-4" data-testid="project-meta">
-              <div className="min-w-0">
-                <h2 className="truncate font-mono text-sm font-medium text-slate-900">
+            <header className="flex min-h-14 items-center border-b border-slate-200 bg-white px-4" data-testid="project-meta">
+              <div className="flex min-w-0 flex-1 items-center gap-3 text-xs text-slate-500">
+                <span data-testid="project-path-text" className="min-w-0 truncate font-mono text-sm font-medium text-slate-900">
                   {selectedProject?.path ?? '选择或创建 Project'}
-                </h2>
-                <div className="mt-1 flex min-w-0 items-center gap-3 text-xs text-slate-500">
+                </span>
+                <span data-testid="project-git-info" className="inline-flex min-w-0 shrink-0 items-center gap-2">
                   <span className="inline-flex min-w-0 items-center gap-1">
                     <GitBranch className="h-3.5 w-3.5 shrink-0" />
                     <span className="truncate">{projectGitText(selectedProject)}</span>
@@ -1115,10 +1128,7 @@ function App() {
                       {selectedProject.git.commit || '-'}
                     </span>
                   ) : null}
-                </div>
-              </div>
-              <div data-testid="agent-config-panel" className="text-xs text-slate-500">
-                {selectedAgentLabel}
+                </span>
               </div>
             </header>
 
@@ -1162,11 +1172,7 @@ function App() {
               {selectedChat ? (
                 <TabsContent value={selectedChat.id}>
                   <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5" data-testid="message-log" aria-live="polite">
-                    {selectedChat.messages.length === 0 ? (
-                      <div className="mx-auto mt-20 max-w-md rounded-md border border-dashed border-slate-300 bg-white px-5 py-10 text-center text-sm text-slate-500">
-                        还没有消息
-                      </div>
-                    ) : (
+                    {selectedChat.messages.length > 0 ? (
                       <div className="mx-auto flex max-w-4xl flex-col gap-3">
                         {selectedChat.messages.map((message) => (
                           <article
@@ -1214,9 +1220,7 @@ function App() {
                                       ) : null}
                                     </details>
                                   ) : (
-                                    <pre key={part.id} className="whitespace-pre-wrap break-words font-sans text-sm leading-6 text-slate-800">
-                                      {part.text}
-                                    </pre>
+                                    <MarkdownRenderer key={part.id} text={part.text ?? ''} />
                                   ),
                                 )}
                               </div>
@@ -1226,7 +1230,7 @@ function App() {
                           </article>
                         ))}
                       </div>
-                    )}
+                    ) : null}
                   </div>
 
                   <form
@@ -1265,17 +1269,15 @@ function App() {
                           </Button>
                         ) : null}
                       </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="composer-agent-config">
-                        <label htmlFor="agent-provider-select" className="text-xs font-medium text-slate-500">
-                          Agent
-                        </label>
+                      <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-slate-50 p-2" data-testid="composer-agent-config">
                         <Select
                           id="agent-provider-select"
                           data-testid="agent-provider-select"
                           value={selectedAgentProvider}
                           onChange={(event) => changeAgentProvider(event.target.value as AgentProvider)}
                           disabled={agentControlsDisabled || providerLocked}
-                          className="max-w-44"
+                          aria-label="选择助理"
+                          className="h-8 min-w-44 max-w-52 border-slate-200 bg-white px-3"
                         >
                           {agentProviders.map((provider) => (
                             <option key={provider.id} value={provider.id}>
@@ -1292,7 +1294,7 @@ function App() {
                           value={selectedAgentModel}
                           onChange={(event) => changeAgentModel(event.target.value)}
                           disabled={modelControlsDisabled}
-                          className="max-w-44"
+                          className="h-8 min-w-52 max-w-60 border-slate-200 bg-white px-3"
                         >
                           {selectedAgentModels.map((model) => (
                             <option key={model.id} value={model.id}>
@@ -1311,7 +1313,7 @@ function App() {
                               value={selectedAgentReasoning}
                               onChange={(event) => changeAgentReasoning(event.target.value)}
                               disabled={modelControlsDisabled}
-                              className="max-w-36"
+                              className="h-8 min-w-28 max-w-36 border-slate-200 bg-white px-3"
                             >
                               {selectedAgentModelOption.reasoningLevels.map((level) => (
                                 <option key={level.id} value={level.id}>
@@ -1320,11 +1322,6 @@ function App() {
                               ))}
                             </Select>
                           </>
-                        ) : null}
-                        {providerLocked ? (
-                          <span data-testid="agent-lock-state" className="text-xs text-slate-500">
-                            已锁定
-                          </span>
                         ) : null}
                         {selectedChat?.agentSessionId ? (
                           <span className="inline-flex min-w-0 items-center gap-1 text-xs text-slate-500">

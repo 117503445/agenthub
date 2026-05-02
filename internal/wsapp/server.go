@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 type Server struct {
 	ctx         context.Context
 	version     string
+	hostname    string
 	store       *Store
 	agents      *AgentManager
 	subscribers map[string]chan ServerMessage
@@ -30,9 +33,14 @@ func NewServer(ctx context.Context, version string, agentConfig AgentConfig) *Se
 	if len(agentProviders) == 0 {
 		agentProviders = DefaultAgentProviderOptions()
 	}
+	hostname, err := os.Hostname()
+	if err != nil || strings.TrimSpace(hostname) == "" {
+		hostname = "unknown"
+	}
 	return &Server{
 		ctx:         ctx,
 		version:     version,
+		hostname:    hostname,
 		store:       NewStoreWithAgentProviders(agentProviders),
 		agents:      NewAgentManager(ctx, agentConfig),
 		subscribers: make(map[string]chan ServerMessage),
@@ -363,6 +371,7 @@ func (s *Server) message(messageType string, payload any) ServerMessage {
 		Payload:    payload,
 		ServerTime: time.Now().Format(time.RFC3339),
 		Version:    s.version,
+		Hostname:   s.hostname,
 	}
 }
 

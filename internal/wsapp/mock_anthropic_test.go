@@ -31,7 +31,7 @@ func TestServeMockAnthropicMessagesNonStream(t *testing.T) {
 	if response.Model != "sonnet" {
 		t.Fatalf("模型不正确: %s", response.Model)
 	}
-	if len(response.Content) != 1 || !strings.Contains(response.Content[0].Text, "Mock Claude 正在回复：你好") {
+	if len(response.Content) != 1 || !strings.Contains(response.Content[0].Text, "## Mock Claude") || !strings.Contains(response.Content[0].Text, "正在回复：你好") {
 		t.Fatalf("响应文本不正确: %#v", response.Content)
 	}
 }
@@ -51,7 +51,7 @@ func TestServeMockAnthropicMessagesStream(t *testing.T) {
 	if !strings.Contains(text, "event: message_start") {
 		t.Fatalf("缺少 message_start 事件: %s", text)
 	}
-	if !strings.Contains(text, "event: content_block_delta") || !strings.Contains(text, "Mock Cla") {
+	if !strings.Contains(text, "event: content_block_delta") || !strings.Contains(text, "## Mock ") {
 		t.Fatalf("缺少流式文本事件: %s", text)
 	}
 	if !strings.Contains(text, "event: message_stop") {
@@ -94,7 +94,7 @@ func TestServeMockOpenAIResponsesNonStream(t *testing.T) {
 	if response.Model != "gpt-5.5" {
 		t.Fatalf("模型不正确: %s", response.Model)
 	}
-	if len(response.Output) != 1 || len(response.Output[0].Content) != 1 || !strings.Contains(response.Output[0].Content[0].Text, "Mock Codex 正在回复：你好 Codex") {
+	if len(response.Output) != 1 || len(response.Output[0].Content) != 1 || !strings.Contains(response.Output[0].Content[0].Text, "## Mock Codex") || !strings.Contains(response.Output[0].Content[0].Text, "正在回复：你好 Codex") {
 		t.Fatalf("响应文本不正确: %#v", response.Output)
 	}
 }
@@ -114,7 +114,7 @@ func TestServeMockOpenAIResponsesStream(t *testing.T) {
 	if !strings.Contains(text, "event: response.created") {
 		t.Fatalf("缺少 response.created 事件: %s", text)
 	}
-	if !strings.Contains(text, "event: response.output_text.delta") || !strings.Contains(text, "Mock Cod") {
+	if !strings.Contains(text, "event: response.output_text.delta") || !strings.Contains(text, "## Mock ") {
 		t.Fatalf("缺少流式文本事件: %s", text)
 	}
 	if !strings.Contains(text, "event: response.completed") {

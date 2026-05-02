@@ -14,6 +14,8 @@ export interface ServerMessage<TPayload = unknown> {
   serverTime: string
   /** version 表示服务端构建版本。 */
   version: string
+  /** hostname 表示后端机器名。 */
+  hostname?: string
 }
 
 // getWebSocketUrl 根据当前页面路径生成 WebSocket 地址，支持子路径部署。

@@ -43,10 +43,22 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDText(page, "connection-state", "已连接", 10*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := expectTestIDText(page, "sidebar-footer", "已连接", 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDNonEmpty(page, "machine-name", 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDCount(page, "project-add-button", 1, 2*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDCount(page, "agent-settings-button", 1, 2*time.Second); err != nil {
+		return fail(err)
+	}
 	if err := expectLocatorBackgroundLuminance(page.Locator("aside"), 235, 2*time.Second); err != nil {
 		return fail(err)
 	}
-	steps = append(steps, "前端使用 paseo 浅色工作台风格，侧栏保持低对比浅灰应用壳。")
+	steps = append(steps, "前端使用 paseo 浅色工作台风格，侧栏左下角集中展示连接状态、机器名、添加项目和设置入口。")
 
 	projectPath := ctx.RootDir
 	projectDisplayName := filepath.Base(projectPath)
@@ -71,6 +83,12 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDText(page, "project-meta", "git", 10*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := expectTestIDsSameLine(page, "project-path-text", "project-git-info", 2, 5*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDCount(page, "agent-config-panel", 0, 2*time.Second); err != nil {
+		return fail(err)
+	}
 	if err := expectTestIDText(page, "chat-tabs", "聊天 1", 10*time.Second); err != nil {
 		return fail(err)
 	}
@@ -80,8 +98,11 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDPinnedToViewportBottom(page, "composer-taskbar", 2*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := expectTestIDNotText(page, "message-log", "还没有消息", 2*time.Second); err != nil {
+		return fail(err)
+	}
 	screenshot(page, filepath.Join(ctx.ScreenshotsDir, "01-chat-created.png"), true)
-	steps = append(steps, "创建 project 后顶部展示完整路径和 git 信息，侧边栏只显示最后一级目录名，任务栏固定在底部。")
+	steps = append(steps, "创建 project 后顶部同一行展示完整路径和 git 信息，侧边栏只显示最后一级目录名，任务栏固定在底部。")
 
 	if err := clickTestID(page, "agent-settings-button"); err != nil {
 		return fail(err)
@@ -106,9 +127,6 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	}
 	steps = append(steps, "Agent 设置页可以向 Claude Code 模型选项列表添加新模型。")
 
-	if err := expectTestIDText(page, "agent-config-panel", "Mock Claude Code", 10*time.Second); err != nil {
-		return fail(err)
-	}
 	if err := selectTestID(page, "agent-provider-select", "claude-code"); err != nil {
 		return fail(err)
 	}
@@ -127,7 +145,10 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDCount(page, "send-button", 0, 2*time.Second); err != nil {
 		return fail(err)
 	}
-	steps = append(steps, "聊天框下方可以选择 agent、模型和推理级别，未输入时不显示发送按钮。")
+	if err := expectTestIDNotText(page, "composer-agent-config", "Agent", 2*time.Second); err != nil {
+		return fail(err)
+	}
+	steps = append(steps, "聊天框下方可以选择 agent、模型和推理级别，未输入时不显示发送按钮和 Agent 标签。")
 
 	firstPrompt := "第一条流式测试"
 	if err := fillTestID(page, "message-input", firstPrompt); err != nil {
@@ -143,6 +164,9 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 		return fail(err)
 	}
 	if err := expectTestIDText(page, "message-log", "Mock Codex", 20*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDDescendantText(page, "message-log", `[data-testid="assistant-markdown"] h2`, "Mock Codex", 20*time.Second); err != nil {
 		return fail(err)
 	}
 	if err := expectToolCallSummaryText(page, "pwd", 20*time.Second); err != nil {
@@ -169,7 +193,10 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDDisabled(page, "agent-reasoning-select", false, 5*time.Second); err != nil {
 		return fail(err)
 	}
-	steps = append(steps, "聊天页开始会话后只锁定 agent，模型和推理级别仍然可调整。")
+	if err := expectTestIDNotText(page, "composer-agent-config", "已锁定", 2*time.Second); err != nil {
+		return fail(err)
+	}
+	steps = append(steps, "聊天页开始会话后只锁定 agent，模型和推理级别仍然可调整，聊天框不显示已锁定文字。")
 
 	if err := clickTestID(page, "chat-tab-add-button"); err != nil {
 		return fail(err)

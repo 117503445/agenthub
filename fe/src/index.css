@@ -258,6 +258,88 @@ textarea {
   padding-inline: 8px !important;
 }
 
+.theme-paseo .markdown-body {
+  color: var(--paseo-foreground);
+  font-size: 0.875rem;
+  line-height: 1.65;
+}
+
+.theme-paseo .markdown-body > * + * {
+  margin-top: 0.65rem;
+}
+
+.theme-paseo .markdown-body h1,
+.theme-paseo .markdown-body h2,
+.theme-paseo .markdown-body h3,
+.theme-paseo .markdown-body h4,
+.theme-paseo .markdown-body h5,
+.theme-paseo .markdown-body h6 {
+  color: var(--paseo-foreground) !important;
+  font-weight: 500 !important;
+  line-height: 1.35;
+}
+
+.theme-paseo .markdown-body h1 {
+  font-size: 1.25rem;
+}
+
+.theme-paseo .markdown-body h2 {
+  font-size: 1.125rem;
+}
+
+.theme-paseo .markdown-body h3,
+.theme-paseo .markdown-body h4,
+.theme-paseo .markdown-body h5,
+.theme-paseo .markdown-body h6 {
+  font-size: 1rem;
+}
+
+.theme-paseo .markdown-body p {
+  white-space: pre-wrap;
+}
+
+.theme-paseo .markdown-body ul,
+.theme-paseo .markdown-body ol {
+  padding-left: 1.25rem;
+}
+
+.theme-paseo .markdown-body ul {
+  list-style: disc;
+}
+
+.theme-paseo .markdown-body ol {
+  list-style: decimal;
+}
+
+.theme-paseo .markdown-body code {
+  border: 1px solid var(--paseo-border-accent);
+  border-radius: 6px;
+  background: var(--paseo-surface-2);
+  padding: 0.1rem 0.3rem;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+}
+
+.theme-paseo .markdown-body pre {
+  overflow-x: auto;
+  border: 1px solid var(--paseo-border-accent);
+  border-radius: 8px;
+  background: var(--paseo-surface-1);
+  padding: 0.75rem;
+}
+
+.theme-paseo .markdown-body pre code {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.theme-paseo .markdown-body a {
+  color: var(--paseo-accent-bright);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .theme-paseo .message-system {
   border-color: rgb(198 79 67 / 0.32) !important;
   background-color: var(--paseo-danger-muted) !important;

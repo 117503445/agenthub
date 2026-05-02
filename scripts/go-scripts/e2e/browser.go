@@ -173,6 +173,73 @@ func expectTestIDAttributeAbsent(page playwright.Page, id string, name string, t
 	return fmt.Errorf("等待元素 %q 属性 %q 不存在超时，实际存在: %v", id, name, lastHasAttribute)
 }
 
+// expectTestIDNonEmpty 使用 page、id 和 timeout 参数等待元素文本非空。
+func expectTestIDNonEmpty(page playwright.Page, id string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastText string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		text, err := getByTestID(page, id).TextContent()
+		if err == nil {
+			lastText = strings.TrimSpace(text)
+			if lastText != "" {
+				return nil
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待元素 %q 文本非空超时，最后错误: %w", id, lastErr)
+	}
+	return fmt.Errorf("等待元素 %q 文本非空超时，实际文本: %s", id, lastText)
+}
+
+// expectTestIDDescendantText 使用 page、id、selector、expected 和 timeout 参数等待后代元素文本。
+func expectTestIDDescendantText(page playwright.Page, id string, selector string, expected string, timeout time.Duration) error {
+	return expectLocatorText(getByTestID(page, id).Locator(selector).First(), expected, timeout)
+}
+
+// expectTestIDsSameLine 使用 page、firstID、secondID、tolerance 和 timeout 参数等待两个元素同一行展示。
+func expectTestIDsSameLine(page playwright.Page, firstID string, secondID string, tolerance float64, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastState string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := page.Evaluate(`([firstID, secondID, tolerance]) => {
+			const find = (id) => document.querySelector('[data-testid="' + id + '"]');
+			const first = find(firstID);
+			const second = find(secondID);
+			if (!first || !second) {
+				return 'missing first=' + Boolean(first) + ', second=' + Boolean(second);
+			}
+			const firstRect = first.getBoundingClientRect();
+			const secondRect = second.getBoundingClientRect();
+			const diff = Math.abs(firstRect.top - secondRect.top);
+			if (diff <= tolerance) {
+				return '';
+			}
+			return 'top diff=' + diff.toFixed(2) + ', first=' + firstRect.top.toFixed(2) + ', second=' + secondRect.top.toFixed(2);
+		}`, []any{firstID, secondID, tolerance})
+		if err == nil {
+			if text, ok := value.(string); ok {
+				lastState = text
+				if text == "" {
+					return nil
+				}
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待元素 %q 和 %q 同行超时，最后错误: %w", firstID, secondID, lastErr)
+	}
+	return fmt.Errorf("等待元素 %q 和 %q 同行超时，最后状态: %s", firstID, secondID, lastState)
+}
+
 // expectTestIDPinnedToViewportBottom 使用 page、id 和 timeout 参数等待元素固定在视口底部。
 func expectTestIDPinnedToViewportBottom(page playwright.Page, id string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)

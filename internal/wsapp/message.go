@@ -14,6 +14,7 @@ type ServerMessage struct {
 	Payload    any    `json:"payload,omitempty"` // Payload 表示响应数据。
 	ServerTime string `json:"serverTime"`        // ServerTime 表示服务端发送时间。
 	Version    string `json:"version"`           // Version 表示当前构建版本。
+	Hostname   string `json:"hostname"`          // Hostname 表示后端机器名。
 }
 
 // ProjectMutationPayload 表示 project 创建和更新消息的参数。
