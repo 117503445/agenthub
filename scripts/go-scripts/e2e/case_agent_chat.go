@@ -46,6 +46,9 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDText(page, "sidebar-footer", "已连接", 10*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := expectTestIDNotText(page, "message-log", "创建聊天后开始", 2*time.Second); err != nil {
+		return fail(err)
+	}
 	if err := expectTestIDNonEmpty(page, "machine-name", 10*time.Second); err != nil {
 		return fail(err)
 	}
@@ -163,6 +166,12 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDText(page, "message-log", firstPrompt, 10*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := expectTestIDText(page, "chat-tabs", firstPrompt, 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDNotText(page, "chat-tabs", "聊天 1", 2*time.Second); err != nil {
+		return fail(err)
+	}
 	if err := expectTestIDText(page, "message-log", "Mock Codex", 20*time.Second); err != nil {
 		return fail(err)
 	}
@@ -222,6 +231,9 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDText(page, "message-log", secondPrompt, 10*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := expectTestIDText(page, "chat-tabs", secondPrompt, 10*time.Second); err != nil {
+		return fail(err)
+	}
 	thirdPrompt := "第三条打断测试"
 	if err := fillTestID(page, "message-input", thirdPrompt); err != nil {
 		return fail(err)
@@ -232,7 +244,7 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDText(page, "message-log", thirdPrompt, 10*time.Second); err != nil {
 		return fail(err)
 	}
-	steps = append(steps, "agent 正在输出时直接输入并回车，会停止上一轮并发送新的 prompt。")
+	steps = append(steps, "聊天页第一次发送 prompt 后，Tab 标题显示本次聊天主题；agent 正在输出时直接输入并回车，会停止上一轮并发送新的 prompt。")
 
 	if err := reloadPage(page); err != nil {
 		return fail(err)
@@ -244,6 +256,9 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 		return fail(err)
 	}
 	if err := expectTestIDText(page, "message-log", thirdPrompt, 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDText(page, "chat-tabs", secondPrompt, 10*time.Second); err != nil {
 		return fail(err)
 	}
 	if err := expectTestIDText(page, "message-log", "Mock Claude", 20*time.Second); err != nil {

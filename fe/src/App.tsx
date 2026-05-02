@@ -1334,11 +1334,7 @@ function App() {
                   </form>
                 </TabsContent>
               ) : (
-                <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5" data-testid="message-log" aria-live="polite">
-                  <div className="mx-auto mt-20 max-w-md rounded-md border border-dashed border-slate-300 bg-white px-5 py-10 text-center text-sm text-slate-500">
-                    创建聊天后开始
-                  </div>
-                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5" data-testid="message-log" aria-live="polite" />
               )}
             </Tabs>
           </>

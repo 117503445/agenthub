@@ -379,6 +379,11 @@ func (s *Store) AddRunMessages(chatID string, prompt string) (Chat, ChatMessage,
 		UpdatedAt: now,
 	}
 	chat.Messages = append(chat.Messages, userMessage, assistantMessage)
+	if len(chat.Messages) == 2 {
+		if title := deriveChatTitleFromPrompt(trimmedPrompt); title != "" {
+			chat.Title = title
+		}
+	}
 	chat.Status = ChatStatusRunning
 	chat.AgentLocked = true
 	chat.UpdatedAt = now

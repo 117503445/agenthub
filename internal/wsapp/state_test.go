@@ -3,6 +3,7 @@ package wsapp
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -46,6 +47,9 @@ func TestStoreProjectChatLifecycle(t *testing.T) {
 	}
 	if chat.Status != ChatStatusRunning {
 		t.Fatalf("聊天页未进入运行状态: %s", chat.Status)
+	}
+	if chat.Title != "第一条 prompt" {
+		t.Fatalf("聊天页标题未从首条 prompt 派生: %q", chat.Title)
 	}
 	if userMessage.Text != "第一条 prompt" || userMessage.Status != MessageStatusComplete {
 		t.Fatalf("用户消息不正确: %#v", userMessage)
@@ -118,6 +122,9 @@ func TestStoreProjectChatLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("追加待停止消息失败: %v", err)
 	}
+	if chat.Title != "第一条 prompt" {
+		t.Fatalf("聊天页标题不应被后续 prompt 覆盖: %q", chat.Title)
+	}
 	chat, stoppedMessage, ok := store.StopStreamingMessage(chat.ID, MessageStatusStopped)
 	if !ok {
 		t.Fatal("停止流式消息失败")
@@ -147,6 +154,24 @@ func TestStoreProjectChatLifecycle(t *testing.T) {
 	snapshot = store.Snapshot()
 	if len(snapshot.Projects) != 0 || len(snapshot.Chats) != 0 {
 		t.Fatalf("删除后的快照不为空: %#v", snapshot)
+	}
+}
+
+// TestDeriveChatTitleFromPrompt 验证聊天页标题派生规则。
+func TestDeriveChatTitleFromPrompt(t *testing.T) {
+	title := deriveChatTitleFromPrompt(" \n\t  修复   登录页   样式  \n第二行")
+	if title != "修复 登录页 样式" {
+		t.Fatalf("标题未正确取首个非空行并压缩空白: %q", title)
+	}
+
+	longPrompt := strings.Repeat("测", maxChatTitleRunes+5)
+	title = deriveChatTitleFromPrompt(longPrompt)
+	if got := len([]rune(title)); got != maxChatTitleRunes {
+		t.Fatalf("标题长度未截断到 %d 个字符: %d", maxChatTitleRunes, got)
+	}
+
+	if title := deriveChatTitleFromPrompt(" \n\t "); title != "" {
+		t.Fatalf("空 prompt 不应生成标题: %q", title)
 	}
 }
 
