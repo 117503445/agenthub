@@ -1,6 +1,9 @@
+ARG PNPM_VERSION=10.33.0
+
 FROM node:25-alpine AS fe
+ARG PNPM_VERSION
 WORKDIR /src/fe
-RUN corepack enable
+RUN npm install -g "pnpm@${PNPM_VERSION}"
 COPY fe/package.json fe/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY fe/ ./

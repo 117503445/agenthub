@@ -2,6 +2,26 @@
 
 这是一个 Go WebSocket 后端 + React 前端项目。
 
+## 安装
+
+安装最新 master Release 中适配当前系统的二进制：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/117503445/agenthub/master/install.sh | sh
+```
+
+默认安装到 `/usr/local/bin/agenthub`。如需安装到用户目录：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/117503445/agenthub/master/install.sh | AGENTHUB_INSTALL_DIR="$HOME/.local/bin" sh
+```
+
+安装后运行：
+
+```bash
+agenthub
+```
+
 ## 技术栈
 
 - 后端：Go、`github.com/coder/websocket`、zerolog
