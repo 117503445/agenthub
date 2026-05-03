@@ -227,7 +227,28 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := fillTestID(page, "message-input", ""); err != nil {
 		return fail(err)
 	}
-	steps = append(steps, "输入 / 时可以选择后端返回的 skills，并把选中的 skill 插入聊天输入框。")
+	if err := fillTestID(page, "message-input", "/"); err != nil {
+		return fail(err)
+	}
+	if err := expectSkillOptionSelected(page, "e2e-alpha", 5*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := page.Keyboard().Press("ArrowDown"); err != nil {
+		return fail(err)
+	}
+	if err := expectSkillOptionSelected(page, "e2e-beta", 5*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := page.Keyboard().Press("Enter"); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDValue(page, "message-input", "/e2e-beta ", 5*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := fillTestID(page, "message-input", ""); err != nil {
+		return fail(err)
+	}
+	steps = append(steps, "输入 / 时可以选择后端返回的 skills，支持点击和键盘上下键选择，并把选中的 skill 插入聊天输入框。")
 
 	if err := expectImageAddButtonUsesPictureLogo(page, 5*time.Second); err != nil {
 		return fail(err)

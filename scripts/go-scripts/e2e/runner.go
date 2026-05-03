@@ -283,26 +283,41 @@ func prepareMockAgentCommands(rootDir string, serverPath string) (string, string
 	return mockCodexPath, mockClaudePath, nil
 }
 
-// prepareE2EHome 使用 rootDir 参数准备 E2E 专用用户目录和测试 skill。
+// prepareE2EHome 使用 rootDir 参数准备 E2E 专用用户目录和测试 skills。
 func prepareE2EHome(rootDir string) (string, error) {
 	homeDir := filepath.Join(rootDir, "data", "e2e", "home")
-	skillDir := filepath.Join(homeDir, ".codex", "skills", "e2e-skill")
-	if err := os.MkdirAll(skillDir, 0755); err != nil {
+	skillsDir := filepath.Join(homeDir, ".codex", "skills")
+	if err := writeE2ESkill(skillsDir, "e2e-alpha", "E2E 键盘选择 Alpha。"); err != nil {
 		return "", err
 	}
-	content := strings.Join([]string{
-		"---",
-		"name: e2e-skill",
-		"description: E2E 技能选择测试。",
-		"---",
-		"",
-		"# E2E Skill",
-		"",
-	}, "\n")
-	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0644); err != nil {
+	if err := writeE2ESkill(skillsDir, "e2e-beta", "E2E 键盘选择 Beta。"); err != nil {
+		return "", err
+	}
+	if err := writeE2ESkill(skillsDir, "e2e-skill", "E2E 技能选择测试。"); err != nil {
 		return "", err
 	}
 	return homeDir, nil
+}
+
+// writeE2ESkill 使用 skillsDir、name 和 description 参数写入测试 skill。
+func writeE2ESkill(skillsDir string, name string, description string) error {
+	skillDir := filepath.Join(skillsDir, name)
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		return err
+	}
+	content := strings.Join([]string{
+		"---",
+		"name: " + name,
+		"description: " + description,
+		"---",
+		"",
+		"# " + name,
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0644); err != nil {
+		return err
+	}
+	return nil
 }
 
 // recreateMockAgentLink 使用 target 和 linkPath 参数重建 mock agent 链接。

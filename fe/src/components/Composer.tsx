@@ -6,6 +6,7 @@ import {
   KeyboardEvent,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -101,6 +102,7 @@ export function Composer({
   onChangeAgentModel,
   onChangeAgentReasoning,
 }: ComposerProps) {
+  const skillMenuID = useId()
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [selectedSkillIndex, setSelectedSkillIndex] = useState(0)
@@ -141,11 +143,13 @@ export function Composer({
     resizeTextarea()
   }, [composerValue, resizeTextarea, selectedChat?.id])
 
-  const activeSkillIndex = skillMenuVisible ? Math.min(selectedSkillIndex, filteredSkills.length - 1) : 0
+  const activeSkillIndex = skillMenuVisible ? boundedSkillIndex(selectedSkillIndex, filteredSkills.length) : 0
+  const activeSkill = filteredSkills[activeSkillIndex] ?? null
 
   // applySkill 使用 skill 参数把 slash skill 插入输入框。
   const applySkill = useCallback(
     (skill: AgentSkillOption) => {
+      setSelectedSkillIndex(0)
       onComposerValueChange(`/${skill.id} `)
       window.setTimeout(() => textareaRef.current?.focus(), 0)
     },
@@ -179,6 +183,12 @@ export function Composer({
     void appendImages(files)
   }
 
+  // handleComposerValueChange 使用 value 参数更新输入内容并重置 skill 键盘选中项。
+  const handleComposerValueChange = (value: string) => {
+    setSelectedSkillIndex(0)
+    onComposerValueChange(value)
+  }
+
   // handlePaste 使用 event 参数处理剪贴板图片。
   const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
     const files = Array.from(event.clipboardData.files ?? []).filter((file) => file.type.startsWith('image/'))
@@ -194,17 +204,17 @@ export function Composer({
     if (skillMenuVisible) {
       if (event.key === 'ArrowDown') {
         event.preventDefault()
-        setSelectedSkillIndex((current) => (current + 1) % filteredSkills.length)
+        setSelectedSkillIndex((current) => (boundedSkillIndex(current, filteredSkills.length) + 1) % filteredSkills.length)
         return
       }
       if (event.key === 'ArrowUp') {
         event.preventDefault()
-        setSelectedSkillIndex((current) => (current - 1 + filteredSkills.length) % filteredSkills.length)
+        setSelectedSkillIndex((current) => (boundedSkillIndex(current, filteredSkills.length) - 1 + filteredSkills.length) % filteredSkills.length)
         return
       }
       if (event.key === 'Tab' || event.key === 'Enter') {
         event.preventDefault()
-        applySkill(filteredSkills[activeSkillIndex] ?? filteredSkills[0])
+        applySkill(activeSkill ?? filteredSkills[0])
         return
       }
     }
@@ -220,14 +230,21 @@ export function Composer({
       <div data-testid="composer-shell" className="composer-shell relative mx-auto w-full max-w-[860px] rounded-[20px] border border-slate-200 bg-white px-4 py-3 shadow-sm">
         {skillMenuVisible ? (
           <div
+            id={skillMenuID}
             data-testid="skill-menu"
+            role="listbox"
+            aria-label="选择 skill"
             className="absolute bottom-[calc(100%+8px)] left-0 right-0 z-30 mx-auto max-h-64 max-w-[860px] overflow-y-auto rounded-md border border-slate-200 bg-white p-1 shadow-lg"
           >
             {filteredSkills.map((skill, index) => (
               <button
                 key={skill.id}
+                id={skillOptionID(skillMenuID, skill.id)}
                 data-testid="skill-option"
                 data-skill-id={skill.id}
+                data-active={index === activeSkillIndex ? 'true' : 'false'}
+                role="option"
+                aria-selected={index === activeSkillIndex}
                 type="button"
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => applySkill(skill)}
@@ -250,9 +267,13 @@ export function Composer({
             id="message-input"
             data-testid="message-input"
             value={composerValue}
-            onChange={(event) => onComposerValueChange(event.target.value)}
+            onChange={(event) => handleComposerValueChange(event.target.value)}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
+            aria-controls={skillMenuVisible ? skillMenuID : undefined}
+            aria-expanded={skillMenuVisible}
+            aria-activedescendant={skillMenuVisible && activeSkill ? skillOptionID(skillMenuID, activeSkill.id) : undefined}
+            aria-autocomplete="list"
             disabled={!selectedChat || connectionState !== 'open'}
             rows={1}
             className="max-h-[168px] min-h-8 border-0 px-0 py-0 text-base leading-6 shadow-none focus:ring-0"
@@ -427,6 +448,19 @@ function readFileAsDataURL(file: File) {
 function composerSelectWidthStyle(label: string, minCh: number, maxCh: number): CSSProperties {
   const contentWidth = Math.min(Math.max(visualTextLength(label), minCh), maxCh)
   return { maxWidth: '100%', width: `calc(${contentWidth}ch + 4.5rem)` }
+}
+
+// boundedSkillIndex 使用 index 和 count 参数返回可见 skill 列表中的有效下标。
+function boundedSkillIndex(index: number, count: number) {
+  if (count <= 0 || index < 0 || index >= count) {
+    return 0
+  }
+  return index
+}
+
+// skillOptionID 使用 menuID 和 skillID 参数生成 skill 选项 DOM ID。
+function skillOptionID(menuID: string, skillID: string) {
+  return `${menuID}-skill-${encodeURIComponent(skillID)}`
 }
 
 // visualTextLength 使用 text 参数估算中英文混排文本的视觉宽度。

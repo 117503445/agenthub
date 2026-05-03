@@ -235,6 +235,30 @@ func expectTestIDValue(page playwright.Page, id string, expected string, timeout
 	return fmt.Errorf("等待元素 %q 值为 %q 超时，实际值: %s", id, expected, lastValue)
 }
 
+// expectSkillOptionSelected 使用 page、skillID 和 timeout 参数等待 skill 选项被键盘选中。
+func expectSkillOptionSelected(page playwright.Page, skillID string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastValue string
+	var lastErr error
+	selector := fmt.Sprintf(`[data-testid="skill-option"][data-skill-id="%s"]`, skillID)
+	for time.Now().Before(deadline) {
+		value, err := page.Locator(selector).GetAttribute("aria-selected")
+		if err == nil {
+			lastValue = value
+			if value == "true" {
+				return nil
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待 skill %q 选中超时，最后错误: %w", skillID, lastErr)
+	}
+	return fmt.Errorf("等待 skill %q 选中超时，实际 aria-selected: %s", skillID, lastValue)
+}
+
 // expectBrowserStorage 使用 page、expectedKeys、expectedValues 和 timeout 参数等待浏览器只持久化指定状态。
 func expectBrowserStorage(
 	page playwright.Page,
