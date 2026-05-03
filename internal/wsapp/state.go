@@ -106,6 +106,22 @@ type ToolCall struct {
 	UpdatedAt time.Time `json:"updatedAt"`        // UpdatedAt 表示更新时间。
 }
 
+// ContextWindowUsage 表示聊天页上下文窗口使用情况。
+type ContextWindowUsage struct {
+	MaxTokens  int `json:"maxTokens"`  // MaxTokens 表示当前模型上下文窗口上限。
+	UsedTokens int `json:"usedTokens"` // UsedTokens 表示当前聊天估算或 agent 上报的已用 token 数。
+}
+
+// MessageImage 表示用户消息携带的一张图片附件。
+type MessageImage struct {
+	ID        string    `json:"id"`        // ID 表示图片附件唯一标识。
+	FileName  string    `json:"fileName"`  // FileName 表示图片文件名。
+	MimeType  string    `json:"mimeType"`  // MimeType 表示图片 MIME 类型。
+	Data      string    `json:"data"`      // Data 表示图片 base64 内容。
+	CreatedAt time.Time `json:"createdAt"` // CreatedAt 表示创建时间。
+	UpdatedAt time.Time `json:"updatedAt"` // UpdatedAt 表示更新时间。
+}
+
 // MessagePart 表示 assistant 消息中的一个顺序片段。
 type MessagePart struct {
 	ID        string    `json:"id"`                 // ID 表示片段唯一标识。
@@ -118,31 +134,44 @@ type MessagePart struct {
 
 // ChatMessage 表示聊天页中的一条消息。
 type ChatMessage struct {
-	ID        string        `json:"id"`                  // ID 表示消息唯一标识。
-	ChatID    string        `json:"chatId"`              // ChatID 表示消息所属聊天页。
-	Role      string        `json:"role"`                // Role 表示消息角色。
-	Text      string        `json:"text"`                // Text 表示消息文本。
-	Status    string        `json:"status"`              // Status 表示消息状态。
-	ToolCalls []ToolCall    `json:"toolCalls,omitempty"` // ToolCalls 表示消息中的工具调用。
-	Parts     []MessagePart `json:"parts,omitempty"`     // Parts 表示 assistant 内容与工具调用的顺序片段。
-	CreatedAt time.Time     `json:"createdAt"`           // CreatedAt 表示创建时间。
-	UpdatedAt time.Time     `json:"updatedAt"`           // UpdatedAt 表示更新时间。
+	ID        string         `json:"id"`                  // ID 表示消息唯一标识。
+	ChatID    string         `json:"chatId"`              // ChatID 表示消息所属聊天页。
+	Role      string         `json:"role"`                // Role 表示消息角色。
+	Text      string         `json:"text"`                // Text 表示消息文本。
+	Status    string         `json:"status"`              // Status 表示消息状态。
+	ToolCalls []ToolCall     `json:"toolCalls,omitempty"` // ToolCalls 表示消息中的工具调用。
+	Parts     []MessagePart  `json:"parts,omitempty"`     // Parts 表示 assistant 内容与工具调用的顺序片段。
+	Images    []MessageImage `json:"images,omitempty"`    // Images 表示用户消息携带的图片附件。
+	CreatedAt time.Time      `json:"createdAt"`           // CreatedAt 表示创建时间。
+	UpdatedAt time.Time      `json:"updatedAt"`           // UpdatedAt 表示更新时间。
+}
+
+// PlanApproval 表示 plan 模式生成的待确认计划。
+type PlanApproval struct {
+	ID        string    `json:"id"`        // ID 表示待确认 plan 标识。
+	MessageID string    `json:"messageId"` // MessageID 表示生成该 plan 的 assistant 消息标识。
+	Text      string    `json:"text"`      // Text 表示 plan 正文。
+	Status    string    `json:"status"`    // Status 表示 plan 当前状态。
+	CreatedAt time.Time `json:"createdAt"` // CreatedAt 表示创建时间。
+	UpdatedAt time.Time `json:"updatedAt"` // UpdatedAt 表示更新时间。
 }
 
 // Chat 表示 project 下的一个聊天页。
 type Chat struct {
-	ID             string        `json:"id"`                       // ID 表示聊天页唯一标识。
-	ProjectID      string        `json:"projectId"`                // ProjectID 表示聊天页所属 project。
-	Title          string        `json:"title"`                    // Title 表示聊天页标题。
-	Status         string        `json:"status"`                   // Status 表示聊天页运行状态。
-	AgentProvider  string        `json:"agentProvider"`            // AgentProvider 表示当前聊天页使用的 agent 类型。
-	AgentModel     string        `json:"agentModel"`               // AgentModel 表示当前聊天页使用的模型。
-	AgentReasoning string        `json:"agentReasoning,omitempty"` // AgentReasoning 表示当前聊天页使用的推理级别。
-	AgentLocked    bool          `json:"agentLocked"`              // AgentLocked 表示会话开始后 agent 配置是否锁定。
-	AgentSessionID string        `json:"agentSessionId,omitempty"` // AgentSessionID 表示 agent 会话标识。
-	Messages       []ChatMessage `json:"messages"`                 // Messages 表示聊天消息列表。
-	CreatedAt      time.Time     `json:"createdAt"`                // CreatedAt 表示创建时间。
-	UpdatedAt      time.Time     `json:"updatedAt"`                // UpdatedAt 表示更新时间。
+	ID             string             `json:"id"`                       // ID 表示聊天页唯一标识。
+	ProjectID      string             `json:"projectId"`                // ProjectID 表示聊天页所属 project。
+	Title          string             `json:"title"`                    // Title 表示聊天页标题。
+	Status         string             `json:"status"`                   // Status 表示聊天页运行状态。
+	AgentProvider  string             `json:"agentProvider"`            // AgentProvider 表示当前聊天页使用的 agent 类型。
+	AgentModel     string             `json:"agentModel"`               // AgentModel 表示当前聊天页使用的模型。
+	AgentReasoning string             `json:"agentReasoning,omitempty"` // AgentReasoning 表示当前聊天页使用的推理级别。
+	AgentLocked    bool               `json:"agentLocked"`              // AgentLocked 表示会话开始后 agent 配置是否锁定。
+	AgentSessionID string             `json:"agentSessionId,omitempty"` // AgentSessionID 表示 agent 会话标识。
+	ContextWindow  ContextWindowUsage `json:"contextWindow"`            // ContextWindow 表示当前上下文窗口使用情况。
+	Plan           *PlanApproval      `json:"plan,omitempty"`           // Plan 表示当前待确认或执行中的 plan。
+	Messages       []ChatMessage      `json:"messages"`                 // Messages 表示聊天消息列表。
+	CreatedAt      time.Time          `json:"createdAt"`                // CreatedAt 表示创建时间。
+	UpdatedAt      time.Time          `json:"updatedAt"`                // UpdatedAt 表示更新时间。
 }
 
 // LastAgentSelection 表示新聊天页默认继承的 agent 配置。
@@ -285,6 +314,7 @@ func (s *Store) CreateChat(projectID string) (Chat, error) {
 		AgentProvider:  lastAgent.Provider,
 		AgentModel:     lastAgent.Model,
 		AgentReasoning: lastAgent.Reasoning,
+		ContextWindow:  ContextWindowUsage{MaxTokens: contextWindowMaxTokens(lastAgent.Provider, lastAgent.Model)},
 		Messages:       []ChatMessage{},
 		CreatedAt:      now,
 		UpdatedAt:      now,
@@ -350,6 +380,7 @@ func (s *Store) UpdateChatAgent(chatID string, provider string, model string, re
 	chat.AgentProvider = normalizedProvider
 	chat.AgentModel = normalizedModel
 	chat.AgentReasoning = normalizedReasoning
+	chat.ContextWindow = estimateChatContextWindowUsage(chat)
 	chat.UpdatedAt = time.Now()
 	s.chats[chatID] = chat
 	s.lastAgent = LastAgentSelection{
@@ -375,11 +406,15 @@ func (s *Store) GetProjectAndChat(chatID string) (Project, Chat, error) {
 	return project, cloneChat(chat), nil
 }
 
-// AddRunMessages 使用 chatID 和 prompt 参数追加用户消息和 assistant 占位消息。
-func (s *Store) AddRunMessages(chatID string, prompt string) (Chat, ChatMessage, ChatMessage, error) {
+// AddRunMessages 使用 chatID、prompt、images 和 planMode 参数追加用户消息和 assistant 占位消息。
+func (s *Store) AddRunMessages(chatID string, prompt string, images []MessageImagePayload, planMode bool) (Chat, ChatMessage, ChatMessage, error) {
 	trimmedPrompt := strings.TrimSpace(prompt)
-	if trimmedPrompt == "" {
-		return Chat{}, ChatMessage{}, ChatMessage{}, fmt.Errorf("%w: prompt 不能为空", ErrInvalidInput)
+	normalizedImages, err := normalizeMessageImages(images)
+	if err != nil {
+		return Chat{}, ChatMessage{}, ChatMessage{}, err
+	}
+	if trimmedPrompt == "" && len(normalizedImages) == 0 {
+		return Chat{}, ChatMessage{}, ChatMessage{}, fmt.Errorf("%w: prompt 或图片不能为空", ErrInvalidInput)
 	}
 
 	s.mu.Lock()
@@ -390,12 +425,21 @@ func (s *Store) AddRunMessages(chatID string, prompt string) (Chat, ChatMessage,
 	}
 
 	now := time.Now()
+	for index := range normalizedImages {
+		normalizedImages[index].CreatedAt = now
+		normalizedImages[index].UpdatedAt = now
+	}
+	displayText := trimmedPrompt
+	if displayText == "" {
+		displayText = fmt.Sprintf("图片附件 %d 张", len(normalizedImages))
+	}
 	userMessage := ChatMessage{
 		ID:        newID("msg"),
 		ChatID:    chatID,
 		Role:      MessageRoleUser,
-		Text:      trimmedPrompt,
+		Text:      displayText,
 		Status:    MessageStatusComplete,
+		Images:    normalizedImages,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -410,12 +454,16 @@ func (s *Store) AddRunMessages(chatID string, prompt string) (Chat, ChatMessage,
 	}
 	chat.Messages = append(chat.Messages, userMessage, assistantMessage)
 	if len(chat.Messages) == 2 {
-		if title := deriveChatTitleFromPrompt(trimmedPrompt); title != "" {
+		if title := deriveChatTitleFromPrompt(displayText); title != "" {
 			chat.Title = title
 		}
 	}
 	chat.Status = ChatStatusRunning
 	chat.AgentLocked = true
+	if planMode {
+		chat.Plan = nil
+	}
+	chat.ContextWindow = estimateChatContextWindowUsage(chat)
 	chat.UpdatedAt = now
 	s.chats[chatID] = chat
 	return cloneChat(chat), userMessage, assistantMessage, nil
@@ -457,6 +505,7 @@ func (s *Store) AppendAssistantDelta(chatID string, messageID string, delta stri
 			})
 		}
 		message.UpdatedAt = now
+		chat.ContextWindow = estimateChatContextWindowUsage(chat)
 		chat.UpdatedAt = now
 		s.chats[chatID] = chat
 		return *message, true
@@ -513,6 +562,7 @@ func (s *Store) UpsertToolCall(chatID string, messageID string, tool ToolCall) (
 		}
 		upsertMessageToolPart(message, mergedTool, now)
 		message.UpdatedAt = now
+		chat.ContextWindow = estimateChatContextWindowUsage(chat)
 		chat.UpdatedAt = now
 		s.chats[chatID] = chat
 		return cloneChat(chat), cloneChatMessage(*message), true
@@ -604,6 +654,83 @@ func (s *Store) AddSystemMessage(chatID string, text string, status string) (Cha
 	chat.UpdatedAt = now
 	s.chats[chatID] = chat
 	return cloneChat(chat), message, nil
+}
+
+// SetChatPlan 使用 chatID、messageID 和 text 参数记录当前待确认 plan。
+func (s *Store) SetChatPlan(chatID string, messageID string, text string) (Chat, bool) {
+	trimmedText := strings.TrimSpace(text)
+	if trimmedText == "" {
+		return Chat{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	chat, ok := s.chats[chatID]
+	if !ok {
+		return Chat{}, false
+	}
+	now := time.Now()
+	chat.Plan = &PlanApproval{
+		ID:        newID("plan"),
+		MessageID: messageID,
+		Text:      trimmedText,
+		Status:    "pending",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	chat.UpdatedAt = now
+	s.chats[chatID] = chat
+	return cloneChat(chat), true
+}
+
+// MarkPlanExecuting 使用 chatID 和 planID 参数把 plan 标记为执行中并返回 plan 正文。
+func (s *Store) MarkPlanExecuting(chatID string, planID string) (Chat, PlanApproval, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	chat, ok := s.chats[chatID]
+	if !ok {
+		return Chat{}, PlanApproval{}, ErrNotFound
+	}
+	if chat.Plan == nil || chat.Plan.ID != planID {
+		return Chat{}, PlanApproval{}, fmt.Errorf("%w: plan 不存在", ErrNotFound)
+	}
+	if chat.Plan.Status != "pending" {
+		return Chat{}, PlanApproval{}, fmt.Errorf("%w: plan 当前不可执行", ErrInvalidInput)
+	}
+	now := time.Now()
+	chat.Plan.Status = "executing"
+	chat.Plan.UpdatedAt = now
+	chat.UpdatedAt = now
+	s.chats[chatID] = chat
+	return cloneChat(chat), *chat.Plan, nil
+}
+
+// UpdateContextWindowUsage 使用 chatID 和 usage 参数更新 agent 上报的上下文窗口使用量。
+func (s *Store) UpdateContextWindowUsage(chatID string, usage ContextWindowUsage) (Chat, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	chat, ok := s.chats[chatID]
+	if !ok {
+		return Chat{}, false
+	}
+	if usage.MaxTokens <= 0 {
+		usage.MaxTokens = chat.ContextWindow.MaxTokens
+	}
+	if usage.MaxTokens <= 0 {
+		usage.MaxTokens = contextWindowMaxTokens(chat.AgentProvider, chat.AgentModel)
+	}
+	if usage.UsedTokens < 0 {
+		usage.UsedTokens = 0
+	}
+	if usage.UsedTokens > usage.MaxTokens {
+		usage.UsedTokens = usage.MaxTokens
+	}
+	if chat.ContextWindow == usage {
+		return Chat{}, false
+	}
+	chat.ContextWindow = usage
+	chat.UpdatedAt = time.Now()
+	s.chats[chatID] = chat
+	return cloneChat(chat), true
 }
 
 // SetChatSessionID 使用 chatID 和 sessionID 参数记录 Claude 会话标识。
@@ -699,6 +826,10 @@ func validateProjectInput(projectPath string) (string, string, error) {
 
 // cloneChat 使用 chat 参数创建不会共享消息切片的副本。
 func cloneChat(chat Chat) Chat {
+	if chat.Plan != nil {
+		plan := *chat.Plan
+		chat.Plan = &plan
+	}
 	messages := chat.Messages
 	chat.Messages = make([]ChatMessage, 0, len(messages))
 	for _, message := range messages {
@@ -714,6 +845,7 @@ func cloneChat(chat Chat) Chat {
 func cloneChatMessage(message ChatMessage) ChatMessage {
 	message.ToolCalls = append([]ToolCall(nil), message.ToolCalls...)
 	message.Parts = cloneMessageParts(message.Parts)
+	message.Images = append([]MessageImage(nil), message.Images...)
 	return message
 }
 
@@ -731,6 +863,87 @@ func cloneMessageParts(parts []MessagePart) []MessagePart {
 		result = append(result, part)
 	}
 	return result
+}
+
+// normalizeMessageImages 使用 images 参数校验并标准化图片附件。
+func normalizeMessageImages(images []MessageImagePayload) ([]MessageImage, error) {
+	if len(images) == 0 {
+		return nil, nil
+	}
+	if len(images) > 8 {
+		return nil, fmt.Errorf("%w: 图片最多支持 8 张", ErrInvalidInput)
+	}
+	result := make([]MessageImage, 0, len(images))
+	for index, image := range images {
+		mimeType := strings.TrimSpace(image.MimeType)
+		if !strings.HasPrefix(mimeType, "image/") {
+			return nil, fmt.Errorf("%w: 只支持图片附件", ErrInvalidInput)
+		}
+		data := strings.TrimSpace(image.Data)
+		if data == "" {
+			return nil, fmt.Errorf("%w: 图片内容不能为空", ErrInvalidInput)
+		}
+		if len(data) > 8*1024*1024 {
+			return nil, fmt.Errorf("%w: 单张图片过大", ErrInvalidInput)
+		}
+		fileName := strings.TrimSpace(image.FileName)
+		if fileName == "" {
+			fileName = fmt.Sprintf("image-%d", index+1)
+		}
+		id := strings.TrimSpace(image.ID)
+		if id == "" {
+			id = newID("img")
+		}
+		result = append(result, MessageImage{
+			ID:       id,
+			FileName: fileName,
+			MimeType: mimeType,
+			Data:     data,
+		})
+	}
+	return result, nil
+}
+
+// estimateChatContextWindowUsage 使用 chat 参数估算上下文窗口使用量。
+func estimateChatContextWindowUsage(chat Chat) ContextWindowUsage {
+	maxTokens := contextWindowMaxTokens(chat.AgentProvider, chat.AgentModel)
+	usedTokens := 0
+	for _, message := range chat.Messages {
+		usedTokens += estimateTextTokens(message.Text)
+		usedTokens += len(message.Images) * 85
+		for _, tool := range message.ToolCalls {
+			usedTokens += estimateTextTokens(tool.Input)
+			usedTokens += estimateTextTokens(tool.Output)
+		}
+	}
+	if usedTokens > maxTokens {
+		usedTokens = maxTokens
+	}
+	return ContextWindowUsage{MaxTokens: maxTokens, UsedTokens: usedTokens}
+}
+
+// estimateTextTokens 使用 text 参数粗略估算 token 数。
+func estimateTextTokens(text string) int {
+	runeCount := len([]rune(strings.TrimSpace(text)))
+	if runeCount == 0 {
+		return 0
+	}
+	return runeCount/4 + 1
+}
+
+// contextWindowMaxTokens 使用 provider 和 model 参数返回模型上下文窗口上限。
+func contextWindowMaxTokens(provider string, model string) int {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	switch {
+	case strings.Contains(normalized, "opus"):
+		return 1_000_000
+	case strings.Contains(normalized, "gpt-5.5"), strings.Contains(normalized, "mock-codex"):
+		return 258_000
+	case strings.Contains(provider, "codex"):
+		return 200_000
+	default:
+		return 200_000
+	}
 }
 
 // upsertMessageToolPart 使用 message、tool 和 now 参数更新消息中的工具调用片段。

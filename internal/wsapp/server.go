@@ -57,7 +57,7 @@ func (s *Server) ServeWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.CloseNow()
-	conn.SetReadLimit(1024 * 1024)
+	conn.SetReadLimit(16 * 1024 * 1024)
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
@@ -224,7 +224,13 @@ func (s *Server) handle(ctx context.Context, outbound chan ServerMessage, msg Cl
 		if err := decodePayload(msg, &payload); err != nil {
 			return err
 		}
-		return s.startChatRun(ctx, payload.ChatID, payload.Prompt)
+		return s.startChatRun(ctx, payload.ChatID, payload.Prompt, payload.Images, payload.PlanMode)
+	case "chat.plan.execute":
+		var payload ChatPlanExecutePayload
+		if err := decodePayload(msg, &payload); err != nil {
+			return err
+		}
+		return s.startPlanExecution(ctx, payload.ChatID, payload.PlanID)
 	case "chat.stop":
 		var payload ChatStopPayload
 		if err := decodePayload(msg, &payload); err != nil {
@@ -238,7 +244,7 @@ func (s *Server) handle(ctx context.Context, outbound chan ServerMessage, msg Cl
 }
 
 // startChatRun 使用 ctx、chatID 和 prompt 参数启动或替换聊天页 agent 输出。
-func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string) error {
+func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string, images []MessageImagePayload, planMode bool) error {
 	project, chat, err := s.store.GetProjectAndChat(chatID)
 	if err != nil {
 		return err
@@ -247,7 +253,7 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string)
 		s.stopChatRun(chatID)
 	}
 
-	chat, _, assistantMessage, err := s.store.AddRunMessages(chatID, prompt)
+	chat, userMessage, assistantMessage, err := s.store.AddRunMessages(chatID, prompt, images, planMode)
 	if err != nil {
 		return err
 	}
@@ -280,10 +286,21 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string)
 			}
 			s.broadcast("chat.changed", map[string]any{"chat": updatedChat})
 		},
+		OnUsage: func(usage ContextWindowUsage) {
+			updatedChat, ok := s.store.UpdateContextWindowUsage(chatID, usage)
+			if ok {
+				s.broadcast("chat.changed", map[string]any{"chat": updatedChat})
+			}
+		},
 		OnDone: func() {
 			updatedChat, message, ok := s.store.FinishAssistantMessage(chatID, assistantMessage.ID, MessageStatusComplete)
 			if !ok {
 				return
+			}
+			if planMode {
+				if planChat, planOK := s.store.SetChatPlan(chatID, assistantMessage.ID, message.Text); planOK {
+					updatedChat = planChat
+				}
 			}
 			s.broadcast("chat.message.done", map[string]any{"chatId": chatID, "message": message})
 			s.broadcast("chat.changed", map[string]any{"chat": updatedChat})
@@ -310,6 +327,8 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string)
 		Model:              chat.AgentModel,
 		Reasoning:          chat.AgentReasoning,
 		Prompt:             prompt,
+		Images:             userMessage.Images,
+		PlanMode:           planMode,
 		SessionID:          chat.AgentSessionID,
 		AssistantMessageID: assistantMessage.ID,
 		Callbacks:          callbacks,
@@ -318,6 +337,24 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string)
 		return err
 	}
 	return nil
+}
+
+// startPlanExecution 使用 ctx、chatID 和 planID 参数执行已确认 plan。
+func (s *Server) startPlanExecution(ctx context.Context, chatID string, planID string) error {
+	chat, plan, err := s.store.MarkPlanExecuting(chatID, planID)
+	if err != nil {
+		return err
+	}
+	s.broadcast("chat.changed", map[string]any{"chat": chat})
+	prompt := strings.Join([]string{
+		"开始执行已确认的 plan。",
+		"",
+		"已确认 plan:",
+		plan.Text,
+		"",
+		"请按该 plan 开始实现，不要重新生成 plan，除非遇到阻塞。",
+	}, "\n")
+	return s.startChatRun(ctx, chatID, prompt, nil, false)
 }
 
 // stopChatRun 使用 chatID 参数停止聊天页当前输出。

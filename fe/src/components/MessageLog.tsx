@@ -1,7 +1,8 @@
 import { Check, Copy, Loader2, Wrench } from 'lucide-react'
 import { MarkdownRenderer } from './MarkdownRenderer'
+import { PlanCard } from './PlanCard'
 import { formatTime, messagePartsForRender, toolCommandTitle } from '../lib/chat'
-import type { Chat, ChatMessage } from '../types'
+import type { Chat, ChatMessage, PlanApproval } from '../types'
 
 interface MessageLogProps {
   /** chat 表示当前聊天页。 */
@@ -10,10 +11,12 @@ interface MessageLogProps {
   copiedMessageId: string
   /** onCopyMessage 使用 message 参数复制消息。 */
   onCopyMessage: (message: ChatMessage) => void
+  /** onExecutePlan 使用 plan 参数执行已确认 plan。 */
+  onExecutePlan: (plan: PlanApproval) => void
 }
 
 // MessageLog 使用 props 参数渲染聊天消息列表。
-export function MessageLog({ chat, copiedMessageId, onCopyMessage }: MessageLogProps) {
+export function MessageLog({ chat, copiedMessageId, onCopyMessage, onExecutePlan }: MessageLogProps) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5" data-testid="message-log" aria-live="polite">
       {chat.messages.length > 0 ? (
@@ -37,36 +40,52 @@ export function MessageLog({ chat, copiedMessageId, onCopyMessage }: MessageLogP
               </div>
               {message.role === 'assistant' ? (
                 <div className="space-y-2">
-                  {messagePartsForRender(message).map((part) =>
-                    part.type === 'tool_call' && part.toolCall ? (
-                      <details
-                        key={part.id}
-                        data-testid="tool-call-details"
-                        className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"
-                      >
-                        <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
-                          <span className="inline-flex min-w-0 items-center gap-2 text-sm font-medium text-slate-800">
-                            <Wrench className="h-4 w-4 shrink-0 text-slate-500" />
-                            <span className="truncate font-mono text-xs">{toolCommandTitle(part.toolCall)}</span>
-                          </span>
-                          <span className="shrink-0 text-xs text-slate-500">
-                            {part.toolCall.status === 'running' ? '运行中' : part.toolCall.status === 'error' ? '失败' : '完成'}
-                          </span>
-                        </summary>
-                        {part.toolCall.input ? <pre className="mt-2 truncate font-mono text-xs text-slate-500">{part.toolCall.input}</pre> : null}
-                        {part.toolCall.output ? (
-                          <pre data-testid="tool-call-output" className="mt-2 whitespace-pre-wrap break-words font-mono text-xs text-slate-600">
-                            {part.toolCall.output}
-                          </pre>
-                        ) : null}
-                      </details>
-                    ) : (
-                      <MarkdownRenderer key={part.id} text={part.text ?? ''} />
-                    ),
+                  {chat.plan?.messageId === message.id ? (
+                    <PlanCard plan={chat.plan} onExecute={onExecutePlan} />
+                  ) : (
+                    messagePartsForRender(message).map((part) =>
+                      part.type === 'tool_call' && part.toolCall ? (
+                        <details
+                          key={part.id}
+                          data-testid="tool-call-details"
+                          className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"
+                        >
+                          <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+                            <span className="inline-flex min-w-0 items-center gap-2 text-sm font-medium text-slate-800">
+                              <Wrench className="h-4 w-4 shrink-0 text-slate-500" />
+                              <span className="truncate font-mono text-xs">{toolCommandTitle(part.toolCall)}</span>
+                            </span>
+                            <span className="shrink-0 text-xs text-slate-500">
+                              {part.toolCall.status === 'running' ? '运行中' : part.toolCall.status === 'error' ? '失败' : '完成'}
+                            </span>
+                          </summary>
+                          {part.toolCall.input ? <pre className="mt-2 truncate font-mono text-xs text-slate-500">{part.toolCall.input}</pre> : null}
+                          {part.toolCall.output ? (
+                            <pre data-testid="tool-call-output" className="mt-2 whitespace-pre-wrap break-words font-mono text-xs text-slate-600">
+                              {part.toolCall.output}
+                            </pre>
+                          ) : null}
+                        </details>
+                      ) : (
+                        <MarkdownRenderer key={part.id} text={part.text ?? ''} />
+                      ),
+                    )
                   )}
                 </div>
               ) : (
-                <pre className="whitespace-pre-wrap break-words font-sans text-base leading-7 text-slate-800">{message.text}</pre>
+                <div className="space-y-3">
+                  <pre className="whitespace-pre-wrap break-words font-sans text-base leading-7 text-slate-800">{message.text}</pre>
+                  {message.images?.length ? (
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                      {message.images.map((image) => (
+                        <figure key={image.id} data-testid="message-image" className="overflow-hidden rounded-md border border-slate-200 bg-white">
+                          <img src={`data:${image.mimeType};base64,${image.data}`} alt={image.fileName} className="h-28 w-full object-cover" />
+                          <figcaption className="truncate px-2 py-1 text-xs text-slate-500">{image.fileName}</figcaption>
+                        </figure>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
               )}
               {message.role === 'user' ? (
                 <button

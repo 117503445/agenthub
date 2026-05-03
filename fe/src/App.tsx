@@ -27,7 +27,9 @@ import type {
   ChatMessageDonePayload,
   ChatTerminalIndicator,
   ChatVisualStatus,
+  ComposerImageAttachment,
   ConnectionState,
+  PlanApproval,
   Project,
   ProjectChangedPayload,
   ProjectDeletedPayload,
@@ -55,6 +57,8 @@ function App() {
   const [newClaudeModelID, setNewClaudeModelID] = useState('')
   const [newClaudeModelLabel, setNewClaudeModelLabel] = useState('')
   const [composerValues, setComposerValues] = useState<Record<string, string>>({})
+  const [composerImages, setComposerImages] = useState<Record<string, ComposerImageAttachment[]>>({})
+  const [planModes, setPlanModes] = useState<Record<string, boolean>>({})
   const [errorText, setErrorText] = useState('')
   const [hasSnapshot, setHasSnapshot] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState('')
@@ -73,6 +77,8 @@ function App() {
     [projectChats, selectedChatId],
   )
   const selectedComposerValue = selectedChat ? (composerValues[selectedChat.id] ?? '') : ''
+  const selectedComposerImages = selectedChat ? (composerImages[selectedChat.id] ?? []) : []
+  const selectedPlanMode = selectedChat ? (planModes[selectedChat.id] ?? false) : false
   const isRunning = selectedChat?.status === 'running'
   const selectedAgentProvider = selectedChat?.agentProvider ?? 'mock-claude-code'
   const selectedAgentModels = agentProviders.find((provider) => provider.id === selectedAgentProvider)?.models ?? []
@@ -141,11 +147,51 @@ function App() {
       }
       return next
     })
+    setComposerImages((current) => {
+      const next: Record<string, ComposerImageAttachment[]> = {}
+      for (const [chatId, images] of Object.entries(current)) {
+        if (chatIds.has(chatId)) {
+          next[chatId] = images
+        }
+      }
+      return next
+    })
+    setPlanModes((current) => {
+      const next: Record<string, boolean> = {}
+      for (const [chatId, enabled] of Object.entries(current)) {
+        if (chatIds.has(chatId)) {
+          next[chatId] = enabled
+        }
+      }
+      return next
+    })
   }, [])
 
   // removeComposerValues 使用 chatIds 参数清理指定聊天页草稿。
   const removeComposerValues = useCallback((chatIds: string[]) => {
     setComposerValues((current) => {
+      let changed = false
+      const next = { ...current }
+      for (const chatId of chatIds) {
+        if (chatId in next) {
+          delete next[chatId]
+          changed = true
+        }
+      }
+      return changed ? next : current
+    })
+    setComposerImages((current) => {
+      let changed = false
+      const next = { ...current }
+      for (const chatId of chatIds) {
+        if (chatId in next) {
+          delete next[chatId]
+          changed = true
+        }
+      }
+      return changed ? next : current
+    })
+    setPlanModes((current) => {
       let changed = false
       const next = { ...current }
       for (const chatId of chatIds) {
@@ -179,6 +225,50 @@ function App() {
       return { ...current, [chatId]: value }
     })
   }, [selectedChat?.id])
+
+  // updateSelectedComposerImages 使用 images 参数更新当前聊天页图片附件草稿。
+  const updateSelectedComposerImages = useCallback(
+    (images: ComposerImageAttachment[]) => {
+      const chatId = selectedChat?.id
+      if (!chatId) {
+        return
+      }
+      setComposerImages((current) => {
+        if (images.length === 0) {
+          if (!(chatId in current)) {
+            return current
+          }
+          const next = { ...current }
+          delete next[chatId]
+          return next
+        }
+        return { ...current, [chatId]: images }
+      })
+    },
+    [selectedChat?.id],
+  )
+
+  // updateSelectedPlanMode 使用 enabled 参数更新当前聊天页 plan 模式。
+  const updateSelectedPlanMode = useCallback(
+    (enabled: boolean) => {
+      const chatId = selectedChat?.id
+      if (!chatId) {
+        return
+      }
+      setPlanModes((current) => {
+        if (!enabled) {
+          if (!(chatId in current)) {
+            return current
+          }
+          const next = { ...current }
+          delete next[chatId]
+          return next
+        }
+        return { ...current, [chatId]: true }
+      })
+    },
+    [selectedChat?.id],
+  )
 
   useEffect(() => {
     // syncFromHash 从当前 hash 路由恢复选中的 project 和聊天页。
@@ -231,6 +321,19 @@ function App() {
     }
     updateHashRoute(selectedProject?.id ?? '', selectedChat?.id ?? '')
   }, [hasSnapshot, routeView, selectedProject?.id, selectedChat?.id])
+
+  // notifyAgentCompletion 使用 message 参数发送 agent 完成通知。
+  const notifyAgentCompletion = useCallback((message: ChatMessage) => {
+    if (!('Notification' in window) || Notification.permission !== 'granted') {
+      return
+    }
+    if (message.role !== 'assistant') {
+      return
+    }
+    const title = message.status === 'error' ? 'Agent 回复失败' : 'Agent 回复完成'
+    const body = message.text.trim().replace(/\s+/g, ' ').slice(0, 120)
+    new Notification(title, { body: body || '任务已结束' })
+  }, [])
 
   // handleServerMessage 使用 message 参数把服务端事件归并到前端状态。
   const handleServerMessage = useCallback(
@@ -349,6 +452,7 @@ function App() {
         } else if (payload.message.status === 'error') {
           markChatIndicator(payload.chatId, 'error')
         }
+        notifyAgentCompletion(payload.message)
         setChats((current) =>
           current.map((chat) => {
             if (chat.id !== payload.chatId) {
@@ -391,7 +495,7 @@ function App() {
         setErrorText(payload.message ?? '服务端错误')
       }
     },
-    [clearChatIndicator, markChatIndicator, pruneComposerValues, removeComposerValues, resetProjectForm],
+    [clearChatIndicator, markChatIndicator, notifyAgentCompletion, pruneComposerValues, removeComposerValues, resetProjectForm],
   )
 
   useEffect(() => {
@@ -575,6 +679,23 @@ function App() {
     }, 1200)
   }
 
+  // requestNotificationPermission 在用户交互中请求桌面通知权限。
+  const requestNotificationPermission = () => {
+    if (!('Notification' in window) || Notification.permission !== 'default') {
+      return
+    }
+    void Notification.requestPermission()
+  }
+
+  // executePlan 使用 plan 参数请求后端执行已确认 plan。
+  const executePlan = (plan: PlanApproval) => {
+    if (!selectedChat || plan.status !== 'pending') {
+      return
+    }
+    requestNotificationPermission()
+    sendClientMessage(wsRef.current, 'chat.plan.execute', { chatId: selectedChat.id, planId: plan.id })
+  }
+
   // submitComposer 处理 event 参数对应的聊天输入提交。
   const submitComposer = (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault()
@@ -582,15 +703,19 @@ function App() {
       return
     }
     const prompt = selectedComposerValue.trim()
-    if (!prompt && isRunning) {
+    const images = selectedComposerImages.map(({ id, fileName, mimeType, data }) => ({ id, fileName, mimeType, data }))
+    const hasPayload = Boolean(prompt) || images.length > 0
+    if (!hasPayload && isRunning) {
       sendClientMessage(wsRef.current, 'chat.stop', { chatId: selectedChat.id })
       return
     }
-    if (!prompt) {
+    if (!hasPayload) {
       return
     }
-    sendClientMessage(wsRef.current, 'chat.send', { chatId: selectedChat.id, prompt })
+    requestNotificationPermission()
+    sendClientMessage(wsRef.current, 'chat.send', { chatId: selectedChat.id, prompt, images, planMode: selectedPlanMode })
     updateSelectedComposerValue('')
+    updateSelectedComposerImages([])
   }
 
   const connectionIcon =
@@ -645,6 +770,8 @@ function App() {
             connectionState={connectionState}
             chatIndicators={chatIndicators}
             composerValue={selectedComposerValue}
+            composerImages={selectedComposerImages}
+            planMode={selectedPlanMode}
             copiedMessageId={copiedMessageId}
             isRunning={isRunning}
             agentProviders={agentProviders}
@@ -662,7 +789,10 @@ function App() {
             onCreateChat={createChat}
             onClearChatIndicator={clearChatIndicator}
             onCopyMessage={(message) => void copyMessageText(message)}
+            onExecutePlan={executePlan}
             onComposerValueChange={updateSelectedComposerValue}
+            onComposerImagesChange={updateSelectedComposerImages}
+            onPlanModeChange={updateSelectedPlanMode}
             onSubmitComposer={submitComposer}
             onChangeAgentProvider={changeAgentProvider}
             onChangeAgentModel={changeAgentModel}

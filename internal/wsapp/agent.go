@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -38,11 +40,12 @@ type AgentConfig struct {
 
 // AgentRunCallbacks 表示一次 agent 运行中的回调。
 type AgentRunCallbacks struct {
-	OnSessionID func(sessionID string) // OnSessionID 使用 sessionID 参数记录 Claude 会话标识。
-	OnDelta     func(delta string)     // OnDelta 使用 delta 参数追加 assistant 流式文本。
-	OnToolCall  func(tool ToolCall)    // OnToolCall 使用 tool 参数报告工具调用状态。
-	OnDone      func()                 // OnDone 表示当前轮次完成。
-	OnError     func(message string)   // OnError 使用 message 参数报告当前轮次失败。
+	OnSessionID func(sessionID string)         // OnSessionID 使用 sessionID 参数记录 Claude 会话标识。
+	OnDelta     func(delta string)             // OnDelta 使用 delta 参数追加 assistant 流式文本。
+	OnToolCall  func(tool ToolCall)            // OnToolCall 使用 tool 参数报告工具调用状态。
+	OnUsage     func(usage ContextWindowUsage) // OnUsage 使用 usage 参数报告上下文窗口使用量。
+	OnDone      func()                         // OnDone 表示当前轮次完成。
+	OnError     func(message string)           // OnError 使用 message 参数报告当前轮次失败。
 }
 
 // AgentRunInput 表示发送 prompt 到 agent 的参数。
@@ -53,6 +56,8 @@ type AgentRunInput struct {
 	Model              string            // Model 表示 agent 模型。
 	Reasoning          string            // Reasoning 表示 agent 推理级别。
 	Prompt             string            // Prompt 表示用户输入。
+	Images             []MessageImage    // Images 表示用户输入携带的图片附件。
+	PlanMode           bool              // PlanMode 表示本轮是否只生成计划。
 	SessionID          string            // SessionID 表示已有 agent 会话标识。
 	AssistantMessageID string            // AssistantMessageID 表示本轮 assistant 消息标识。
 	Callbacks          AgentRunCallbacks // Callbacks 表示运行过程回调。
@@ -75,6 +80,7 @@ type AgentRuntime struct {
 	provider             string
 	model                string
 	reasoning            string
+	planMode             bool
 	projectPath          string
 	sessionID            string
 	cmd                  *exec.Cmd
@@ -84,6 +90,7 @@ type AgentRuntime struct {
 	running              bool
 	stopping             bool
 	stderrLines          []string
+	imageTempDir         string
 	currentMessageID     string
 	emittedAssistantText string
 	callbacks            AgentRunCallbacks
@@ -172,7 +179,11 @@ func (m *AgentManager) sendClaude(ctx context.Context, input AgentRunInput) erro
 	stdin := runtime.stdin
 	runtime.mu.Unlock()
 
-	line, err := buildClaudeUserMessage(input.Prompt, sessionID)
+	prompt := agentPrompt(input.Prompt, input.Images)
+	if runtime.provider == AgentProviderMockClaudeCode && input.PlanMode {
+		prompt = planModePrompt(prompt)
+	}
+	line, err := buildClaudeUserMessage(prompt, input.Images, sessionID)
 	if err != nil {
 		runtime.failCurrentRun(err.Error())
 		return err
@@ -195,7 +206,7 @@ func (m *AgentManager) sendCodex(ctx context.Context, input AgentRunInput) error
 	if err != nil {
 		return err
 	}
-	if err := runtime.startCodex(ctx, input.Prompt); err != nil {
+	if err := runtime.startCodex(ctx, agentPrompt(input.Prompt, input.Images), input.Images); err != nil {
 		runtime.failCurrentRun(err.Error())
 		m.removeRuntime(input.ChatID, runtime)
 		return err
@@ -229,6 +240,7 @@ func (m *AgentManager) registerEphemeralRuntime(input AgentRunInput) (*AgentRunt
 		provider:             input.Provider,
 		model:                input.Model,
 		reasoning:            input.Reasoning,
+		planMode:             input.PlanMode,
 		projectPath:          input.ProjectPath,
 		sessionID:            input.SessionID,
 		running:              true,
@@ -256,6 +268,7 @@ func (m *AgentManager) ensureRuntime(ctx context.Context, input AgentRunInput) (
 		existing.provider == input.Provider &&
 		existing.model == input.Model &&
 		existing.reasoning == input.Reasoning &&
+		existing.planMode == input.PlanMode &&
 		existing.projectPath == input.ProjectPath &&
 		existing.isAlive() {
 		m.mu.Unlock()
@@ -275,6 +288,7 @@ func (m *AgentManager) ensureRuntime(ctx context.Context, input AgentRunInput) (
 		provider:    input.Provider,
 		model:       input.Model,
 		reasoning:   input.Reasoning,
+		planMode:    input.PlanMode,
 		projectPath: input.ProjectPath,
 		sessionID:   input.SessionID,
 	}
@@ -378,6 +392,9 @@ func (r *AgentRuntime) claudeArgs() []string {
 		"--verbose",
 		"--model", r.model,
 	}
+	if r.planMode {
+		args = append(args, "--permission-mode", "plan")
+	}
 	if r.provider == AgentProviderMockClaudeCode {
 		return append([]string{"--bare", "--setting-sources", "local"}, args...)
 	}
@@ -385,28 +402,33 @@ func (r *AgentRuntime) claudeArgs() []string {
 }
 
 // startCodex 使用 ctx 参数启动 Codex CLI 单轮运行。
-func (r *AgentRuntime) startCodex(ctx context.Context, prompt string) error {
+func (r *AgentRuntime) startCodex(ctx context.Context, prompt string, images []MessageImage) error {
 	args := []string{"exec"}
 	resumeSessionID := strings.TrimSpace(r.sessionID)
-	if resumeSessionID != "" {
-		args = append(args, "resume")
-	}
 	if r.provider == AgentProviderMockCodex {
 		args = append(args, r.mockCodexConfigArgs()...)
 	}
 	if strings.TrimSpace(r.reasoning) != "" {
 		args = append(args, "-c", fmt.Sprintf("model_reasoning_effort=%q", r.reasoning))
 	}
-	args = append(args,
-		"--json",
-		"--dangerously-bypass-approvals-and-sandbox",
-		"--skip-git-repo-check",
-		"--model", r.model,
-	)
+	if r.planMode {
+		prompt = planModePrompt(prompt)
+		args = append(args, "--sandbox", "read-only")
+	} else {
+		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
+	}
+	args = append(args, "--json", "--skip-git-repo-check", "--model", r.model)
+	imagePaths, err := r.prepareImageFiles(images)
+	if err != nil {
+		return err
+	}
+	for _, imagePath := range imagePaths {
+		args = append(args, "--image", imagePath)
+	}
 	if resumeSessionID == "" {
 		args = append(args, "--cd", r.projectPath)
 	} else {
-		args = append(args, resumeSessionID)
+		args = append(args, "resume", resumeSessionID)
 	}
 	args = append(args, prompt)
 
@@ -420,13 +442,16 @@ func (r *AgentRuntime) startCodex(ctx context.Context, prompt string) error {
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		r.cleanupImageFiles()
 		return fmt.Errorf("创建 Codex stdout 失败: %w", err)
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		r.cleanupImageFiles()
 		return fmt.Errorf("创建 Codex stderr 失败: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
+		r.cleanupImageFiles()
 		return fmt.Errorf("启动 Codex 失败: %w", err)
 	}
 
@@ -723,6 +748,7 @@ func (r *AgentRuntime) wait() {
 	r.stdin = nil
 	r.mu.Unlock()
 	r.waitStderrDone(stderrDone)
+	r.cleanupImageFiles()
 
 	if !running || stopping {
 		return
@@ -772,6 +798,7 @@ func (r *AgentRuntime) stop() {
 	if cmd != nil && cmd.Process != nil {
 		_ = cmd.Process.Kill()
 	}
+	r.cleanupImageFiles()
 }
 
 // failCurrentRun 使用 message 参数结束当前轮次并报告失败。
@@ -818,11 +845,13 @@ func (r *AgentRuntime) consumeOutputEvent(event ClaudeOutputEvent) {
 	var onSessionID func(string)
 	var onDelta func(string)
 	var onToolCall func(ToolCall)
+	var onUsage func(ContextWindowUsage)
 	var onDone func()
 	var onError func(string)
 	var sessionID string
 	var delta string
 	var toolCalls []ToolCall
+	var usage ContextWindowUsage
 	var done bool
 	var errorMessage string
 
@@ -853,6 +882,10 @@ func (r *AgentRuntime) consumeOutputEvent(event ClaudeOutputEvent) {
 			toolCalls = append([]ToolCall(nil), event.ToolCalls...)
 			onToolCall = r.callbacks.OnToolCall
 		}
+		if event.ContextWindow.MaxTokens > 0 || event.ContextWindow.UsedTokens > 0 {
+			usage = event.ContextWindow
+			onUsage = r.callbacks.OnUsage
+		}
 		if event.Done {
 			r.running = false
 			done = true
@@ -877,6 +910,9 @@ func (r *AgentRuntime) consumeOutputEvent(event ClaudeOutputEvent) {
 			onToolCall(tool)
 		}
 	}
+	if onUsage != nil {
+		onUsage(usage)
+	}
 	if onError != nil && errorMessage != "" {
 		onError(errorMessage)
 		return
@@ -888,12 +924,13 @@ func (r *AgentRuntime) consumeOutputEvent(event ClaudeOutputEvent) {
 
 // ClaudeOutputEvent 表示从 Claude JSON 行中提取出的 UI 事件。
 type ClaudeOutputEvent struct {
-	SessionID     string     // SessionID 表示 Claude 会话标识。
-	Delta         string     // Delta 表示增量 assistant 文本。
-	AssistantText string     // AssistantText 表示当前 assistant 完整文本。
-	ToolCalls     []ToolCall // ToolCalls 表示本行携带的工具调用更新。
-	Done          bool       // Done 表示当前轮次完成。
-	Error         string     // Error 表示当前轮次错误。
+	SessionID     string             // SessionID 表示 Claude 会话标识。
+	Delta         string             // Delta 表示增量 assistant 文本。
+	AssistantText string             // AssistantText 表示当前 assistant 完整文本。
+	ToolCalls     []ToolCall         // ToolCalls 表示本行携带的工具调用更新。
+	ContextWindow ContextWindowUsage // ContextWindow 表示本行携带的上下文窗口使用量。
+	Done          bool               // Done 表示当前轮次完成。
+	Error         string             // Error 表示当前轮次错误。
 }
 
 // parseClaudeOutputLine 使用 line 参数解析 Claude JSON 行。
@@ -1032,6 +1069,9 @@ func parseCodexOutputLine(line []byte) (ClaudeOutputEvent, error) {
 	if strings.Contains(method, "turn/completed") || strings.Contains(method, "turn_completed") || method == "turn.completed" || method == "done" {
 		event.Done = true
 	}
+	if usage, ok := extractContextWindowUsage(firstNonNil(params["tokenUsage"], params["token_usage"], raw["tokenUsage"], raw["token_usage"], raw["usage"])); ok {
+		event.ContextWindow = usage
+	}
 	if errText := firstNonEmpty(codexErrorText(raw["error"]), codexErrorText(params["error"]), stringValue(raw["message"]), stringValue(params["message"])); errText != "" {
 		event.Error = errText
 	}
@@ -1047,6 +1087,53 @@ func codexErrorText(value any) string {
 		return firstNonEmpty(stringValue(block["message"]), stringValue(block["error"]))
 	}
 	return ""
+}
+
+// extractContextWindowUsage 使用 value 参数提取上下文窗口使用量。
+func extractContextWindowUsage(value any) (ContextWindowUsage, bool) {
+	usage := mapValue(value)
+	if usage == nil {
+		return ContextWindowUsage{}, false
+	}
+	maxTokens := firstPositiveInt(
+		usage["contextWindowMaxTokens"],
+		usage["context_window_max_tokens"],
+		usage["modelContextWindow"],
+		usage["model_context_window"],
+		usage["maxTokens"],
+	)
+	usedTokens := firstPositiveInt(
+		usage["contextWindowUsedTokens"],
+		usage["context_window_used_tokens"],
+		usage["usedTokens"],
+		usage["totalTokens"],
+		usage["total_tokens"],
+	)
+	if maxTokens <= 0 && usedTokens <= 0 {
+		return ContextWindowUsage{}, false
+	}
+	return ContextWindowUsage{MaxTokens: maxTokens, UsedTokens: usedTokens}, true
+}
+
+// firstPositiveInt 使用 values 参数返回第一个正整数。
+func firstPositiveInt(values ...any) int {
+	for _, value := range values {
+		switch typed := value.(type) {
+		case int:
+			if typed > 0 {
+				return typed
+			}
+		case int64:
+			if typed > 0 {
+				return int(typed)
+			}
+		case float64:
+			if typed > 0 {
+				return int(typed)
+			}
+		}
+	}
+	return 0
 }
 
 // extractStreamEventDelta 使用 value 参数提取 Claude stream_event 文本增量。
@@ -1185,6 +1272,16 @@ func mapValue(value any) map[string]any {
 	return result
 }
 
+// firstNonNil 返回 values 参数中的第一个非 nil 值。
+func firstNonNil(values ...any) any {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
 // jsonString 使用 value 参数编码简短 JSON 字符串。
 func jsonString(value any) string {
 	if value == nil {
@@ -1200,18 +1297,30 @@ func jsonString(value any) string {
 	return string(data)
 }
 
-// buildClaudeUserMessage 使用 prompt 和 sessionID 参数构造 Claude stream-json 输入行。
-func buildClaudeUserMessage(prompt string, sessionID string) (string, error) {
+// buildClaudeUserMessage 使用 prompt、images 和 sessionID 参数构造 Claude stream-json 输入行。
+func buildClaudeUserMessage(prompt string, images []MessageImage, sessionID string) (string, error) {
+	content := make([]any, 0, len(images)+1)
+	if strings.TrimSpace(prompt) != "" {
+		content = append(content, map[string]any{
+			"type": "text",
+			"text": prompt,
+		})
+	}
+	for _, image := range images {
+		content = append(content, map[string]any{
+			"type": "image",
+			"source": map[string]any{
+				"type":       "base64",
+				"media_type": image.MimeType,
+				"data":       image.Data,
+			},
+		})
+	}
 	payload := map[string]any{
 		"type": "user",
 		"message": map[string]any{
-			"role": "user",
-			"content": []map[string]string{
-				{
-					"type": "text",
-					"text": prompt,
-				},
-			},
+			"role":    "user",
+			"content": content,
 		},
 		"parent_tool_use_id": nil,
 		"uuid":               newUUID(),
@@ -1222,6 +1331,99 @@ func buildClaudeUserMessage(prompt string, sessionID string) (string, error) {
 		return "", err
 	}
 	return string(data), nil
+}
+
+// agentPrompt 使用 prompt 和 images 参数生成发送给 agent 的文本。
+func agentPrompt(prompt string, images []MessageImage) string {
+	trimmed := strings.TrimSpace(prompt)
+	if trimmed != "" {
+		return trimmed
+	}
+	if len(images) > 0 {
+		return "请根据图片附件继续。"
+	}
+	return ""
+}
+
+// planModePrompt 使用 prompt 参数生成 plan 模式提示。
+func planModePrompt(prompt string) string {
+	return strings.Join([]string{
+		"你现在处于 plan 模式。只阅读、分析并生成可执行计划，不要修改文件或执行实现。",
+		"如果计划需要用户确认，请把待确认意见写清楚。",
+		"用户批准后才可以开始执行。",
+		"",
+		prompt,
+	}, "\n")
+}
+
+// prepareImageFiles 使用 images 参数为 Codex CLI 准备本地图片文件。
+func (r *AgentRuntime) prepareImageFiles(images []MessageImage) ([]string, error) {
+	if len(images) == 0 {
+		return nil, nil
+	}
+	dir, err := os.MkdirTemp("", "coding-agent-images-*")
+	if err != nil {
+		return nil, fmt.Errorf("创建图片临时目录失败: %w", err)
+	}
+	r.mu.Lock()
+	r.imageTempDir = dir
+	r.mu.Unlock()
+
+	paths := make([]string, 0, len(images))
+	for index, image := range images {
+		data, err := base64.StdEncoding.DecodeString(image.Data)
+		if err != nil {
+			r.cleanupImageFiles()
+			return nil, fmt.Errorf("解码图片失败: %w", err)
+		}
+		name := safeImageFileName(image.FileName, image.MimeType, index)
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			r.cleanupImageFiles()
+			return nil, fmt.Errorf("写入图片临时文件失败: %w", err)
+		}
+		paths = append(paths, path)
+	}
+	return paths, nil
+}
+
+// cleanupImageFiles 清理当前 runtime 的图片临时目录。
+func (r *AgentRuntime) cleanupImageFiles() {
+	r.mu.Lock()
+	dir := r.imageTempDir
+	r.imageTempDir = ""
+	r.mu.Unlock()
+	if dir != "" {
+		_ = os.RemoveAll(dir)
+	}
+}
+
+// safeImageFileName 使用 name、mimeType 和 index 参数生成安全图片文件名。
+func safeImageFileName(name string, mimeType string, index int) string {
+	base := filepath.Base(strings.TrimSpace(name))
+	if base == "." || base == string(filepath.Separator) || base == "" {
+		base = fmt.Sprintf("image-%d%s", index+1, imageExtension(mimeType))
+	}
+	return strings.Map(func(r rune) rune {
+		if r == '/' || r == '\\' || r == ':' {
+			return '-'
+		}
+		return r
+	}, base)
+}
+
+// imageExtension 使用 mimeType 参数返回图片文件扩展名。
+func imageExtension(mimeType string) string {
+	switch strings.ToLower(strings.TrimSpace(mimeType)) {
+	case "image/jpeg", "image/jpg":
+		return ".jpg"
+	case "image/webp":
+		return ".webp"
+	case "image/gif":
+		return ".gif"
+	default:
+		return ".png"
+	}
 }
 
 // newUUID 生成符合 UUID v4 形式的随机标识。

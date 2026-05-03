@@ -137,7 +137,7 @@ func TestParseCodexOutputLine(t *testing.T) {
 
 // TestBuildClaudeUserMessage 验证发送给 Claude stdin 的用户消息结构。
 func TestBuildClaudeUserMessage(t *testing.T) {
-	line, err := buildClaudeUserMessage("测试 prompt", "session-1")
+	line, err := buildClaudeUserMessage("测试 prompt", nil, "session-1")
 	if err != nil {
 		t.Fatalf("构造用户消息失败: %v", err)
 	}

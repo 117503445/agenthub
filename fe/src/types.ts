@@ -6,6 +6,56 @@ export type MessageRole = 'user' | 'assistant' | 'system'
 export type MessageStatus = 'complete' | 'streaming' | 'stopped' | 'error'
 export type AgentProvider = 'claude-code' | 'codex' | 'mock-claude-code' | 'mock-codex'
 
+export interface ContextWindowUsage {
+  /** maxTokens 表示当前模型上下文窗口上限。 */
+  maxTokens: number
+  /** usedTokens 表示当前聊天估算或后端上报的已用 token 数。 */
+  usedTokens: number
+}
+
+export interface MessageImage {
+  /** id 表示图片附件唯一标识。 */
+  id: string
+  /** fileName 表示图片文件名。 */
+  fileName: string
+  /** mimeType 表示图片 MIME 类型。 */
+  mimeType: string
+  /** data 表示图片 base64 内容。 */
+  data: string
+  /** createdAt 表示创建时间。 */
+  createdAt?: string
+  /** updatedAt 表示更新时间。 */
+  updatedAt?: string
+}
+
+export interface ComposerImageAttachment {
+  /** id 表示前端草稿中的图片附件标识。 */
+  id: string
+  /** fileName 表示图片文件名。 */
+  fileName: string
+  /** mimeType 表示图片 MIME 类型。 */
+  mimeType: string
+  /** data 表示图片 base64 内容。 */
+  data: string
+  /** previewUrl 表示浏览器可直接显示的预览地址。 */
+  previewUrl: string
+}
+
+export interface PlanApproval {
+  /** id 表示待确认 plan 标识。 */
+  id: string
+  /** messageId 表示生成该 plan 的 assistant 消息标识。 */
+  messageId: string
+  /** text 表示 plan 正文。 */
+  text: string
+  /** status 表示 plan 当前状态。 */
+  status: 'pending' | 'executing' | 'done'
+  /** createdAt 表示创建时间。 */
+  createdAt: string
+  /** updatedAt 表示更新时间。 */
+  updatedAt: string
+}
+
 export interface AgentModelOption {
   /** id 表示传递给 agent CLI 的模型标识。 */
   id: string
@@ -128,6 +178,8 @@ export interface ChatMessage {
   toolCalls?: ToolCall[]
   /** parts 表示 assistant 内容与工具调用的顺序片段。 */
   parts?: MessagePart[]
+  /** images 表示用户消息携带的图片附件。 */
+  images?: MessageImage[]
   /** createdAt 表示创建时间。 */
   createdAt: string
   /** updatedAt 表示更新时间。 */
@@ -153,6 +205,10 @@ export interface Chat {
   agentLocked: boolean
   /** agentSessionId 表示 agent 会话标识。 */
   agentSessionId?: string
+  /** contextWindow 表示当前聊天的上下文窗口使用情况。 */
+  contextWindow?: ContextWindowUsage
+  /** plan 表示当前待确认或执行中的 plan。 */
+  plan?: PlanApproval
   /** messages 表示消息列表。 */
   messages: ChatMessage[]
   /** createdAt 表示创建时间。 */

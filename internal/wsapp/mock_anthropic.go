@@ -15,6 +15,8 @@ type MockAnthropicMessageRequest struct {
 	Model    string                 `json:"model"`    // Model 表示请求模型。
 	Stream   bool                   `json:"stream"`   // Stream 表示是否使用 SSE 流式返回。
 	Messages []MockAnthropicMessage `json:"messages"` // Messages 表示请求消息列表。
+	System   any                    `json:"system"`   // System 表示 Claude Code 注入的系统提示。
+	Tools    []map[string]any       `json:"tools"`    // Tools 表示请求携带的工具定义。
 	Metadata map[string]any         `json:"metadata"` // Metadata 表示可选元数据。
 }
 
@@ -57,7 +59,13 @@ func ServeMockAnthropicMessages(w http.ResponseWriter, r *http.Request) {
 	if prompt == "" {
 		prompt = "空输入"
 	}
-	responseText := buildMockAnthropicResponse(prompt)
+	planStage := detectMockPlanStage(mockAnthropicClassificationText(prompt, request))
+	log.Ctx(r.Context()).Info().
+		Str("planStage", string(planStage)).
+		Strs("tools", mockOpenAIToolNames(request.Tools)).
+		Int("promptChars", len([]rune(prompt))).
+		Msg("收到 Anthropic mock 请求")
+	responseText := buildMockResponse("Mock Claude", prompt, planStage)
 	model := request.Model
 	if model == "" {
 		model = "sonnet"
@@ -98,19 +106,24 @@ func ServeMockOpenAIResponses(w http.ResponseWriter, r *http.Request) {
 	if prompt == "" {
 		prompt = "空输入"
 	}
-	log.Ctx(r.Context()).Info().Strs("tools", mockOpenAIToolNames(request.Tools)).Msg("收到 OpenAI mock 请求")
+	planStage := detectMockPlanStage(prompt)
+	log.Ctx(r.Context()).Info().
+		Str("planStage", string(planStage)).
+		Strs("tools", mockOpenAIToolNames(request.Tools)).
+		Int("promptChars", len([]rune(prompt))).
+		Msg("收到 OpenAI mock 请求")
 	if strings.Contains(prompt, "MOCK_AGENT_ERROR") {
 		http.Error(w, "mock codex error: forced failure", http.StatusBadRequest)
 		return
 	}
-	responseText := buildMockOpenAIResponse(prompt)
+	responseText := buildMockResponse("Mock Codex", prompt, planStage)
 	model := request.Model
 	if model == "" {
 		model = "gpt-5.5"
 	}
 
 	if request.Stream {
-		if mockOpenAIShouldCallTool(request.Input, request.Tools) {
+		if mockOpenAIShouldCallTool(request.Input, request.Tools, planStage) {
 			serveMockOpenAIToolCallStream(w, r, model)
 			return
 		}
@@ -216,8 +229,11 @@ func mockOpenAIToolNames(tools []map[string]any) []string {
 	return names
 }
 
-// mockOpenAIShouldCallTool 使用 input 和 tools 参数判断是否需要先返回工具调用。
-func mockOpenAIShouldCallTool(input any, tools []map[string]any) bool {
+// mockOpenAIShouldCallTool 使用 input、tools 和 planStage 参数判断是否需要先返回工具调用。
+func mockOpenAIShouldCallTool(input any, tools []map[string]any, planStage mockPlanStage) bool {
+	if planStage == mockPlanStageDraft || planStage == mockPlanStageRevise {
+		return false
+	}
 	if mockOpenAIHasFunctionOutput(input) {
 		return false
 	}
@@ -479,20 +495,100 @@ func stripMockSystemReminder(text string) string {
 	return trimmed
 }
 
+// mockPlanStage 表示 mock 模型识别出的 plan 流程阶段。
+type mockPlanStage string
+
+const (
+	mockPlanStageNone    mockPlanStage = ""
+	mockPlanStageDraft   mockPlanStage = "draft"
+	mockPlanStageRevise  mockPlanStage = "revise"
+	mockPlanStageExecute mockPlanStage = "execute"
+)
+
+// detectMockPlanStage 使用 prompt 参数识别 plan 初稿、修订和执行阶段。
+func detectMockPlanStage(prompt string) mockPlanStage {
+	trimmed := strings.TrimSpace(prompt)
+	if trimmed == "" {
+		return mockPlanStageNone
+	}
+	lower := strings.ToLower(trimmed)
+	if strings.Contains(lower, "开始执行已确认的 plan") ||
+		strings.Contains(lower, "已确认 plan:") ||
+		strings.Contains(lower, "approved plan:") ||
+		strings.Contains(lower, "the user approved the plan") {
+		return mockPlanStageExecute
+	}
+	hasPlanModeMarker := strings.Contains(lower, "plan 模式") ||
+		strings.Contains(lower, "plan mode") ||
+		strings.Contains(lower, "permission-mode plan") ||
+		strings.Contains(lower, "exitplanmode") ||
+		strings.Contains(lower, "enterplanmode")
+	if !hasPlanModeMarker {
+		return mockPlanStageNone
+	}
+	if strings.Contains(trimmed, "先写测试") ||
+		strings.Contains(trimmed, "改成") ||
+		strings.Contains(trimmed, "修改") ||
+		strings.Contains(lower, "revise") ||
+		strings.Contains(lower, "update the plan") {
+		return mockPlanStageRevise
+	}
+	return mockPlanStageDraft
+}
+
+// mockAnthropicClassificationText 使用 prompt 和 request 参数生成 Claude mock 阶段识别文本。
+func mockAnthropicClassificationText(prompt string, request MockAnthropicMessageRequest) string {
+	parts := []string{prompt}
+	if systemText := strings.TrimSpace(extractMockContentText(request.System)); systemText != "" {
+		parts = append(parts, systemText)
+	}
+	if toolNames := mockOpenAIToolNames(request.Tools); len(toolNames) > 0 {
+		parts = append(parts, strings.Join(toolNames, "\n"))
+	}
+	return strings.Join(parts, "\n")
+}
+
+// buildMockResponse 使用 agentLabel、prompt 和 planStage 参数构造 mock 回复文本。
+func buildMockResponse(agentLabel string, prompt string, planStage mockPlanStage) string {
+	switch planStage {
+	case mockPlanStageDraft, mockPlanStageRevise:
+		firstStep := "先梳理需求和 plan 约束"
+		if planStage == mockPlanStageRevise || strings.Contains(prompt, "先写测试") {
+			firstStep = "先写测试覆盖 mock plan 模式"
+		}
+		return fmt.Sprintf(
+			"## %s Plan\n\n待确认意见\n\n- %s。\n- 改写 mock 模型服务，让 %s 在 plan 模式只返回计划。\n- 运行单独 case 和全量 E2E，确认生成、修订、执行都通过。\n\n请确认是否开始执行。",
+			agentLabel,
+			firstStep,
+			agentLabel,
+		)
+	case mockPlanStageExecute:
+		return fmt.Sprintf(
+			"## %s 执行结果\n\n开始执行已确认的 plan。\n\n- 已进入执行阶段。\n- 已使用确认后的 plan 继续实现。\n- mock 执行阶段不会再次请求确认。",
+			agentLabel,
+		)
+	default:
+		if agentLabel == "Mock Codex" {
+			return fmt.Sprintf(
+				"## Mock Codex\n\n正在回复：%s\n\n- 来自后端 OpenAI Responses 兼容 mock 服务。\n- 用于验证 Codex CLI 和工具调用展示。",
+				prompt,
+			)
+		}
+		return fmt.Sprintf(
+			"## Mock Claude\n\n正在回复：%s\n\n- 来自后端 ANTHROPIC 兼容 mock 服务。\n- 用于验证会话恢复和停止发送流程。",
+			prompt,
+		)
+	}
+}
+
 // buildMockAnthropicResponse 使用 prompt 参数构造 mock 回复文本。
 func buildMockAnthropicResponse(prompt string) string {
-	return fmt.Sprintf(
-		"## Mock Claude\n\n正在回复：%s\n\n- 来自后端 ANTHROPIC 兼容 mock 服务。\n- 用于验证会话恢复和停止发送流程。",
-		prompt,
-	)
+	return buildMockResponse("Mock Claude", prompt, detectMockPlanStage(prompt))
 }
 
 // buildMockOpenAIResponse 使用 prompt 参数构造 Codex mock 回复文本。
 func buildMockOpenAIResponse(prompt string) string {
-	return fmt.Sprintf(
-		"## Mock Codex\n\n正在回复：%s\n\n- 来自后端 OpenAI Responses 兼容 mock 服务。\n- 用于验证 Codex CLI 和工具调用展示。",
-		prompt,
-	)
+	return buildMockResponse("Mock Codex", prompt, detectMockPlanStage(prompt))
 }
 
 // extractMockOpenAIInputPrompt 使用 input 参数提取 Responses API 最后一条用户文本。

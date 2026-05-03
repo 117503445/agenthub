@@ -84,6 +84,8 @@ export function normalizeChat(chat: Chat) {
     agentModel: chat.agentModel ?? 'mock-claude-sonnet',
     agentReasoning: chat.agentReasoning ?? '',
     agentLocked: chat.agentLocked ?? (chat.messages?.length ?? 0) > 0,
+    contextWindow: chat.contextWindow,
+    plan: chat.plan,
     messages: chat.messages ?? [],
   }
 }

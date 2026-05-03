@@ -13,7 +13,9 @@ import type {
   Chat,
   ChatMessage,
   ChatTerminalIndicator,
+  ComposerImageAttachment,
   ConnectionState,
+  PlanApproval,
   Project,
 } from '../types'
 import type { FormEvent } from 'react'
@@ -33,6 +35,10 @@ interface ChatWorkspaceProps {
   chatIndicators: Record<string, ChatTerminalIndicator>
   /** composerValue 表示输入框内容。 */
   composerValue: string
+  /** composerImages 表示当前聊天页图片附件草稿。 */
+  composerImages: ComposerImageAttachment[]
+  /** planMode 表示当前聊天页是否开启 plan 模式。 */
+  planMode: boolean
   /** copiedMessageId 表示刚复制成功的消息标识。 */
   copiedMessageId: string
   /** isRunning 表示当前聊天页是否正在输出。 */
@@ -67,8 +73,14 @@ interface ChatWorkspaceProps {
   onClearChatIndicator: (chatId: string) => void
   /** onCopyMessage 使用 message 参数复制消息。 */
   onCopyMessage: (message: ChatMessage) => void
+  /** onExecutePlan 使用 plan 参数执行已确认 plan。 */
+  onExecutePlan: (plan: PlanApproval) => void
   /** onComposerValueChange 使用 value 参数更新输入框内容。 */
   onComposerValueChange: (value: string) => void
+  /** onComposerImagesChange 使用 images 参数更新图片附件草稿。 */
+  onComposerImagesChange: (images: ComposerImageAttachment[]) => void
+  /** onPlanModeChange 使用 enabled 参数切换 plan 模式。 */
+  onPlanModeChange: (enabled: boolean) => void
   /** onSubmitComposer 使用 event 参数提交输入框。 */
   onSubmitComposer: (event?: FormEvent<HTMLFormElement>) => void
   /** onChangeAgentProvider 使用 provider 参数切换 agent。 */
@@ -88,6 +100,8 @@ export function ChatWorkspace({
   connectionState,
   chatIndicators,
   composerValue,
+  composerImages,
+  planMode,
   copiedMessageId,
   isRunning,
   agentProviders,
@@ -105,7 +119,10 @@ export function ChatWorkspace({
   onCreateChat,
   onClearChatIndicator,
   onCopyMessage,
+  onExecutePlan,
   onComposerValueChange,
+  onComposerImagesChange,
+  onPlanModeChange,
   onSubmitComposer,
   onChangeAgentProvider,
   onChangeAgentModel,
@@ -197,11 +214,13 @@ export function ChatWorkspace({
 
         {selectedChat ? (
           <TabsContent value={selectedChat.id} onClickCapture={() => onClearChatIndicator(selectedChat.id)}>
-            <MessageLog chat={selectedChat} copiedMessageId={copiedMessageId} onCopyMessage={onCopyMessage} />
+            <MessageLog chat={selectedChat} copiedMessageId={copiedMessageId} onCopyMessage={onCopyMessage} onExecutePlan={onExecutePlan} />
             <Composer
               selectedChat={selectedChat}
               connectionState={connectionState}
               composerValue={composerValue}
+              composerImages={composerImages}
+              planMode={planMode}
               isRunning={isRunning}
               agentProviders={agentProviders}
               agentSkills={agentSkills}
@@ -214,6 +233,8 @@ export function ChatWorkspace({
               providerLocked={providerLocked}
               modelControlsDisabled={modelControlsDisabled}
               onComposerValueChange={onComposerValueChange}
+              onComposerImagesChange={onComposerImagesChange}
+              onPlanModeChange={onPlanModeChange}
               onSubmitComposer={onSubmitComposer}
               onChangeAgentProvider={onChangeAgentProvider}
               onChangeAgentModel={onChangeAgentModel}

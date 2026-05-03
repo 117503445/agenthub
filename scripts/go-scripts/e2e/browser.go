@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"encoding/base64"
 	"fmt"
 	"math"
 	"os"
@@ -9,6 +10,8 @@ import (
 
 	"github.com/playwright-community/playwright-go"
 )
+
+const testPNGBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
 
 // browserSession 表示一个 Playwright 浏览器会话。
 type browserSession struct {
@@ -91,6 +94,65 @@ func fillTestID(page playwright.Page, id string, value string) error {
 // clickTestID 使用 page 和 id 参数点击 data-testid 对应元素。
 func clickTestID(page playwright.Page, id string) error {
 	return getByTestID(page, id).Click()
+}
+
+// installNotificationProbe 使用 page 参数注入桌面通知探针。
+func installNotificationProbe(page playwright.Page) error {
+	_, err := page.Evaluate(`() => {
+		window.__codingNotifications = [];
+		function FakeNotification(title, options) {
+			window.__codingNotifications.push({
+				title: String(title || ''),
+				body: String(options?.body || ''),
+			});
+		}
+		Object.defineProperty(FakeNotification, 'permission', { get: () => 'granted' });
+		FakeNotification.requestPermission = () => Promise.resolve('granted');
+		Object.defineProperty(window, 'Notification', {
+			configurable: true,
+			writable: true,
+			value: FakeNotification,
+		});
+	}`, nil)
+	return err
+}
+
+// attachTestImage 使用 page 和 name 参数通过文件选择控件添加测试图片。
+func attachTestImage(page playwright.Page, name string) error {
+	buffer, err := base64.StdEncoding.DecodeString(testPNGBase64)
+	if err != nil {
+		return err
+	}
+	return getByTestID(page, "image-file-input").SetInputFiles([]playwright.InputFile{{
+		Name:     name,
+		MimeType: "image/png",
+		Buffer:   buffer,
+	}})
+}
+
+// pasteTestImage 使用 page 和 name 参数模拟剪贴板粘贴图片。
+func pasteTestImage(page playwright.Page, name string) error {
+	_, err := page.Evaluate(`([name, base64]) => {
+		const input = document.querySelector('[data-testid="message-input"]');
+		if (!input) {
+			throw new Error('missing message input');
+		}
+		const binary = atob(base64);
+		const bytes = new Uint8Array(binary.length);
+		for (let index = 0; index < binary.length; index += 1) {
+			bytes[index] = binary.charCodeAt(index);
+		}
+		const file = new File([bytes], name, { type: 'image/png' });
+		const data = new DataTransfer();
+		data.items.add(file);
+		const event = new ClipboardEvent('paste', {
+			bubbles: true,
+			cancelable: true,
+			clipboardData: data,
+		});
+		input.dispatchEvent(event);
+	}`, []any{name, testPNGBase64})
+	return err
 }
 
 // clickFirstTestID 使用 page 和 id 参数点击首个 data-testid 对应元素。
@@ -233,6 +295,66 @@ func expectTestIDNonEmpty(page playwright.Page, id string, timeout time.Duration
 		return fmt.Errorf("等待元素 %q 文本非空超时，最后错误: %w", id, lastErr)
 	}
 	return fmt.Errorf("等待元素 %q 文本非空超时，实际文本: %s", id, lastText)
+}
+
+// expectContextWindowMeter 使用 page 和 timeout 参数等待 context window 图标展示有效百分比。
+func expectContextWindowMeter(page playwright.Page, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastState string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := getByTestID(page, "context-window-meter").First().Evaluate(`(element) => {
+			const percent = Number.parseFloat(element.getAttribute('data-percent') || '');
+			const label = element.textContent || '';
+			if (Number.isFinite(percent) && percent >= 0 && percent <= 100 && label.includes('Context window')) {
+				return '';
+			}
+			return 'percent=' + element.getAttribute('data-percent') + ', text=' + label;
+		}`, nil)
+		if err == nil {
+			if text, ok := value.(string); ok {
+				lastState = text
+				if text == "" {
+					return nil
+				}
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待 context window 图标超时，最后错误: %w", lastErr)
+	}
+	return fmt.Errorf("等待 context window 图标超时，最后状态: %s", lastState)
+}
+
+// expectNotificationCount 使用 page、minimum 和 timeout 参数等待桌面通知数量达到下限。
+func expectNotificationCount(page playwright.Page, minimum int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastCount int
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := page.Evaluate(`() => window.__codingNotifications?.length ?? 0`, nil)
+		if err == nil {
+			switch typed := value.(type) {
+			case int:
+				lastCount = typed
+			case float64:
+				lastCount = int(typed)
+			}
+			if lastCount >= minimum {
+				return nil
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待桌面通知数量达到 %d 超时，最后错误: %w", minimum, lastErr)
+	}
+	return fmt.Errorf("等待桌面通知数量达到 %d 超时，实际数量: %d", minimum, lastCount)
 }
 
 // expectTestIDDescendantText 使用 page、id、selector、expected 和 timeout 参数等待后代元素文本。

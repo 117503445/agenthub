@@ -42,6 +42,9 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := gotoPage(page, ctx.BaseURL); err != nil {
 		return fail(err)
 	}
+	if err := installNotificationProbe(page); err != nil {
+		return fail(err)
+	}
 	if err := expectTestIDText(page, "connection-state", "已连接", 10*time.Second); err != nil {
 		return fail(err)
 	}
@@ -148,6 +151,12 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectComposerInitialSizing(page, 5*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := expectTestIDCount(page, "context-window-meter", 1, 2*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectContextWindowMeter(page, 5*time.Second); err != nil {
+		return fail(err)
+	}
 	longComposerText := strings.Repeat("输入框自适应高度测试\n", 9)
 	if err := fillTestID(page, "message-input", longComposerText); err != nil {
 		return fail(err)
@@ -227,6 +236,20 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	}
 	steps = append(steps, "输入 / 时可以选择后端返回的 skills，并把选中的 skill 插入聊天输入框。")
 
+	if err := attachTestImage(page, "local-image.png"); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDText(page, "composer-attachments", "local-image.png", 5*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := pasteTestImage(page, "pasted-image.png"); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDText(page, "composer-attachments", "pasted-image.png", 5*time.Second); err != nil {
+		return fail(err)
+	}
+	steps = append(steps, "聊天框加号可以选择本地图片，Ctrl+V 可以粘贴剪贴板图片，并在发送前展示附件预览。")
+
 	firstPrompt := "第一条流式测试"
 	if err := fillTestID(page, "message-input", firstPrompt); err != nil {
 		return fail(err)
@@ -238,6 +261,12 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 		return fail(err)
 	}
 	if err := expectTestIDText(page, "message-log", firstPrompt, 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDText(page, "message-log", "local-image.png", 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDText(page, "message-log", "pasted-image.png", 10*time.Second); err != nil {
 		return fail(err)
 	}
 	if err := expectMessageTimesIncludeSeconds(page, 5*time.Second); err != nil {
@@ -289,6 +318,9 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	steps = append(steps, "Mock Codex 通过真实 Codex CLI 请求后端 mock 模型服务，工具调用标题直接展示命令并排在输出前。")
 
 	if err := expectTestIDCount(page, "send-button", 0, 30*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectNotificationCount(page, 1, 10*time.Second); err != nil {
 		return fail(err)
 	}
 	if err := expectTestIDAttributeValue(page, "chat-status-dot", "data-status", "success", 10*time.Second); err != nil {
@@ -420,6 +452,20 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := clickTestID(page, "chat-tab-add-button"); err != nil {
 		return fail(err)
 	}
+	if err := runMockPlanFlow(page, "mock-codex", "Mock Codex Plan", "Mock Codex 执行结果"); err != nil {
+		return fail(err)
+	}
+	if err := clickTestID(page, "chat-tab-add-button"); err != nil {
+		return fail(err)
+	}
+	if err := runMockPlanFlow(page, "mock-claude-code", "Mock Claude Plan", "Mock Claude 执行结果"); err != nil {
+		return fail(err)
+	}
+	steps = append(steps, "Mock Codex 和 Mock Claude Code 都能在 mock 模型服务下生成 plan、按用户意见修订，并点击开始执行。")
+
+	if err := clickTestID(page, "chat-tab-add-button"); err != nil {
+		return fail(err)
+	}
 	if err := selectTestID(page, "agent-provider-select", "mock-codex"); err != nil {
 		return fail(err)
 	}
@@ -443,6 +489,58 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	}
 	steps = append(steps, "agent 报错时，错误信息会返回并显示在前端聊天记录中。")
 	return true
+}
+
+// runMockPlanFlow 使用 page、provider、planTitle 和 executionTitle 参数验证 mock plan 全流程。
+func runMockPlanFlow(page playwright.Page, provider string, planTitle string, executionTitle string) error {
+	if err := selectTestID(page, "agent-provider-select", provider); err != nil {
+		return err
+	}
+	if err := clickTestID(page, "plan-mode-toggle"); err != nil {
+		return err
+	}
+	if err := expectTestIDAttributeValue(page, "plan-mode-toggle", "data-active", "true", 5*time.Second); err != nil {
+		return err
+	}
+	planPrompt := fmt.Sprintf("生成 %s plan 模式测试", provider)
+	if err := fillTestID(page, "message-input", planPrompt); err != nil {
+		return err
+	}
+	if err := page.Keyboard().Press("Enter"); err != nil {
+		return err
+	}
+	if err := expectTestIDText(page, "plan-card", "待确认", 20*time.Second); err != nil {
+		return err
+	}
+	if err := expectTestIDText(page, "plan-card", planTitle, 20*time.Second); err != nil {
+		return err
+	}
+	planReply := "请把第一条改成先写测试"
+	if err := fillTestID(page, "message-input", planReply); err != nil {
+		return err
+	}
+	if err := page.Keyboard().Press("Enter"); err != nil {
+		return err
+	}
+	if err := expectTestIDText(page, "message-log", planReply, 10*time.Second); err != nil {
+		return err
+	}
+	if err := expectTestIDText(page, "plan-card", "先写测试", 20*time.Second); err != nil {
+		return err
+	}
+	if err := clickTestID(page, "plan-execute-button"); err != nil {
+		return err
+	}
+	if err := expectTestIDText(page, "message-log", "开始执行已确认的 plan", 10*time.Second); err != nil {
+		return err
+	}
+	if err := expectTestIDText(page, "message-log", executionTitle, 20*time.Second); err != nil {
+		return err
+	}
+	if err := expectTestIDCount(page, "send-button", 0, 30*time.Second); err != nil {
+		return err
+	}
+	return nil
 }
 
 // writeAgentChatReport 使用 outputDir、success 和 steps 参数写入 Agent 聊天报告。

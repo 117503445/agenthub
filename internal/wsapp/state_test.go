@@ -41,7 +41,7 @@ func TestStoreProjectChatLifecycle(t *testing.T) {
 		t.Fatalf("聊天页 agent 未更新: %#v", chat)
 	}
 
-	chat, userMessage, assistantMessage, err := store.AddRunMessages(chat.ID, "  第一条 prompt  ")
+	chat, userMessage, assistantMessage, err := store.AddRunMessages(chat.ID, "  第一条 prompt  ", nil, false)
 	if err != nil {
 		t.Fatalf("追加运行消息失败: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestStoreProjectChatLifecycle(t *testing.T) {
 		t.Fatalf("设置 session id 失败: ok=%v chat=%#v", ok, updatedChat)
 	}
 
-	chat, _, assistantMessage, err = store.AddRunMessages(chat.ID, "需要停止")
+	chat, _, assistantMessage, err = store.AddRunMessages(chat.ID, "需要停止", nil, false)
 	if err != nil {
 		t.Fatalf("追加待停止消息失败: %v", err)
 	}

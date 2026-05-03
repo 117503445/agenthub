@@ -59,6 +59,40 @@ func TestServeMockAnthropicMessagesStream(t *testing.T) {
 	}
 }
 
+// TestBuildMockAnthropicPlanResponses 验证 Claude mock 会按 plan 阶段返回稳定内容。
+func TestBuildMockAnthropicPlanResponses(t *testing.T) {
+	planText := buildMockAnthropicResponse(planModePrompt("生成 mock claude plan 模式测试"))
+	if !strings.Contains(planText, "Mock Claude Plan") || !strings.Contains(planText, "待确认意见") {
+		t.Fatalf("Claude plan 响应不正确: %s", planText)
+	}
+
+	revisedText := buildMockAnthropicResponse(planModePrompt("请把第一条改成先写测试"))
+	if !strings.Contains(revisedText, "Mock Claude Plan") || !strings.Contains(revisedText, "先写测试") {
+		t.Fatalf("Claude plan 修订响应不正确: %s", revisedText)
+	}
+
+	executedText := buildMockAnthropicResponse("开始执行已确认的 plan。\n\n已确认 plan:\n\n- 先写测试")
+	if !strings.Contains(executedText, "Mock Claude 执行结果") || strings.Contains(executedText, "待确认意见") {
+		t.Fatalf("Claude plan 执行响应不正确: %s", executedText)
+	}
+}
+
+// TestServeMockAnthropicMessagesPlanToolMarker 验证 Claude mock 可从官方 plan 工具标记识别 plan 阶段。
+func TestServeMockAnthropicMessagesPlanToolMarker(t *testing.T) {
+	body := strings.NewReader(`{"model":"sonnet","messages":[{"role":"user","content":"生成计划"}],"tools":[{"name":"ExitPlanMode"}]}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", body)
+	recorder := httptest.NewRecorder()
+
+	ServeMockAnthropicMessages(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("状态码不正确: %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "Mock Claude Plan") {
+		t.Fatalf("未按 ExitPlanMode 识别 plan 阶段: %s", recorder.Body.String())
+	}
+}
+
 // TestExtractLastUserPromptStripsSystemReminder 验证 mock 会移除 Claude Code 注入的系统提醒。
 func TestExtractLastUserPromptStripsSystemReminder(t *testing.T) {
 	prompt := extractLastUserPrompt([]MockAnthropicMessage{
@@ -119,5 +153,51 @@ func TestServeMockOpenAIResponsesStream(t *testing.T) {
 	}
 	if !strings.Contains(text, "event: response.completed") {
 		t.Fatalf("缺少 response.completed 事件: %s", text)
+	}
+}
+
+// TestBuildMockOpenAIPlanResponses 验证 Codex mock 会按 plan 阶段返回稳定内容。
+func TestBuildMockOpenAIPlanResponses(t *testing.T) {
+	planText := buildMockOpenAIResponse(planModePrompt("生成 mock codex plan 模式测试"))
+	if !strings.Contains(planText, "Mock Codex Plan") || !strings.Contains(planText, "待确认意见") {
+		t.Fatalf("Codex plan 响应不正确: %s", planText)
+	}
+
+	revisedText := buildMockOpenAIResponse(planModePrompt("请把第一条改成先写测试"))
+	if !strings.Contains(revisedText, "Mock Codex Plan") || !strings.Contains(revisedText, "先写测试") {
+		t.Fatalf("Codex plan 修订响应不正确: %s", revisedText)
+	}
+
+	executedText := buildMockOpenAIResponse("开始执行已确认的 plan。\n\n已确认 plan:\n\n- 先写测试")
+	if !strings.Contains(executedText, "Mock Codex 执行结果") || strings.Contains(executedText, "待确认意见") {
+		t.Fatalf("Codex plan 执行响应不正确: %s", executedText)
+	}
+}
+
+// TestServeMockOpenAIResponsesPlanPromptSkipsToolCall 验证 Codex mock plan 阶段不会先返回工具调用。
+func TestServeMockOpenAIResponsesPlanPromptSkipsToolCall(t *testing.T) {
+	requestBody, err := json.Marshal(MockOpenAIResponsesRequest{
+		Model:  "gpt-5.5",
+		Stream: true,
+		Input:  planModePrompt("生成 mock codex plan 模式测试"),
+		Tools:  []map[string]any{{"type": "function", "name": "exec_command"}},
+	})
+	if err != nil {
+		t.Fatalf("编码请求失败: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(string(requestBody)))
+	recorder := httptest.NewRecorder()
+
+	ServeMockOpenAIResponses(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("状态码不正确: %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	text := recorder.Body.String()
+	if strings.Contains(text, "response.function_call_arguments.delta") {
+		t.Fatalf("plan 阶段不应返回工具调用: %s", text)
+	}
+	if !strings.Contains(text, "Mock Codex Plan") {
+		t.Fatalf("缺少 Codex plan 文本: %s", text)
 	}
 }

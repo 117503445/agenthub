@@ -35,13 +35,29 @@ type ChatCreatePayload struct {
 
 // ChatSendPayload 表示向聊天页发送 prompt 的请求参数。
 type ChatSendPayload struct {
-	ChatID string `json:"chatId"` // ChatID 表示目标聊天页标识。
-	Prompt string `json:"prompt"` // Prompt 表示用户输入内容。
+	ChatID   string                `json:"chatId"`           // ChatID 表示目标聊天页标识。
+	Prompt   string                `json:"prompt"`           // Prompt 表示用户输入内容。
+	Images   []MessageImagePayload `json:"images,omitempty"` // Images 表示随 prompt 发送的图片附件。
+	PlanMode bool                  `json:"planMode"`         // PlanMode 表示本轮是否只生成 plan。
 }
 
 // ChatStopPayload 表示停止聊天页当前输出的请求参数。
 type ChatStopPayload struct {
 	ChatID string `json:"chatId"` // ChatID 表示目标聊天页标识。
+}
+
+// ChatPlanExecutePayload 表示执行已确认 plan 的请求参数。
+type ChatPlanExecutePayload struct {
+	ChatID string `json:"chatId"` // ChatID 表示目标聊天页标识。
+	PlanID string `json:"planId"` // PlanID 表示要执行的 plan 标识。
+}
+
+// MessageImagePayload 表示浏览器发送的图片附件。
+type MessageImagePayload struct {
+	ID       string `json:"id"`       // ID 表示前端生成的附件标识。
+	FileName string `json:"fileName"` // FileName 表示图片文件名。
+	MimeType string `json:"mimeType"` // MimeType 表示图片 MIME 类型。
+	Data     string `json:"data"`     // Data 表示图片 base64 内容。
 }
 
 // ChatAgentUpdatePayload 表示更新聊天页 agent 配置的请求参数。
