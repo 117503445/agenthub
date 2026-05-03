@@ -143,6 +143,19 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectComposerShellLayout(page, 5*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := expectComposerInitialSizing(page, 5*time.Second); err != nil {
+		return fail(err)
+	}
+	longComposerText := strings.Repeat("输入框自适应高度测试\n", 9)
+	if err := fillTestID(page, "message-input", longComposerText); err != nil {
+		return fail(err)
+	}
+	if err := expectComposerExpandedSizing(page, 5*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := fillTestID(page, "message-input", ""); err != nil {
+		return fail(err)
+	}
 	if err := expectTestIDNotText(page, "message-log", "还没有消息", 2*time.Second); err != nil {
 		return fail(err)
 	}
@@ -208,6 +221,12 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDText(page, "message-log", firstPrompt, 10*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := expectMessageTimesIncludeSeconds(page, 5*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectNoMessageRoleLabels(page, 5*time.Second); err != nil {
+		return fail(err)
+	}
 	if err := expectTestIDAttributeValue(page, "chat-status-dot", "data-status", "running", 10*time.Second); err != nil {
 		return fail(err)
 	}
@@ -226,6 +245,9 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDDescendantText(page, "message-log", `[data-testid="assistant-markdown"] h2`, "Mock Codex", 20*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := expectChatContentFontSize(page, 5*time.Second); err != nil {
+		return fail(err)
+	}
 	if err := expectToolCallSummaryText(page, "pwd", 20*time.Second); err != nil {
 		return fail(err)
 	}
@@ -241,6 +263,9 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDCount(page, "assistant-copy-button", 1, 2*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := expectUserCopyButtonOutsideMessage(page, 5*time.Second); err != nil {
+		return fail(err)
+	}
 	screenshot(page, filepath.Join(ctx.ScreenshotsDir, "02-streaming.png"), true)
 	steps = append(steps, "Mock Codex 通过真实 Codex CLI 请求后端 mock 模型服务，工具调用标题直接展示命令并排在输出前。")
 
@@ -253,10 +278,13 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDAttributeValue(page, "project-status-dot", "data-status", "success", 10*time.Second); err != nil {
 		return fail(err)
 	}
-	if err := clickFirstTestID(page, "chat-tab"); err != nil {
+	if err := clickTestID(page, "message-log"); err != nil {
 		return fail(err)
 	}
 	if err := expectTestIDCount(page, "chat-status-dot", 0, 5*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDCount(page, "project-status-dot", 0, 5*time.Second); err != nil {
 		return fail(err)
 	}
 	if err := expectTestIDDisabled(page, "agent-provider-select", true, 5*time.Second); err != nil {

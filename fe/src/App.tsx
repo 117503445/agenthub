@@ -391,7 +391,7 @@ function formatTime(value: string) {
   if (Number.isNaN(date.getTime())) {
     return ''
   }
-  return date.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' })
+  return date.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
 // projectDisplayName 使用 project 参数返回侧边栏展示名称。
@@ -575,6 +575,7 @@ function App() {
   const wsRef = useRef<WebSocket | null>(null)
   const pendingCreatedChatProjectIdRef = useRef('')
   const chatsRef = useRef<Chat[]>([])
+  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null)
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting')
   const [hostname, setHostname] = useState('')
   const [projects, setProjects] = useState<Project[]>([])
@@ -617,7 +618,6 @@ function App() {
   const providerLocked = chatHasStarted(selectedChat) || isRunning
   const agentControlsDisabled = !selectedChat || connectionState !== 'open'
   const modelControlsDisabled = agentControlsDisabled || isRunning
-  const selectedAgentLabel = agentProviders.find((provider) => provider.id === selectedAgentProvider)?.label ?? 'Agent'
   const claudeCodeModels = agentProviders.find((provider) => provider.id === 'claude-code')?.models ?? []
   const projectVisualStatuses = useMemo(() => {
     const statuses = new Map<string, ChatVisualStatus>()
@@ -641,6 +641,24 @@ function App() {
     setProjectPath(project?.path ?? '')
     setErrorText('')
   }, [])
+
+  // resizeComposerTextarea 根据当前内容调整输入框高度，并限制最大高度。
+  const resizeComposerTextarea = useCallback(() => {
+    const textarea = composerTextareaRef.current
+    if (!textarea) {
+      return
+    }
+    textarea.style.height = 'auto'
+    const minHeight = 32
+    const maxHeight = 168
+    const nextHeight = Math.min(Math.max(textarea.scrollHeight, minHeight), maxHeight)
+    textarea.style.height = `${nextHeight}px`
+    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden'
+  }, [])
+
+  useEffect(() => {
+    resizeComposerTextarea()
+  }, [composerValue, resizeComposerTextarea, selectedChat?.id])
 
   // clearChatIndicator 使用 chatId 参数清除聊天页的成功或失败提示。
   const clearChatIndicator = useCallback((chatId: string) => {
@@ -1380,7 +1398,7 @@ function App() {
               </div>
 
               {selectedChat ? (
-                <TabsContent value={selectedChat.id}>
+                <TabsContent value={selectedChat.id} onClickCapture={() => clearChatIndicator(selectedChat.id)}>
                   <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5" data-testid="message-log" aria-live="polite">
                     {selectedChat.messages.length > 0 ? (
                       <div className="mx-auto flex max-w-4xl flex-col gap-3">
@@ -1389,17 +1407,14 @@ function App() {
                             key={message.id}
                             className={`message-card message-${message.role} group/message relative rounded-md border p-4 ${
                               message.role === 'user'
-                                ? 'border-teal-200 bg-teal-50'
+                                ? 'mb-8 border-teal-200 bg-teal-50'
                                 : message.role === 'system'
                                   ? 'border-rose-200 bg-rose-50'
                                   : 'border-transparent bg-transparent'
                             }`}
                           >
-                            <div className="mb-2 flex items-center justify-between gap-3">
-                              <span className="text-sm font-medium text-slate-800">
-                                {message.role === 'user' ? '你' : message.role === 'assistant' ? selectedAgentLabel : '系统'}
-                              </span>
-                              <span className="inline-flex items-center gap-2 text-xs text-slate-500">
+                            <div className="mb-2 flex items-center justify-end">
+                              <span data-testid="message-time" className="inline-flex items-center gap-2 text-xs text-slate-500">
                                 {message.status === 'streaming' ? <Loader2 className="h-3.5 w-3.5 animate-spin text-orange-500" /> : null}
                                 {message.status === 'stopped' ? '已停止' : message.status === 'error' ? '失败' : formatTime(message.updatedAt)}
                               </span>
@@ -1435,14 +1450,14 @@ function App() {
                                 )}
                               </div>
                             ) : (
-                              <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-6 text-slate-800">{message.text}</pre>
+                              <pre className="whitespace-pre-wrap break-words font-sans text-base leading-7 text-slate-800">{message.text}</pre>
                             )}
                             {message.role === 'user' ? (
                               <button
                                 data-testid="user-copy-button"
                                 type="button"
                                 onClick={() => void copyMessageText(message)}
-                                className="absolute bottom-2 right-2 inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-slate-500 opacity-0 transition hover:bg-white hover:text-slate-900 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-teal-500/20 group-hover/message:opacity-100"
+                                className="absolute -bottom-8 right-0 inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-slate-500 opacity-0 transition hover:bg-slate-100 hover:text-slate-900 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-teal-500/20 group-hover/message:opacity-100"
                                 aria-label="复制消息"
                                 title="复制"
                               >
@@ -1471,7 +1486,7 @@ function App() {
 
                   <form
                     data-testid="composer-taskbar"
-                    className="sticky bottom-0 z-10 shrink-0 bg-white px-4 py-4"
+                    className="composer-taskbar sticky bottom-0 z-10 shrink-0 bg-white px-4 py-4"
                     onSubmit={submitComposer}
                   >
                     <div
@@ -1483,14 +1498,15 @@ function App() {
                           Prompt
                         </label>
                         <Textarea
+                          ref={composerTextareaRef}
                           id="message-input"
                           data-testid="message-input"
                           value={composerValue}
                           onChange={(event) => setComposerValue(event.target.value)}
                           onKeyDown={handleComposerKeyDown}
                           disabled={!selectedChat || connectionState !== 'open'}
-                          rows={2}
-                          className="max-h-40 min-h-24 border-0 px-0 py-0 text-[15px] leading-6 shadow-none focus:ring-0"
+                          rows={1}
+                          className="max-h-[168px] min-h-8 border-0 px-0 py-0 text-base leading-6 shadow-none focus:ring-0"
                           placeholder={selectedChat ? '输入消息' : '先创建聊天'}
                         />
                       </div>

@@ -404,6 +404,243 @@ func expectComposerShellLayout(page playwright.Page, timeout time.Duration) erro
 	return fmt.Errorf("等待输入框居中布局超时，最后状态: %s", lastState)
 }
 
+// expectComposerInitialSizing 使用 page 和 timeout 参数等待输入框初始高度、字号和背景符合预期。
+func expectComposerInitialSizing(page playwright.Page, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastState string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := page.Evaluate(`() => {
+			const taskbar = document.querySelector('[data-testid="composer-taskbar"]');
+			const shell = document.querySelector('[data-testid="composer-shell"]');
+			const input = document.querySelector('[data-testid="message-input"]');
+			if (!taskbar || !shell || !input) {
+				return 'missing taskbar=' + Boolean(taskbar) + ', shell=' + Boolean(shell) + ', input=' + Boolean(input);
+			}
+			const inputRect = input.getBoundingClientRect();
+			const fontSize = Number.parseFloat(getComputedStyle(input).fontSize);
+			const taskbarLum = cssLuminance(getComputedStyle(taskbar).backgroundColor);
+			const shellLum = cssLuminance(getComputedStyle(shell).backgroundColor);
+			const compact = inputRect.height <= 72;
+			const fontOK = Math.abs(fontSize - 16) <= 0.5;
+			const shellGrey = shellLum < taskbarLum - 1;
+			const taskbarWhite = taskbarLum >= 252;
+			if (compact && fontOK && shellGrey && taskbarWhite) {
+				return '';
+			}
+			return 'height=' + inputRect.height.toFixed(2) +
+				', font=' + fontSize.toFixed(2) +
+				', shellLum=' + shellLum.toFixed(1) +
+				', taskbarLum=' + taskbarLum.toFixed(1);
+			function cssLuminance(text) {
+				const match = text.match(/rgba?\(([^)]+)\)/);
+				if (!match) return 0;
+				const parts = match[1].split(',').slice(0, 3).map((item) => Number.parseFloat(item.trim()));
+				if (parts.length < 3 || parts.some((item) => !Number.isFinite(item))) return 0;
+				return parts[0] * 0.299 + parts[1] * 0.587 + parts[2] * 0.114;
+			}
+		}`, nil)
+		if err == nil {
+			if text, ok := value.(string); ok {
+				lastState = text
+				if text == "" {
+					return nil
+				}
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待输入框初始尺寸和背景超时，最后错误: %w", lastErr)
+	}
+	return fmt.Errorf("等待输入框初始尺寸和背景超时，最后状态: %s", lastState)
+}
+
+// expectComposerExpandedSizing 使用 page 和 timeout 参数等待输入框随内容增高并保持上限。
+func expectComposerExpandedSizing(page playwright.Page, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastState string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := getByTestID(page, "message-input").Evaluate(`(element) => {
+			const rect = element.getBoundingClientRect();
+			const style = getComputedStyle(element);
+			const maxHeight = Number.parseFloat(style.maxHeight);
+			if (rect.height >= 120 && rect.height <= 180 && Number.isFinite(maxHeight) && maxHeight <= 180) {
+				return '';
+			}
+			return 'height=' + rect.height.toFixed(2) + ', maxHeight=' + style.maxHeight;
+		}`, nil)
+		if err == nil {
+			if text, ok := value.(string); ok {
+				lastState = text
+				if text == "" {
+					return nil
+				}
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待输入框内容增高超时，最后错误: %w", lastErr)
+	}
+	return fmt.Errorf("等待输入框内容增高超时，最后状态: %s", lastState)
+}
+
+// expectChatContentFontSize 使用 page 和 timeout 参数等待聊天正文使用 16px 字号。
+func expectChatContentFontSize(page playwright.Page, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastState string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := page.Evaluate(`() => {
+			const elements = Array.from(document.querySelectorAll('.message-user > pre, .markdown-body'));
+			if (!elements.length) {
+				return 'missing message text';
+			}
+			const sizes = elements.map((element) => Number.parseFloat(getComputedStyle(element).fontSize));
+			if (sizes.every((size) => Math.abs(size - 16) <= 0.5)) {
+				return '';
+			}
+			return 'sizes=' + sizes.map((size) => size.toFixed(2)).join(',');
+		}`, nil)
+		if err == nil {
+			if text, ok := value.(string); ok {
+				lastState = text
+				if text == "" {
+					return nil
+				}
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待聊天正文 16px 字号超时，最后错误: %w", lastErr)
+	}
+	return fmt.Errorf("等待聊天正文 16px 字号超时，最后状态: %s", lastState)
+}
+
+// expectMessageTimesIncludeSeconds 使用 page 和 timeout 参数等待消息时间精确到秒。
+func expectMessageTimesIncludeSeconds(page playwright.Page, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastState string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := page.Evaluate(`() => {
+			const times = Array.from(document.querySelectorAll('[data-testid="message-time"]'))
+				.map((element) => (element.textContent ?? '').trim())
+				.filter(Boolean);
+			if (!times.length) {
+				return 'missing message time';
+			}
+			if (times.every((text) => /^\d{2}:\d{2}:\d{2}$/.test(text) || text === '已停止' || text === '失败')) {
+				return '';
+			}
+			return 'times=' + times.join(',');
+		}`, nil)
+		if err == nil {
+			if text, ok := value.(string); ok {
+				lastState = text
+				if text == "" {
+					return nil
+				}
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待消息时间精确到秒超时，最后错误: %w", lastErr)
+	}
+	return fmt.Errorf("等待消息时间精确到秒超时，最后状态: %s", lastState)
+}
+
+// expectNoMessageRoleLabels 使用 page 和 timeout 参数等待消息区域不显示角色名。
+func expectNoMessageRoleLabels(page playwright.Page, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastState string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := page.Evaluate(`() => {
+			const legacyLabels = Array.from(document.querySelectorAll('.message-card > div:first-child > span:first-child'))
+				.map((element) => (element.textContent ?? '').trim())
+				.filter(Boolean);
+			const explicitLabels = Array.from(document.querySelectorAll('[data-testid="message-role-label"]'))
+				.map((element) => (element.textContent ?? '').trim())
+				.filter(Boolean);
+			const labels = [...legacyLabels, ...explicitLabels].filter((text) => text === '你' || text.includes('Codex') || text.includes('Claude'));
+			if (!labels.length) {
+				return '';
+			}
+			return 'labels=' + labels.join(',');
+		}`, nil)
+		if err == nil {
+			if text, ok := value.(string); ok {
+				lastState = text
+				if text == "" {
+					return nil
+				}
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待消息区域隐藏角色名超时，最后错误: %w", lastErr)
+	}
+	return fmt.Errorf("等待消息区域隐藏角色名超时，最后状态: %s", lastState)
+}
+
+// expectUserCopyButtonOutsideMessage 使用 page 和 timeout 参数等待用户消息复制按钮位于消息框外侧右下方。
+func expectUserCopyButtonOutsideMessage(page playwright.Page, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastState string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := page.Evaluate(`() => {
+			const message = document.querySelector('.message-user');
+			const button = document.querySelector('[data-testid="user-copy-button"]');
+			if (!message || !button) {
+				return 'missing message=' + Boolean(message) + ', button=' + Boolean(button);
+			}
+			const messageRect = message.getBoundingClientRect();
+			const buttonRect = button.getBoundingClientRect();
+			const below = buttonRect.top >= messageRect.bottom - 1;
+			const alignedRight = buttonRect.right >= messageRect.right - 1;
+			if (below && alignedRight) {
+				return '';
+			}
+			return 'messageBottom=' + messageRect.bottom.toFixed(2) +
+				', messageRight=' + messageRect.right.toFixed(2) +
+				', buttonTop=' + buttonRect.top.toFixed(2) +
+				', buttonRight=' + buttonRect.right.toFixed(2);
+		}`, nil)
+		if err == nil {
+			if text, ok := value.(string); ok {
+				lastState = text
+				if text == "" {
+					return nil
+				}
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待用户消息复制按钮位于外侧超时，最后错误: %w", lastErr)
+	}
+	return fmt.Errorf("等待用户消息复制按钮位于外侧超时，最后状态: %s", lastState)
+}
+
 // expectTestIDPinnedToViewportBottom 使用 page、id 和 timeout 参数等待元素固定在视口底部。
 func expectTestIDPinnedToViewportBottom(page playwright.Page, id string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
