@@ -16,9 +16,9 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
-	"github.com/117503445/coding/internal/wsapp"
-	"github.com/117503445/coding/scripts/go-scripts/buildweb"
-	"github.com/117503445/coding/scripts/go-scripts/common"
+	"github.com/117503445/agenthub/internal/wsapp"
+	"github.com/117503445/agenthub/scripts/go-scripts/buildweb"
+	"github.com/117503445/agenthub/scripts/go-scripts/common"
 )
 
 // Run 编译并启动 Go 服务，再用 Go client 验证服务行为。
@@ -65,8 +65,8 @@ func Run() error {
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 	serverCmd := exec.Command(binaryPath)
 	serverCmd.Env = append(os.Environ(),
-		fmt.Sprintf("PORT=%d", port),
-		"CODING_LOG_NO_COLOR=true",
+		fmt.Sprintf("AGENTHUB_PORT=%d", port),
+		"AGENTHUB_LOG_NO_COLOR=true",
 	)
 	serverCmd.Stdout = serverLog
 	serverCmd.Stderr = serverLog

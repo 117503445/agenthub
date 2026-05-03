@@ -15,7 +15,7 @@
 go-task run:web
 ```
 
-运行后端服务，默认监听 `8080` 端口。
+运行后端服务，默认监听 `8080` 端口，可用 `AGENTHUB_PORT` 或 `--port` 修改。
 
 ```bash
 go-task fe:dev

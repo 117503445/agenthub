@@ -5,15 +5,13 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
-	"os"
 	"path"
-	"strings"
 	"time"
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/117503445/coding/internal/buildinfo"
-	"github.com/117503445/coding/internal/wsapp"
+	"github.com/117503445/agenthub/internal/buildinfo"
+	"github.com/117503445/agenthub/internal/wsapp"
 )
 
 // newHTTPHandler 使用 ctx 和 port 参数创建 WebSocket 服务的 HTTP 处理器。
@@ -52,48 +50,18 @@ func subpathHandler(wsServer *wsapp.Server, static http.Handler) http.Handler {
 
 // resolveAgentConfig 使用 port 参数生成 agent runtime 配置。
 func resolveAgentConfig(port string) wsapp.AgentConfig {
-	baseURL := strings.TrimSpace(os.Getenv("ANTHROPIC_BASE_URL"))
-	openAIBaseURL := strings.TrimSpace(os.Getenv("OPENAI_BASE_URL"))
-	model := strings.TrimSpace(os.Getenv("ANTHROPIC_MODEL"))
-	if model == "" {
-		model = "sonnet"
-	}
-	apiKey := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
-	openAIAPIKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
-	if openAIAPIKey == "" {
-		openAIAPIKey = apiKey
-	}
-	command := strings.TrimSpace(os.Getenv("CODING_CLAUDE_COMMAND"))
-	if command == "" {
-		command = "claude"
-	}
-	codexCommand := strings.TrimSpace(os.Getenv("CODING_CODEX_COMMAND"))
-	if codexCommand == "" {
-		codexCommand = "codex"
-	}
-	mockClaudeCommand := strings.TrimSpace(os.Getenv("CODING_MOCK_CLAUDE_COMMAND"))
-	if mockClaudeCommand == "" {
-		mockClaudeCommand = command
-	}
-	mockCodexCommand := strings.TrimSpace(os.Getenv("CODING_MOCK_CODEX_COMMAND"))
-	if mockCodexCommand == "" {
-		mockCodexCommand = codexCommand
-	}
+	model := "sonnet"
 	agentProviders := wsapp.AgentProviderOptions(wsapp.AgentOptionsConfig{
 		ClaudeDefaultModel: model,
 		CodexDefaultEffort: "xhigh",
 	})
 	mockBaseURL := backendMockBaseURL(port)
 	return wsapp.AgentConfig{
-		Command:              command,
-		CodexCommand:         codexCommand,
-		MockClaudeCommand:    mockClaudeCommand,
-		MockCodexCommand:     mockCodexCommand,
-		AnthropicBaseURL:     baseURL,
+		Command:              "claude",
+		CodexCommand:         "codex",
+		MockClaudeCommand:    "claude",
+		MockCodexCommand:     "codex",
 		AnthropicModel:       model,
-		AnthropicAPIKey:      apiKey,
-		OpenAIBaseURL:        openAIBaseURL,
-		OpenAIAPIKey:         openAIAPIKey,
 		MockAnthropicBaseURL: mockBaseURL + "/mock/anthropic",
 		MockAnthropicAPIKey:  "mock-key",
 		MockOpenAIBaseURL:    mockBaseURL + "/mock/openai/v1",
@@ -104,11 +72,7 @@ func resolveAgentConfig(port string) wsapp.AgentConfig {
 
 // backendMockBaseURL 使用 port 参数返回后端 mock 服务根地址。
 func backendMockBaseURL(port string) string {
-	trimmedPort := strings.TrimSpace(port)
-	if trimmedPort == "" {
-		trimmedPort = "8080"
-	}
-	return "http://127.0.0.1:" + trimmedPort
+	return defaultAgentHubBaseURL(port)
 }
 
 // ListenAndServe 使用 ctx 参数记录日志，并在 port 参数指定的端口启动 HTTP 服务。

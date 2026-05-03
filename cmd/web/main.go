@@ -2,27 +2,20 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"github.com/117503445/goutils/glog"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
-	"github.com/117503445/coding/internal/buildinfo"
-	"github.com/117503445/coding/internal/envloader"
+	"github.com/117503445/agenthub/internal/buildinfo"
+	"github.com/117503445/agenthub/internal/envloader"
 )
 
-// init 初始化日志并主动加载 .env 文件。
-func init() {
-	initLog()
-	if err := envloader.LoadDefault(); err != nil {
-		log.Warn().Err(err).Msg("加载 .env 失败")
-	}
-}
-
-// initLog 根据环境变量初始化日志颜色。
-func initLog() {
-	if os.Getenv("CODING_LOG_NO_COLOR") == "true" {
+// initLog 使用 noColor 参数初始化日志颜色。
+func initLog(noColor bool) {
+	if noColor {
 		logger := log.Output(glog.NewConsoleWriter(glog.ConsoleWriterConfig{
 			NoColor: true,
 		})).Level(zerolog.DebugLevel).With().Caller().Logger()
@@ -38,6 +31,17 @@ func main() {
 		return
 	}
 
+	envErr := envloader.LoadDefault()
+	config, err := parseWebConfig(os.Args[1:], os.Stdout, os.Stderr)
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	initLog(config.LogNoColor)
+	if envErr != nil {
+		log.Warn().Err(envErr).Msg("加载 .env 失败")
+	}
+
 	log.Info().
 		Str("BuildTime", buildinfo.BuildTime).
 		Str("GitBranch", buildinfo.GitBranch).
@@ -48,13 +52,8 @@ func main() {
 		Str("BuildDir", buildinfo.BuildDir).
 		Msg("构建信息")
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-
 	ctx := log.Logger.WithContext(context.Background())
-	if err := ListenAndServe(ctx, port); err != nil {
+	if err := ListenAndServe(ctx, config.Port); err != nil {
 		log.Panic().Err(err).Msg("服务启动失败")
 	}
 }

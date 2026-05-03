@@ -24,7 +24,7 @@ const (
 
 var ssPIDPattern = regexp.MustCompile(`pid=([0-9]+)`)
 
-// Prepare 使用 stdout 和 stderr 参数输出日志，清理 PORT 端口上已有的监听进程。
+// Prepare 使用 stdout 和 stderr 参数输出日志，清理 AGENTHUB_PORT 端口上已有的监听进程。
 func Prepare(stdout io.Writer, stderr io.Writer) error {
 	port, err := runPort()
 	if err != nil {
@@ -60,15 +60,15 @@ func Prepare(stdout io.Writer, stderr io.Writer) error {
 	return nil
 }
 
-// runPort 从环境变量读取运行端口，缺省时返回默认端口。
+// runPort 从 AGENTHUB_PORT 环境变量读取运行端口，缺省时返回默认端口。
 func runPort() (string, error) {
-	port := strings.TrimSpace(os.Getenv("PORT"))
+	port := strings.TrimSpace(os.Getenv("AGENTHUB_PORT"))
 	if port == "" {
 		port = defaultPort
 	}
 	value, err := strconv.Atoi(port)
 	if err != nil || value <= 0 || value > 65535 {
-		return "", fmt.Errorf("PORT 必须是 1-65535 的端口号，当前值: %q", port)
+		return "", fmt.Errorf("AGENTHUB_PORT 必须是 1-65535 的端口号，当前值: %q", port)
 	}
 	return port, nil
 }

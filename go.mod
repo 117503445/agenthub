@@ -1,9 +1,10 @@
-module github.com/117503445/coding
+module github.com/117503445/agenthub
 
 go 1.26.1
 
 require (
 	github.com/117503445/goutils v0.0.0-20260101165948-3e133cdc3759
+	github.com/alecthomas/kong v1.15.0
 	github.com/coder/websocket v1.8.14
 	github.com/playwright-community/playwright-go v0.5700.1
 	github.com/rs/zerolog v1.34.0

@@ -6,11 +6,11 @@ import (
 	"testing"
 )
 
-// TestLoadAgentSkillOptions 验证 CODEX_HOME 中的 SKILL.md 会被解析为输入框候选项。
+// TestLoadAgentSkillOptions 验证用户目录中的 SKILL.md 会被解析为输入框候选项。
 func TestLoadAgentSkillOptions(t *testing.T) {
-	codexHome := t.TempDir()
-	t.Setenv("CODEX_HOME", codexHome)
-	skillDir := filepath.Join(codexHome, "skills", "demo-skill")
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	skillDir := filepath.Join(homeDir, ".codex", "skills", "demo-skill")
 	if err := os.MkdirAll(skillDir, 0755); err != nil {
 		t.Fatalf("创建 skill 目录失败: %v", err)
 	}

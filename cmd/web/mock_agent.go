@@ -203,10 +203,7 @@ func requestMockAgentText(model string, prompt string) (string, error) {
 
 // mockAgentMessagesURL 返回 mock Anthropic messages 端点地址。
 func mockAgentMessagesURL() string {
-	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("ANTHROPIC_BASE_URL")), "/")
-	if baseURL == "" {
-		baseURL = "http://127.0.0.1:8080/mock/anthropic"
-	}
+	baseURL := defaultAgentHubBaseURL(os.Getenv("AGENTHUB_PORT")) + "/mock/anthropic"
 	return baseURL + "/v1/messages"
 }
 
@@ -217,7 +214,7 @@ func mockCLIModelFromArgs(args []string) string {
 			return args[index+1]
 		}
 	}
-	return strings.TrimSpace(os.Getenv("ANTHROPIC_MODEL"))
+	return "sonnet"
 }
 
 // mockCLILastArg 使用 args 参数提取最后一个非空参数。

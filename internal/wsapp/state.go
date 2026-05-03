@@ -831,7 +831,7 @@ func (s *Store) Snapshot() Snapshot {
 	}
 }
 
-// AgentSkills 返回当前 project 和 CODEX_HOME 中可用的 skill 列表。
+// AgentSkills 返回当前 project 和用户目录中可用的 skill 列表。
 func (s *Store) AgentSkills() []AgentSkillOption {
 	s.mu.RLock()
 	projectPaths := make([]string, 0, len(s.projects))

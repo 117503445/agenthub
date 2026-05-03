@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/117503445/coding/scripts/go-scripts/common"
+	"github.com/117503445/agenthub/scripts/go-scripts/common"
 	"github.com/playwright-community/playwright-go"
 )
 
@@ -152,8 +152,20 @@ func runCase(rootDir string, serverCmd string, item E2ECase) bool {
 		logger.Errorf("查找可用端口失败: %v", err)
 		return false
 	}
+	legacyPort, err := common.FindFreeTCPPort()
+	if err != nil {
+		logger.Errorf("查找旧环境变量冲突端口失败: %v", err)
+		return false
+	}
+	for legacyPort == port {
+		legacyPort, err = common.FindFreeTCPPort()
+		if err != nil {
+			logger.Errorf("重新查找旧环境变量冲突端口失败: %v", err)
+			return false
+		}
+	}
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
-	process, stopServer, err := startServer(rootDir, serverCmd, port, logsDir)
+	process, stopServer, err := startServer(rootDir, serverCmd, port, legacyPort, logsDir)
 	if err != nil {
 		logger.Errorf("启动服务失败: %v", err)
 		return false
@@ -181,8 +193,8 @@ func runCase(rootDir string, serverCmd string, item E2ECase) bool {
 	return success
 }
 
-// startServer 使用 rootDir、serverCmd、port 和 logsDir 参数启动被测服务。
-func startServer(rootDir string, serverCmd string, port int, logsDir string) (*exec.Cmd, func(), error) {
+// startServer 使用 rootDir、serverCmd、port、legacyPort 和 logsDir 参数启动被测服务。
+func startServer(rootDir string, serverCmd string, port int, legacyPort int, logsDir string) (*exec.Cmd, func(), error) {
 	parts := strings.Fields(serverCmd)
 	if len(parts) == 0 {
 		return nil, nil, fmt.Errorf("server-cmd 不能为空")
@@ -191,7 +203,7 @@ func startServer(rootDir string, serverCmd string, port int, logsDir string) (*e
 	if err != nil {
 		return nil, nil, err
 	}
-	codexHome, err := prepareE2ESkillsHome(rootDir)
+	homeDir, err := prepareE2EHome(rootDir)
 	if err != nil {
 		_ = serverLog.Close()
 		return nil, nil, err
@@ -200,14 +212,10 @@ func startServer(rootDir string, serverCmd string, port int, logsDir string) (*e
 	cmd := exec.Command(parts[0], parts[1:]...)
 	cmd.Dir = rootDir
 	cmd.Env = withEnvOverride(os.Environ(), map[string]string{
-		"PORT":                fmt.Sprintf("%d", port),
-		"CODING_LOG_NO_COLOR": "true",
-		"CODEX_HOME":          codexHome,
-		"ANTHROPIC_BASE_URL":  fmt.Sprintf("http://127.0.0.1:%d/mock/anthropic", port),
-		"ANTHROPIC_API_KEY":   "mock-key",
-		"ANTHROPIC_MODEL":     "mock-claude-sonnet",
-		"OPENAI_BASE_URL":     fmt.Sprintf("http://127.0.0.1:%d/mock/openai/v1", port),
-		"OPENAI_API_KEY":      "mock-key",
+		"AGENTHUB_PORT":         fmt.Sprintf("%d", port),
+		"AGENTHUB_LOG_NO_COLOR": "true",
+		"PORT":                  fmt.Sprintf("%d", legacyPort),
+		"HOME":                  homeDir,
 	})
 	cmd.Stdout = serverLog
 	cmd.Stderr = serverLog
@@ -244,10 +252,10 @@ func prepareMockAgentCommands(rootDir string, serverPath string) (string, string
 	return mockCodexPath, mockClaudePath, nil
 }
 
-// prepareE2ESkillsHome 使用 rootDir 参数准备 E2E 专用 CODEX_HOME 和测试 skill。
-func prepareE2ESkillsHome(rootDir string) (string, error) {
-	codexHome := filepath.Join(rootDir, "data", "e2e", "codex-home")
-	skillDir := filepath.Join(codexHome, "skills", "e2e-skill")
+// prepareE2EHome 使用 rootDir 参数准备 E2E 专用用户目录和测试 skill。
+func prepareE2EHome(rootDir string) (string, error) {
+	homeDir := filepath.Join(rootDir, "data", "e2e", "home")
+	skillDir := filepath.Join(homeDir, ".codex", "skills", "e2e-skill")
 	if err := os.MkdirAll(skillDir, 0755); err != nil {
 		return "", err
 	}
@@ -263,7 +271,7 @@ func prepareE2ESkillsHome(rootDir string) (string, error) {
 	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0644); err != nil {
 		return "", err
 	}
-	return codexHome, nil
+	return homeDir, nil
 }
 
 // recreateMockAgentLink 使用 target 和 linkPath 参数重建 mock agent 链接。

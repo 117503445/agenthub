@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/117503445/coding/scripts/go-scripts/buildweb"
-	"github.com/117503445/coding/scripts/go-scripts/e2e"
-	"github.com/117503445/coding/scripts/go-scripts/it"
-	"github.com/117503445/coding/scripts/go-scripts/runweb"
-	"github.com/117503445/coding/scripts/go-scripts/ut"
+	"github.com/117503445/agenthub/scripts/go-scripts/buildweb"
+	"github.com/117503445/agenthub/scripts/go-scripts/e2e"
+	"github.com/117503445/agenthub/scripts/go-scripts/it"
+	"github.com/117503445/agenthub/scripts/go-scripts/runweb"
+	"github.com/117503445/agenthub/scripts/go-scripts/ut"
 )
 
 // main 解析脚本命令并执行对应任务。

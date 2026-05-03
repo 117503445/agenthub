@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/117503445/coding/scripts/go-scripts/common"
+	"github.com/117503445/agenthub/scripts/go-scripts/common"
 )
 
 // Run 运行 build-web 命令。
@@ -71,7 +71,7 @@ func buildLDFlags() string {
 
 	parts := make([]string, 0, len(pairs))
 	for key, value := range pairs {
-		parts = append(parts, fmt.Sprintf("-X github.com/117503445/coding/internal/buildinfo.%s=%s", key, value))
+		parts = append(parts, fmt.Sprintf("-X github.com/117503445/agenthub/internal/buildinfo.%s=%s", key, value))
 	}
 	return strings.Join(parts, " ")
 }

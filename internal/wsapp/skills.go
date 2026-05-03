@@ -75,11 +75,9 @@ func skillCandidateDirs(projectPaths []string) []string {
 		}
 	}
 
-	codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
-	if codexHome == "" {
-		if homeDir, err := os.UserHomeDir(); err == nil {
-			codexHome = filepath.Join(homeDir, ".codex")
-		}
+	codexHome := ""
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		codexHome = filepath.Join(homeDir, ".codex")
 	}
 	addDir(filepath.Join(codexHome, "skills"))
 	return dirs

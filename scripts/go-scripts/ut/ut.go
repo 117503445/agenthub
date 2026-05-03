@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/117503445/coding/scripts/go-scripts/common"
+	"github.com/117503445/agenthub/scripts/go-scripts/common"
 )
 
 // Run 运行单元测试，并把日志写入 data/ut。
