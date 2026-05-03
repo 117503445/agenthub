@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/playwright-community/playwright-go"
 )
 
 // runAgentChatCase 使用 ctx 参数运行 Agent 聊天 E2E 用例。
@@ -318,10 +320,33 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	}
 	steps = append(steps, "聊天页开始会话后只锁定 agent，模型和推理级别仍然可调整，聊天框不显示已锁定文字。")
 
+	firstDraft := "第一个聊天页未发送草稿"
+	secondDraft := "第二个聊天页未发送草稿"
+	if err := fillTestID(page, "message-input", firstDraft); err != nil {
+		return fail(err)
+	}
 	if err := clickTestID(page, "chat-tab-add-button"); err != nil {
 		return fail(err)
 	}
 	if err := expectTestIDText(page, "chat-tabs", "聊天 2", 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDValue(page, "message-input", "", 5*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := fillTestID(page, "message-input", secondDraft); err != nil {
+		return fail(err)
+	}
+	if err := page.Locator(`[data-testid="chat-tab"]`, playwright.PageLocatorOptions{HasText: firstPrompt}).Click(); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDValue(page, "message-input", firstDraft, 5*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := page.Locator(`[data-testid="chat-tab"]`, playwright.PageLocatorOptions{HasText: "聊天 2"}).Click(); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDValue(page, "message-input", secondDraft, 5*time.Second); err != nil {
 		return fail(err)
 	}
 	if err := expectTestIDValue(page, "agent-provider-select", "mock-codex", 10*time.Second); err != nil {
@@ -339,7 +364,7 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDValue(page, "agent-model-select", "mock-claude-sonnet", 10*time.Second); err != nil {
 		return fail(err)
 	}
-	steps = append(steps, "新聊天默认继承上一次选择的 agent、模型和推理级别；E2E 使用 Mock Claude Code 命令连接服务端 mock 模型服务。")
+	steps = append(steps, "新聊天默认继承上一次选择的 agent、模型和推理级别；每个聊天 Tab 保留独立输入草稿；E2E 使用 Mock Claude Code 命令连接服务端 mock 模型服务。")
 
 	secondPrompt := "第二条长流式测试"
 	if err := fillTestID(page, "message-input", secondPrompt); err != nil {

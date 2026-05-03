@@ -54,7 +54,7 @@ function App() {
   const [projectDialogOpen, setProjectDialogOpen] = useState(false)
   const [newClaudeModelID, setNewClaudeModelID] = useState('')
   const [newClaudeModelLabel, setNewClaudeModelLabel] = useState('')
-  const [composerValue, setComposerValue] = useState('')
+  const [composerValues, setComposerValues] = useState<Record<string, string>>({})
   const [errorText, setErrorText] = useState('')
   const [hasSnapshot, setHasSnapshot] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState('')
@@ -72,6 +72,7 @@ function App() {
     () => projectChats.find((chat) => chat.id === selectedChatId) ?? projectChats[0] ?? null,
     [projectChats, selectedChatId],
   )
+  const selectedComposerValue = selectedChat ? (composerValues[selectedChat.id] ?? '') : ''
   const isRunning = selectedChat?.status === 'running'
   const selectedAgentProvider = selectedChat?.agentProvider ?? 'mock-claude-code'
   const selectedAgentModels = agentProviders.find((provider) => provider.id === selectedAgentProvider)?.models ?? []
@@ -128,6 +129,56 @@ function App() {
     }
     setChatIndicators((current) => ({ ...current, [chatId]: status }))
   }, [])
+
+  // pruneComposerValues 使用 chatIds 参数移除已经不存在的聊天页草稿。
+  const pruneComposerValues = useCallback((chatIds: Set<string>) => {
+    setComposerValues((current) => {
+      const next: Record<string, string> = {}
+      for (const [chatId, value] of Object.entries(current)) {
+        if (chatIds.has(chatId)) {
+          next[chatId] = value
+        }
+      }
+      return next
+    })
+  }, [])
+
+  // removeComposerValues 使用 chatIds 参数清理指定聊天页草稿。
+  const removeComposerValues = useCallback((chatIds: string[]) => {
+    setComposerValues((current) => {
+      let changed = false
+      const next = { ...current }
+      for (const chatId of chatIds) {
+        if (chatId in next) {
+          delete next[chatId]
+          changed = true
+        }
+      }
+      return changed ? next : current
+    })
+  }, [])
+
+  // updateSelectedComposerValue 使用 value 参数更新当前聊天页草稿。
+  const updateSelectedComposerValue = useCallback((value: string) => {
+    const chatId = selectedChat?.id
+    if (!chatId) {
+      return
+    }
+    setComposerValues((current) => {
+      if (value === '') {
+        if (!(chatId in current)) {
+          return current
+        }
+        const next = { ...current }
+        delete next[chatId]
+        return next
+      }
+      if (current[chatId] === value) {
+        return current
+      }
+      return { ...current, [chatId]: value }
+    })
+  }, [selectedChat?.id])
 
   useEffect(() => {
     // syncFromHash 从当前 hash 路由恢复选中的 project 和聊天页。
@@ -194,6 +245,7 @@ function App() {
         setAgentSkills(payload.agentSkills ?? [])
         setProjects(nextProjects)
         setChats(nextChats)
+        pruneComposerValues(nextChatIds)
         setChatIndicators((current) => {
           const next: Record<string, ChatTerminalIndicator> = {}
           for (const [chatId, status] of Object.entries(current)) {
@@ -239,6 +291,7 @@ function App() {
         })
         setSelectedProjectId((current) => (current === payload.id ? '' : current))
         setSelectedChatId((current) => (payload.chatIds.includes(current) ? '' : current))
+        removeComposerValues(payload.chatIds)
         resetProjectForm(null)
         setProjectDialogOpen(false)
         return
@@ -269,6 +322,7 @@ function App() {
           return next
         })
         setSelectedChatId((current) => (current === payload.id ? '' : current))
+        removeComposerValues([payload.id])
         return
       }
       if (message.type === 'chat.message.delta') {
@@ -337,7 +391,7 @@ function App() {
         setErrorText(payload.message ?? '服务端错误')
       }
     },
-    [clearChatIndicator, markChatIndicator, resetProjectForm],
+    [clearChatIndicator, markChatIndicator, pruneComposerValues, removeComposerValues, resetProjectForm],
   )
 
   useEffect(() => {
@@ -527,7 +581,7 @@ function App() {
     if (!selectedChat) {
       return
     }
-    const prompt = composerValue.trim()
+    const prompt = selectedComposerValue.trim()
     if (!prompt && isRunning) {
       sendClientMessage(wsRef.current, 'chat.stop', { chatId: selectedChat.id })
       return
@@ -536,7 +590,7 @@ function App() {
       return
     }
     sendClientMessage(wsRef.current, 'chat.send', { chatId: selectedChat.id, prompt })
-    setComposerValue('')
+    updateSelectedComposerValue('')
   }
 
   const connectionIcon =
@@ -590,7 +644,7 @@ function App() {
             activeProjectId={activeProjectId}
             connectionState={connectionState}
             chatIndicators={chatIndicators}
-            composerValue={composerValue}
+            composerValue={selectedComposerValue}
             copiedMessageId={copiedMessageId}
             isRunning={isRunning}
             agentProviders={agentProviders}
@@ -608,7 +662,7 @@ function App() {
             onCreateChat={createChat}
             onClearChatIndicator={clearChatIndicator}
             onCopyMessage={(message) => void copyMessageText(message)}
-            onComposerValueChange={setComposerValue}
+            onComposerValueChange={updateSelectedComposerValue}
             onSubmitComposer={submitComposer}
             onChangeAgentProvider={changeAgentProvider}
             onChangeAgentModel={changeAgentModel}
