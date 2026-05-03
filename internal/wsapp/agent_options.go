@@ -142,6 +142,17 @@ func DefaultAgentReasoning(provider string, model string, options []AgentProvide
 	return ""
 }
 
+// defaultLastAgentSelection 使用 options 参数返回新聊天页的初始 agent 配置。
+func defaultLastAgentSelection(options []AgentProviderOption) LastAgentSelection {
+	provider := AgentProviderMockClaudeCode
+	model := DefaultAgentModel(provider, options)
+	return LastAgentSelection{
+		Provider:  provider,
+		Model:     model,
+		Reasoning: DefaultAgentReasoning(provider, model, options),
+	}
+}
+
 // NormalizeAgentSelection 使用 provider、model、reasoning 和 options 参数校验并补全 agent 选择。
 func NormalizeAgentSelection(provider string, model string, reasoning string, options []AgentProviderOption) (string, string, string, error) {
 	if len(options) == 0 {

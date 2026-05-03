@@ -139,6 +139,7 @@ func (s *Server) handle(ctx context.Context, outbound chan ServerMessage, msg Cl
 		}
 		s.broadcast("project.changed", map[string]any{"project": project})
 		s.broadcast("chat.changed", map[string]any{"chat": chat})
+		s.broadcast("agent.skills.changed", map[string]any{"agentSkills": s.store.AgentSkills()})
 		return nil
 	case "project.update":
 		var payload ProjectMutationPayload
@@ -150,6 +151,7 @@ func (s *Server) handle(ctx context.Context, outbound chan ServerMessage, msg Cl
 			return err
 		}
 		s.broadcast("project.changed", map[string]any{"project": project})
+		s.broadcast("agent.skills.changed", map[string]any{"agentSkills": s.store.AgentSkills()})
 		return nil
 	case "project.delete":
 		var payload IDPayload
@@ -164,6 +166,7 @@ func (s *Server) handle(ctx context.Context, outbound chan ServerMessage, msg Cl
 			s.agents.Stop(chatID)
 		}
 		s.broadcast("project.deleted", map[string]any{"id": payload.ID, "chatIds": chatIDs})
+		s.broadcast("agent.skills.changed", map[string]any{"agentSkills": s.store.AgentSkills()})
 		return nil
 	case "chat.create":
 		var payload ChatCreatePayload

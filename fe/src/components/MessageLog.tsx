@@ -1,0 +1,103 @@
+import { Check, Copy, Loader2, Wrench } from 'lucide-react'
+import { MarkdownRenderer } from './MarkdownRenderer'
+import { formatTime, messagePartsForRender, toolCommandTitle } from '../lib/chat'
+import type { Chat, ChatMessage } from '../types'
+
+interface MessageLogProps {
+  /** chat 表示当前聊天页。 */
+  chat: Chat
+  /** copiedMessageId 表示刚复制成功的消息标识。 */
+  copiedMessageId: string
+  /** onCopyMessage 使用 message 参数复制消息。 */
+  onCopyMessage: (message: ChatMessage) => void
+}
+
+// MessageLog 使用 props 参数渲染聊天消息列表。
+export function MessageLog({ chat, copiedMessageId, onCopyMessage }: MessageLogProps) {
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5" data-testid="message-log" aria-live="polite">
+      {chat.messages.length > 0 ? (
+        <div className="mx-auto flex max-w-4xl flex-col gap-3">
+          {chat.messages.map((message) => (
+            <article
+              key={message.id}
+              className={`message-card message-${message.role} group/message relative rounded-md border p-4 ${
+                message.role === 'user'
+                  ? 'mb-8 border-teal-200 bg-teal-50'
+                  : message.role === 'system'
+                    ? 'border-rose-200 bg-rose-50'
+                    : 'border-transparent bg-transparent'
+              }`}
+            >
+              <div className="mb-2 flex items-center justify-end">
+                <span data-testid="message-time" className="inline-flex items-center gap-2 text-xs text-slate-500">
+                  {message.status === 'streaming' ? <Loader2 className="h-3.5 w-3.5 animate-spin text-orange-500" /> : null}
+                  {message.status === 'stopped' ? '已停止' : message.status === 'error' ? '失败' : formatTime(message.updatedAt)}
+                </span>
+              </div>
+              {message.role === 'assistant' ? (
+                <div className="space-y-2">
+                  {messagePartsForRender(message).map((part) =>
+                    part.type === 'tool_call' && part.toolCall ? (
+                      <details
+                        key={part.id}
+                        data-testid="tool-call-details"
+                        className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"
+                      >
+                        <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+                          <span className="inline-flex min-w-0 items-center gap-2 text-sm font-medium text-slate-800">
+                            <Wrench className="h-4 w-4 shrink-0 text-slate-500" />
+                            <span className="truncate font-mono text-xs">{toolCommandTitle(part.toolCall)}</span>
+                          </span>
+                          <span className="shrink-0 text-xs text-slate-500">
+                            {part.toolCall.status === 'running' ? '运行中' : part.toolCall.status === 'error' ? '失败' : '完成'}
+                          </span>
+                        </summary>
+                        {part.toolCall.input ? <pre className="mt-2 truncate font-mono text-xs text-slate-500">{part.toolCall.input}</pre> : null}
+                        {part.toolCall.output ? (
+                          <pre data-testid="tool-call-output" className="mt-2 whitespace-pre-wrap break-words font-mono text-xs text-slate-600">
+                            {part.toolCall.output}
+                          </pre>
+                        ) : null}
+                      </details>
+                    ) : (
+                      <MarkdownRenderer key={part.id} text={part.text ?? ''} />
+                    ),
+                  )}
+                </div>
+              ) : (
+                <pre className="whitespace-pre-wrap break-words font-sans text-base leading-7 text-slate-800">{message.text}</pre>
+              )}
+              {message.role === 'user' ? (
+                <button
+                  data-testid="user-copy-button"
+                  type="button"
+                  onClick={() => onCopyMessage(message)}
+                  className="absolute -bottom-8 right-0 inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-slate-500 opacity-0 transition hover:bg-slate-100 hover:text-slate-900 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-teal-500/20 group-hover/message:opacity-100"
+                  aria-label="复制消息"
+                  title="复制"
+                >
+                  {copiedMessageId === message.id ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                </button>
+              ) : null}
+              {message.role === 'assistant' ? (
+                <div className="mt-2 flex justify-start">
+                  <button
+                    data-testid="assistant-copy-button"
+                    type="button"
+                    onClick={() => onCopyMessage(message)}
+                    className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                    aria-label="复制回复"
+                    title="复制"
+                  >
+                    {copiedMessageId === message.id ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                  </button>
+                </div>
+              ) : null}
+            </article>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}

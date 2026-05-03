@@ -191,12 +191,18 @@ func startServer(rootDir string, serverCmd string, port int, logsDir string) (*e
 	if err != nil {
 		return nil, nil, err
 	}
+	codexHome, err := prepareE2ESkillsHome(rootDir)
+	if err != nil {
+		_ = serverLog.Close()
+		return nil, nil, err
+	}
 
 	cmd := exec.Command(parts[0], parts[1:]...)
 	cmd.Dir = rootDir
 	cmd.Env = withEnvOverride(os.Environ(), map[string]string{
 		"PORT":                fmt.Sprintf("%d", port),
 		"CODING_LOG_NO_COLOR": "true",
+		"CODEX_HOME":          codexHome,
 		"ANTHROPIC_BASE_URL":  fmt.Sprintf("http://127.0.0.1:%d/mock/anthropic", port),
 		"ANTHROPIC_API_KEY":   "mock-key",
 		"ANTHROPIC_MODEL":     "mock-claude-sonnet",
@@ -236,6 +242,28 @@ func prepareMockAgentCommands(rootDir string, serverPath string) (string, string
 		return "", "", err
 	}
 	return mockCodexPath, mockClaudePath, nil
+}
+
+// prepareE2ESkillsHome 使用 rootDir 参数准备 E2E 专用 CODEX_HOME 和测试 skill。
+func prepareE2ESkillsHome(rootDir string) (string, error) {
+	codexHome := filepath.Join(rootDir, "data", "e2e", "codex-home")
+	skillDir := filepath.Join(codexHome, "skills", "e2e-skill")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		return "", err
+	}
+	content := strings.Join([]string{
+		"---",
+		"name: e2e-skill",
+		"description: E2E 技能选择测试。",
+		"---",
+		"",
+		"# E2E Skill",
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0644); err != nil {
+		return "", err
+	}
+	return codexHome, nil
 }
 
 // recreateMockAgentLink 使用 target 和 linkPath 参数重建 mock agent 链接。

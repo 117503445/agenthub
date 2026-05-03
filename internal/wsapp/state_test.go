@@ -148,6 +148,9 @@ func TestStoreProjectChatLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("创建待删除聊天页失败: %v", err)
 	}
+	if extraChat.AgentProvider != AgentProviderCodex || extraChat.AgentModel != "gpt-5.4" {
+		t.Fatalf("新聊天页未继承上次 agent 选择: %#v", extraChat)
+	}
 	deletedProjectID, err := store.DeleteChat(extraChat.ID)
 	if err != nil {
 		t.Fatalf("删除单个聊天页失败: %v", err)

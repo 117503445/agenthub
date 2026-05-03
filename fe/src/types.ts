@@ -1,0 +1,245 @@
+export type ConnectionState = 'connecting' | 'open' | 'closed' | 'error'
+export type ChatStatus = 'idle' | 'running' | 'error'
+export type ChatTerminalIndicator = 'success' | 'error'
+export type ChatVisualStatus = 'running' | ChatTerminalIndicator
+export type MessageRole = 'user' | 'assistant' | 'system'
+export type MessageStatus = 'complete' | 'streaming' | 'stopped' | 'error'
+export type AgentProvider = 'claude-code' | 'codex' | 'mock-claude-code' | 'mock-codex'
+
+export interface AgentModelOption {
+  /** id 表示传递给 agent CLI 的模型标识。 */
+  id: string
+  /** label 表示界面展示名称。 */
+  label: string
+  /** default 表示是否为 provider 默认模型。 */
+  default?: boolean
+  /** reasoningLevels 表示模型支持的推理级别。 */
+  reasoningLevels?: AgentReasoningOption[]
+}
+
+export interface AgentReasoningOption {
+  /** id 表示传递给 agent CLI 的推理级别标识。 */
+  id: string
+  /** label 表示界面展示名称。 */
+  label: string
+  /** description 表示推理级别说明。 */
+  description: string
+  /** default 表示是否为默认推理级别。 */
+  default?: boolean
+}
+
+export interface AgentProviderOption {
+  /** id 表示 provider 标识。 */
+  id: AgentProvider
+  /** label 表示界面展示名称。 */
+  label: string
+  /** models 表示 provider 可选模型。 */
+  models: AgentModelOption[]
+}
+
+export interface AgentSkillOption {
+  /** id 表示 skill 命令标识。 */
+  id: string
+  /** label 表示界面展示名称。 */
+  label: string
+  /** description 表示 skill 说明。 */
+  description: string
+}
+
+export interface LastAgentSelection {
+  /** provider 表示最近一次选择的 agent provider。 */
+  provider: AgentProvider
+  /** model 表示最近一次选择的模型。 */
+  model: string
+  /** reasoning 表示最近一次选择的推理级别。 */
+  reasoning: string
+}
+
+export interface Project {
+  /** id 表示 project 唯一标识。 */
+  id: string
+  /** name 表示 project 展示名称。 */
+  name: string
+  /** path 表示后端本机工作目录。 */
+  path: string
+  /** git 表示 project 当前 Git 摘要。 */
+  git?: ProjectGitInfo
+  /** createdAt 表示创建时间。 */
+  createdAt: string
+  /** updatedAt 表示更新时间。 */
+  updatedAt: string
+}
+
+export interface ProjectGitInfo {
+  /** isRepo 表示当前目录是否位于 Git 仓库中。 */
+  isRepo: boolean
+  /** branch 表示当前分支或 HEAD 状态。 */
+  branch: string
+  /** commit 表示当前短提交哈希。 */
+  commit: string
+  /** dirty 表示工作区是否有未提交内容。 */
+  dirty: boolean
+}
+
+export interface ToolCall {
+  /** id 表示工具调用唯一标识。 */
+  id: string
+  /** name 表示工具名称。 */
+  name: string
+  /** status 表示工具调用状态。 */
+  status: 'running' | 'complete' | 'error'
+  /** input 表示工具入参摘要。 */
+  input?: string
+  /** output 表示工具输出摘要。 */
+  output?: string
+  /** createdAt 表示创建时间。 */
+  createdAt: string
+  /** updatedAt 表示更新时间。 */
+  updatedAt: string
+}
+
+export interface MessagePart {
+  /** id 表示片段唯一标识。 */
+  id: string
+  /** type 表示片段类型。 */
+  type: 'text' | 'tool_call'
+  /** text 表示文本片段内容。 */
+  text?: string
+  /** toolCall 表示工具调用片段。 */
+  toolCall?: ToolCall
+  /** createdAt 表示创建时间。 */
+  createdAt: string
+  /** updatedAt 表示更新时间。 */
+  updatedAt: string
+}
+
+export interface ChatMessage {
+  /** id 表示消息唯一标识。 */
+  id: string
+  /** chatId 表示消息所属聊天页。 */
+  chatId: string
+  /** role 表示消息角色。 */
+  role: MessageRole
+  /** text 表示消息文本。 */
+  text: string
+  /** status 表示消息状态。 */
+  status: MessageStatus
+  /** toolCalls 表示消息中的工具调用。 */
+  toolCalls?: ToolCall[]
+  /** parts 表示 assistant 内容与工具调用的顺序片段。 */
+  parts?: MessagePart[]
+  /** createdAt 表示创建时间。 */
+  createdAt: string
+  /** updatedAt 表示更新时间。 */
+  updatedAt: string
+}
+
+export interface Chat {
+  /** id 表示聊天页唯一标识。 */
+  id: string
+  /** projectId 表示所属 project。 */
+  projectId: string
+  /** title 表示聊天页标题。 */
+  title: string
+  /** status 表示聊天页运行状态。 */
+  status: ChatStatus
+  /** agentProvider 表示聊天页使用的 agent 类型。 */
+  agentProvider: AgentProvider
+  /** agentModel 表示聊天页使用的模型。 */
+  agentModel: string
+  /** agentReasoning 表示聊天页使用的推理级别。 */
+  agentReasoning?: string
+  /** agentLocked 表示会话开始后 agent 配置是否锁定。 */
+  agentLocked: boolean
+  /** agentSessionId 表示 agent 会话标识。 */
+  agentSessionId?: string
+  /** messages 表示消息列表。 */
+  messages: ChatMessage[]
+  /** createdAt 表示创建时间。 */
+  createdAt: string
+  /** updatedAt 表示更新时间。 */
+  updatedAt: string
+}
+
+export interface SnapshotPayload {
+  /** projects 表示所有 project。 */
+  projects: Project[]
+  /** chats 表示所有聊天页。 */
+  chats: Chat[]
+  /** agentProviders 表示可选 agent 和模型。 */
+  agentProviders?: AgentProviderOption[]
+  /** agentSkills 表示可选 skills。 */
+  agentSkills?: AgentSkillOption[]
+  /** lastAgentSelection 表示后端保存的上次 agent 配置。 */
+  lastAgentSelection?: LastAgentSelection
+}
+
+export interface ProjectChangedPayload {
+  /** project 表示变更后的 project。 */
+  project: Project
+}
+
+export interface ProjectDeletedPayload {
+  /** id 表示被删除的 project 标识。 */
+  id: string
+  /** chatIds 表示被删除的聊天页标识。 */
+  chatIds: string[]
+}
+
+export interface ChatChangedPayload {
+  /** chat 表示变更后的聊天页。 */
+  chat: Chat
+}
+
+export interface ChatDeletedPayload {
+  /** id 表示被删除的聊天页标识。 */
+  id: string
+  /** projectId 表示被删除聊天页所属 project。 */
+  projectId: string
+}
+
+export interface ChatMessageDeltaPayload {
+  /** chatId 表示聊天页标识。 */
+  chatId: string
+  /** messageId 表示消息标识。 */
+  messageId: string
+  /** delta 表示增量文本。 */
+  delta: string
+  /** text 表示服务端当前完整文本。 */
+  text: string
+  /** message 表示服务端当前完整消息。 */
+  message?: ChatMessage
+}
+
+export interface ChatMessageDonePayload {
+  /** chatId 表示聊天页标识。 */
+  chatId: string
+  /** message 表示完成后的消息。 */
+  message: ChatMessage
+}
+
+export interface AgentStatusPayload {
+  /** chatId 表示聊天页标识。 */
+  chatId: string
+  /** status 表示聊天页运行状态。 */
+  status: ChatStatus
+}
+
+export interface AgentProvidersChangedPayload {
+  /** agentProviders 表示更新后的 agent 和模型选项。 */
+  agentProviders: AgentProviderOption[]
+}
+
+export interface AgentSkillsChangedPayload {
+  /** agentSkills 表示更新后的 skill 选项。 */
+  agentSkills: AgentSkillOption[]
+}
+
+export interface HashRoute {
+  /** view 表示当前 hash 路由视图。 */
+  view: 'chat' | 'settings'
+  /** projectId 表示 hash 路由中的 project 标识。 */
+  projectId: string
+  /** chatId 表示 hash 路由中的聊天页标识。 */
+  chatId: string
+}

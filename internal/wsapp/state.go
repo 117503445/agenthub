@@ -145,11 +145,20 @@ type Chat struct {
 	UpdatedAt      time.Time     `json:"updatedAt"`                // UpdatedAt 表示更新时间。
 }
 
+// LastAgentSelection 表示新聊天页默认继承的 agent 配置。
+type LastAgentSelection struct {
+	Provider  string `json:"provider"`  // Provider 表示最近一次选择的 agent provider。
+	Model     string `json:"model"`     // Model 表示最近一次选择的模型。
+	Reasoning string `json:"reasoning"` // Reasoning 表示最近一次选择的推理级别。
+}
+
 // Snapshot 表示前端重连时需要恢复的完整内存状态。
 type Snapshot struct {
-	Projects       []Project             `json:"projects"`       // Projects 表示所有 project。
-	Chats          []Chat                `json:"chats"`          // Chats 表示所有聊天页。
-	AgentProviders []AgentProviderOption `json:"agentProviders"` // AgentProviders 表示可选 agent 和模型。
+	Projects           []Project             `json:"projects"`           // Projects 表示所有 project。
+	Chats              []Chat                `json:"chats"`              // Chats 表示所有聊天页。
+	AgentProviders     []AgentProviderOption `json:"agentProviders"`     // AgentProviders 表示可选 agent 和模型。
+	AgentSkills        []AgentSkillOption    `json:"agentSkills"`        // AgentSkills 表示可在输入框中选择的 skills。
+	LastAgentSelection LastAgentSelection    `json:"lastAgentSelection"` // LastAgentSelection 表示新聊天页默认 agent 配置。
 }
 
 // Store 维护 project、聊天页和消息的内存状态。
@@ -159,6 +168,7 @@ type Store struct {
 	chats           map[string]Chat
 	nextChatOrdinal map[string]int
 	agentProviders  []AgentProviderOption
+	lastAgent       LastAgentSelection
 }
 
 // NewStore 创建使用默认 agent 选项的内存状态存储。
@@ -176,6 +186,7 @@ func NewStoreWithAgentProviders(agentProviders []AgentProviderOption) *Store {
 		chats:           make(map[string]Chat),
 		nextChatOrdinal: make(map[string]int),
 		agentProviders:  cloneAgentProviderOptions(agentProviders),
+		lastAgent:       defaultLastAgentSelection(agentProviders),
 	}
 }
 
@@ -265,16 +276,18 @@ func (s *Store) CreateChat(projectID string) (Chat, error) {
 	}
 	s.nextChatOrdinal[projectID]++
 	now := time.Now()
+	lastAgent := s.lastAgent
 	chat := Chat{
-		ID:            newID("chat"),
-		ProjectID:     projectID,
-		Title:         fmt.Sprintf("聊天 %d", s.nextChatOrdinal[projectID]),
-		Status:        ChatStatusIdle,
-		AgentProvider: AgentProviderMockClaudeCode,
-		AgentModel:    DefaultAgentModel(AgentProviderMockClaudeCode, s.agentProviders),
-		Messages:      []ChatMessage{},
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		ID:             newID("chat"),
+		ProjectID:      projectID,
+		Title:          fmt.Sprintf("聊天 %d", s.nextChatOrdinal[projectID]),
+		Status:         ChatStatusIdle,
+		AgentProvider:  lastAgent.Provider,
+		AgentModel:     lastAgent.Model,
+		AgentReasoning: lastAgent.Reasoning,
+		Messages:       []ChatMessage{},
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}
 	s.chats[chat.ID] = chat
 	return cloneChat(chat), nil
@@ -339,6 +352,11 @@ func (s *Store) UpdateChatAgent(chatID string, provider string, model string, re
 	chat.AgentReasoning = normalizedReasoning
 	chat.UpdatedAt = time.Now()
 	s.chats[chatID] = chat
+	s.lastAgent = LastAgentSelection{
+		Provider:  normalizedProvider,
+		Model:     normalizedModel,
+		Reasoning: normalizedReasoning,
+	}
 	return cloneChat(chat), nil
 }
 
@@ -608,7 +626,6 @@ func (s *Store) SetChatSessionID(chatID string, sessionID string) (Chat, bool) {
 // Snapshot 返回当前内存状态的稳定排序副本。
 func (s *Store) Snapshot() Snapshot {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 
 	projects := make([]Project, 0, len(s.projects))
 	for _, project := range s.projects {
@@ -625,6 +642,10 @@ func (s *Store) Snapshot() Snapshot {
 	for _, chat := range s.chats {
 		chats = append(chats, cloneChat(chat))
 	}
+	agentProviders := cloneAgentProviderOptions(s.agentProviders)
+	lastAgent := s.lastAgent
+	s.mu.RUnlock()
+
 	sort.Slice(chats, func(i int, j int) bool {
 		if chats[i].CreatedAt.Equal(chats[j].CreatedAt) {
 			return chats[i].ID < chats[j].ID
@@ -632,7 +653,28 @@ func (s *Store) Snapshot() Snapshot {
 		return chats[i].CreatedAt.Before(chats[j].CreatedAt)
 	})
 
-	return Snapshot{Projects: projects, Chats: chats, AgentProviders: cloneAgentProviderOptions(s.agentProviders)}
+	projectPaths := make([]string, 0, len(projects))
+	for _, project := range projects {
+		projectPaths = append(projectPaths, project.Path)
+	}
+	return Snapshot{
+		Projects:           projects,
+		Chats:              chats,
+		AgentProviders:     agentProviders,
+		AgentSkills:        LoadAgentSkillOptions(projectPaths),
+		LastAgentSelection: lastAgent,
+	}
+}
+
+// AgentSkills 返回当前 project 和 CODEX_HOME 中可用的 skill 列表。
+func (s *Store) AgentSkills() []AgentSkillOption {
+	s.mu.RLock()
+	projectPaths := make([]string, 0, len(s.projects))
+	for _, project := range s.projects {
+		projectPaths = append(projectPaths, project.Path)
+	}
+	s.mu.RUnlock()
+	return LoadAgentSkillOptions(projectPaths)
 }
 
 // validateProjectInput 使用 projectPath 参数校验 project 输入，并返回派生名称和绝对路径。

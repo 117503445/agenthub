@@ -208,6 +208,23 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	}
 	steps = append(steps, "聊天框下方可以选择 agent、模型和推理级别，未输入时不显示发送按钮和 Agent 标签。")
 
+	if err := fillTestID(page, "message-input", "/"); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDText(page, "skill-menu", "e2e-skill", 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := page.Locator(`[data-testid="skill-option"][data-skill-id="e2e-skill"]`).Click(); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDValue(page, "message-input", "/e2e-skill ", 5*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := fillTestID(page, "message-input", ""); err != nil {
+		return fail(err)
+	}
+	steps = append(steps, "输入 / 时可以选择后端返回的 skills，并把选中的 skill 插入聊天输入框。")
+
 	firstPrompt := "第一条流式测试"
 	if err := fillTestID(page, "message-input", firstPrompt); err != nil {
 		return fail(err)
@@ -307,13 +324,22 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDText(page, "chat-tabs", "聊天 2", 10*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := expectTestIDValue(page, "agent-provider-select", "mock-codex", 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDValue(page, "agent-model-select", "mock-codex-gpt-5.5", 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDValue(page, "agent-reasoning-select", "xhigh", 10*time.Second); err != nil {
+		return fail(err)
+	}
 	if err := selectTestID(page, "agent-provider-select", "mock-claude-code"); err != nil {
 		return fail(err)
 	}
 	if err := expectTestIDValue(page, "agent-model-select", "mock-claude-sonnet", 10*time.Second); err != nil {
 		return fail(err)
 	}
-	steps = append(steps, "E2E 使用 Mock Claude Code 命令连接服务端 mock 模型服务。")
+	steps = append(steps, "新聊天默认继承上一次选择的 agent、模型和推理级别；E2E 使用 Mock Claude Code 命令连接服务端 mock 模型服务。")
 
 	secondPrompt := "第二条长流式测试"
 	if err := fillTestID(page, "message-input", secondPrompt); err != nil {
