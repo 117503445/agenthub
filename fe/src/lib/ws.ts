@@ -18,11 +18,14 @@ export interface ServerMessage<TPayload = unknown> {
   hostname?: string
 }
 
-// getWebSocketUrl 根据当前页面路径生成 WebSocket 地址，支持子路径部署。
-export function getWebSocketUrl() {
+// getWebSocketUrl 根据当前页面路径和 token 参数生成 WebSocket 地址，支持子路径部署。
+export function getWebSocketUrl(token = '') {
   const pageUrl = window.location.href.split('#')[0]
   const endpoint = new URL('ws', new URL('.', pageUrl))
   endpoint.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  if (token) {
+    endpoint.searchParams.set('token', token)
+  }
   return endpoint.toString()
 }
 

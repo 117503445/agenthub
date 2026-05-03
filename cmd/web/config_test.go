@@ -11,8 +11,10 @@ import (
 func TestParseWebConfigUsesOnlyAgentHubEnv(t *testing.T) {
 	t.Setenv("AGENTHUB_PORT", "6060")
 	t.Setenv("AGENTHUB_LOG_NO_COLOR", "true")
+	t.Setenv("AGENTHUB_TOKEN", "secret-token")
 	t.Setenv("PORT", "7070")
 	t.Setenv("CODING_LOG_NO_COLOR", "false")
+	t.Setenv("CODING_TOKEN", "legacy-token")
 
 	config, err := parseWebConfig(nil, io.Discard, io.Discard)
 	if err != nil {
@@ -23,6 +25,9 @@ func TestParseWebConfigUsesOnlyAgentHubEnv(t *testing.T) {
 	}
 	if !config.LogNoColor {
 		t.Fatalf("AGENTHUB_LOG_NO_COLOR=true 应禁用日志颜色")
+	}
+	if config.Token != "secret-token" {
+		t.Fatalf("token 应来自 AGENTHUB_TOKEN，当前值: %q", config.Token)
 	}
 }
 
@@ -53,5 +58,8 @@ func TestWebCLIHelpHidesLogNoColor(t *testing.T) {
 	}
 	if strings.Contains(help, "AGENTHUB_LOG_NO_COLOR") || strings.Contains(help, "log-no-color") {
 		t.Fatalf("帮助信息不应展示日志颜色配置，当前帮助: %s", help)
+	}
+	if strings.Contains(help, "AGENTHUB_TOKEN") || strings.Contains(help, "token") {
+		t.Fatalf("帮助信息不应展示 token 配置，当前帮助: %s", help)
 	}
 }

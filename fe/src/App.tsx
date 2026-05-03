@@ -1,9 +1,17 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Loader2, Wifi, WifiOff } from 'lucide-react'
+import { Loader2, LockKeyhole, Wifi, WifiOff } from 'lucide-react'
 import { getWebSocketUrl, sendClientMessage, type ServerMessage } from './lib/ws'
+import {
+  clearStoredAgentHubToken,
+  fetchAuthStatus,
+  readStoredAgentHubToken,
+  writeStoredAgentHubToken,
+} from './lib/auth'
 import { AgentSettingsPage } from './components/AgentSettingsPage'
 import { AppSidebar } from './components/AppSidebar'
 import { ChatWorkspace } from './components/ChatWorkspace'
+import { Button } from './components/ui/button'
+import { Input } from './components/ui/input'
 import {
   chatHasStarted,
   defaultModelForProvider,
@@ -41,6 +49,11 @@ function App() {
   const wsRef = useRef<WebSocket | null>(null)
   const pendingCreatedChatProjectIdRef = useRef('')
   const chatsRef = useRef<Chat[]>([])
+  const [authChecked, setAuthChecked] = useState(false)
+  const [authRequired, setAuthRequired] = useState(false)
+  const [authToken, setAuthToken] = useState(() => readStoredAgentHubToken())
+  const [authTokenInput, setAuthTokenInput] = useState(() => readStoredAgentHubToken())
+  const [authErrorText, setAuthErrorText] = useState('')
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting')
   const [hostname, setHostname] = useState('')
   const [projects, setProjects] = useState<Project[]>([])
@@ -105,6 +118,43 @@ function App() {
   useEffect(() => {
     chatsRef.current = chats
   }, [chats])
+
+  useEffect(() => {
+    let stopped = false
+
+    // loadAuthStatus 读取服务端鉴权状态，并决定是否需要 token。
+    const loadAuthStatus = async () => {
+      try {
+        const status = await fetchAuthStatus()
+        if (stopped) {
+          return
+        }
+        setAuthRequired(status.tokenRequired)
+        setAuthChecked(true)
+        if (!status.tokenRequired) {
+          clearStoredAgentHubToken()
+          setAuthToken('')
+          setAuthTokenInput('')
+        } else if (!readStoredAgentHubToken()) {
+          setConnectionState('closed')
+        }
+      } catch {
+        if (stopped) {
+          return
+        }
+        setAuthRequired(true)
+        setAuthToken('')
+        setAuthErrorText('无法读取鉴权状态')
+        setAuthChecked(true)
+        setConnectionState('error')
+      }
+    }
+
+    void loadAuthStatus()
+    return () => {
+      stopped = true
+    }
+  }, [])
 
   // resetProjectForm 使用 project 参数重置 project 表单。
   const resetProjectForm = useCallback((project?: Project | null) => {
@@ -499,18 +549,32 @@ function App() {
   )
 
   useEffect(() => {
+    if (!authChecked) {
+      return
+    }
+    if (authRequired && !authToken) {
+      return
+    }
+
     let stopped = false
     let retryTimer = 0
     let heartbeatTimer = 0
 
     // connect 建立 WebSocket 连接，并在断开后自动重连。
     const connect = () => {
+      let opened = false
       setConnectionState('connecting')
-      const ws = new WebSocket(getWebSocketUrl())
+      const ws = new WebSocket(getWebSocketUrl(authRequired ? authToken : ''))
       wsRef.current = ws
 
       ws.onopen = () => {
+        opened = true
         setConnectionState('open')
+        if (authRequired) {
+          writeStoredAgentHubToken(authToken)
+          setAuthTokenInput(authToken)
+          setAuthErrorText('')
+        }
         heartbeatTimer = window.setInterval(() => {
           sendClientMessage(ws, 'ping')
         }, 8000)
@@ -539,6 +603,14 @@ function App() {
         if (stopped) {
           return
         }
+        if (authRequired && authToken && !opened) {
+          clearStoredAgentHubToken()
+          setAuthToken('')
+          setAuthErrorText('Token 不正确')
+          setHasSnapshot(false)
+          setConnectionState('closed')
+          return
+        }
         setConnectionState('closed')
         retryTimer = window.setTimeout(connect, 1000)
       }
@@ -551,7 +623,20 @@ function App() {
       window.clearTimeout(retryTimer)
       wsRef.current?.close()
     }
-  }, [handleServerMessage])
+  }, [authChecked, authRequired, authToken, handleServerMessage])
+
+  // submitAgentHubToken 处理 event 参数对应的 token 提交。
+  const submitAgentHubToken = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const token = authTokenInput.trim()
+    if (!token) {
+      setAuthErrorText('请输入 Token')
+      return
+    }
+    clearStoredAgentHubToken()
+    setAuthErrorText('')
+    setAuthToken(token)
+  }
 
   // saveProject 处理 event 参数对应的 project 表单提交。
   const saveProject = (event: FormEvent<HTMLFormElement>) => {
@@ -726,6 +811,54 @@ function App() {
     ) : (
       <WifiOff className="h-4 w-4 text-rose-500" />
     )
+
+  if (!authChecked) {
+    return (
+      <main className="theme-paseo flex h-[100dvh] items-center justify-center bg-slate-100 text-slate-950">
+        <div className="flex items-center gap-2 text-sm text-[var(--paseo-muted)]" data-testid="auth-loading">
+          <Loader2 className="h-4 w-4 animate-spin text-amber-500" />
+          <span>正在连接</span>
+        </div>
+      </main>
+    )
+  }
+
+  if (authRequired && !authToken) {
+    return (
+      <main className="theme-paseo flex h-[100dvh] items-center justify-center bg-slate-100 px-4 text-slate-950">
+        <form
+          className="w-full max-w-sm rounded-lg border border-[var(--paseo-border)] bg-white p-5 shadow-sm"
+          data-testid="token-auth-form"
+          onSubmit={submitAgentHubToken}
+        >
+          <div className="mb-5 flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-md border border-[var(--paseo-border)] bg-[var(--paseo-surface-1)] text-[var(--paseo-accent)]">
+              <LockKeyhole className="h-4 w-4" />
+            </div>
+            <h1 className="text-base font-medium text-[var(--paseo-foreground)]">AgentHub Token</h1>
+          </div>
+          <label className="mb-2 block text-sm text-[var(--paseo-muted)]" htmlFor="agenthub-token-input">
+            Token
+          </label>
+          <Input
+            autoComplete="current-password"
+            autoFocus
+            data-testid="agenthub-token-input"
+            id="agenthub-token-input"
+            onChange={(event) => setAuthTokenInput(event.target.value)}
+            type="password"
+            value={authTokenInput}
+          />
+          <p className="mt-3 min-h-5 text-sm text-[var(--paseo-danger)]" data-testid="token-auth-error">
+            {authErrorText}
+          </p>
+          <Button className="mt-2 w-full" data-testid="agenthub-token-submit" type="submit">
+            进入
+          </Button>
+        </form>
+      </main>
+    )
+  }
 
   return (
     <main className="theme-paseo grid h-[100dvh] min-h-0 overflow-hidden bg-slate-100 text-slate-950 lg:grid-cols-[320px_minmax(0,1fr)]">

@@ -14,10 +14,11 @@ import (
 	"github.com/117503445/agenthub/internal/wsapp"
 )
 
-// newHTTPHandler 使用 ctx 和 port 参数创建 WebSocket 服务的 HTTP 处理器。
-func newHTTPHandler(ctx context.Context, port string) http.Handler {
+// newHTTPHandler 使用 ctx 和 config 参数创建 WebSocket 服务的 HTTP 处理器。
+func newHTTPHandler(ctx context.Context, config webConfig) http.Handler {
 	mux := http.NewServeMux()
-	wsServer := wsapp.NewServer(ctx, buildinfo.Version(), resolveAgentConfig(port))
+	wsServer := wsapp.NewServer(ctx, buildinfo.Version(), resolveAgentConfig(config.Port))
+	auth := newTokenAuth(config.Token)
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -31,17 +32,25 @@ func newHTTPHandler(ctx context.Context, port string) http.Handler {
 	mux.HandleFunc("/mock/anthropic/v1/messages", wsapp.ServeMockAnthropicMessages)
 	mux.HandleFunc("/mock/openai/v1/responses", wsapp.ServeMockOpenAIResponses)
 	mux.HandleFunc("/mock/openai/responses", wsapp.ServeMockOpenAIResponses)
-	mux.HandleFunc("/ws", wsServer.ServeWS)
-	mux.Handle("/", subpathHandler(wsServer, staticHandler()))
+	mux.HandleFunc("/auth/status", auth.ServeStatus)
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		auth.ServeWS(w, r, wsServer.ServeWS)
+	})
+	mux.Handle("/", subpathHandler(wsServer, auth, staticHandler()))
 
 	return mux
 }
 
-// subpathHandler 使用 wsServer 和 static 参数处理子路径下的前端与 WebSocket 请求。
-func subpathHandler(wsServer *wsapp.Server, static http.Handler) http.Handler {
+// subpathHandler 使用 wsServer、auth 和 static 参数处理子路径下的前端、鉴权状态与 WebSocket 请求。
+func subpathHandler(wsServer *wsapp.Server, auth tokenAuth, static http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if path.Base(path.Clean(r.URL.Path)) == "ws" {
-			wsServer.ServeWS(w, r)
+		requestPath := path.Clean(r.URL.Path)
+		if path.Base(requestPath) == "ws" {
+			auth.ServeWS(w, r, wsServer.ServeWS)
+			return
+		}
+		if isAuthStatusPath(requestPath) {
+			auth.ServeStatus(w, r)
 			return
 		}
 		static.ServeHTTP(w, r)
@@ -75,9 +84,9 @@ func backendMockBaseURL(port string) string {
 	return defaultAgentHubBaseURL(port)
 }
 
-// ListenAndServe 使用 ctx 参数记录日志，并在 port 参数指定的端口启动 HTTP 服务。
-func ListenAndServe(ctx context.Context, port string) error {
-	listener, err := net.Listen("tcp", ":"+port)
+// ListenAndServe 使用 ctx 和 config 参数记录日志并启动 HTTP 服务。
+func ListenAndServe(ctx context.Context, config webConfig) error {
+	listener, err := net.Listen("tcp", ":"+config.Port)
 	if err != nil {
 		log.Ctx(ctx).Error().Err(err).Msg("监听端口失败")
 		return err
@@ -89,5 +98,5 @@ func ListenAndServe(ctx context.Context, port string) error {
 	}()
 
 	log.Ctx(ctx).Info().Str("addr", listener.Addr().String()).Msg("Web 服务已启动")
-	return http.Serve(listener, newHTTPHandler(ctx, port))
+	return http.Serve(listener, newHTTPHandler(ctx, config))
 }

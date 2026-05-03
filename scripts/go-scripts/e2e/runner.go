@@ -21,6 +21,7 @@ import (
 type E2ECase struct {
 	Name string                // Name 表示用例名称。
 	Run  func(E2EContext) bool // Run 使用 E2EContext 参数运行用例。
+	Env  map[string]string     // Env 表示当前用例额外覆盖的环境变量。
 }
 
 // E2EContext 表示 E2E 用例运行所需上下文。
@@ -105,7 +106,10 @@ func Run(args []string) int {
 func registeredCases() map[string]E2ECase {
 	return map[string]E2ECase{
 		"case_agent_chat": {Name: "case_agent_chat", Run: runAgentChatCase},
-		"case_ws":         {Name: "case_ws", Run: runWSCase},
+		"case_token_auth": {Name: "case_token_auth", Run: runTokenAuthCase, Env: map[string]string{
+			"AGENTHUB_TOKEN": e2eAgentHubToken,
+		}},
+		"case_ws": {Name: "case_ws", Run: runWSCase},
 	}
 }
 
@@ -165,7 +169,7 @@ func runCase(rootDir string, serverCmd string, item E2ECase) bool {
 		}
 	}
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
-	process, stopServer, err := startServer(rootDir, serverCmd, port, legacyPort, logsDir)
+	process, stopServer, err := startServer(rootDir, serverCmd, port, legacyPort, logsDir, item.Env)
 	if err != nil {
 		logger.Errorf("启动服务失败: %v", err)
 		return false
@@ -193,8 +197,15 @@ func runCase(rootDir string, serverCmd string, item E2ECase) bool {
 	return success
 }
 
-// startServer 使用 rootDir、serverCmd、port、legacyPort 和 logsDir 参数启动被测服务。
-func startServer(rootDir string, serverCmd string, port int, legacyPort int, logsDir string) (*exec.Cmd, func(), error) {
+// startServer 使用 rootDir、serverCmd、port、legacyPort、logsDir 和 extraEnv 参数启动被测服务。
+func startServer(
+	rootDir string,
+	serverCmd string,
+	port int,
+	legacyPort int,
+	logsDir string,
+	extraEnv map[string]string,
+) (*exec.Cmd, func(), error) {
 	parts := strings.Fields(serverCmd)
 	if len(parts) == 0 {
 		return nil, nil, fmt.Errorf("server-cmd 不能为空")
@@ -211,12 +222,17 @@ func startServer(rootDir string, serverCmd string, port int, legacyPort int, log
 
 	cmd := exec.Command(parts[0], parts[1:]...)
 	cmd.Dir = rootDir
-	cmd.Env = withEnvOverride(os.Environ(), map[string]string{
+	envOverride := map[string]string{
 		"AGENTHUB_PORT":         fmt.Sprintf("%d", port),
 		"AGENTHUB_LOG_NO_COLOR": "true",
+		"AGENTHUB_TOKEN":        "",
 		"PORT":                  fmt.Sprintf("%d", legacyPort),
 		"HOME":                  homeDir,
-	})
+	}
+	for key, value := range extraEnv {
+		envOverride[key] = value
+	}
+	cmd.Env = withEnvOverride(os.Environ(), envOverride)
 	cmd.Stdout = serverLog
 	cmd.Stderr = serverLog
 	if err := cmd.Start(); err != nil {

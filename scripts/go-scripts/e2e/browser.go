@@ -235,6 +235,96 @@ func expectTestIDValue(page playwright.Page, id string, expected string, timeout
 	return fmt.Errorf("等待元素 %q 值为 %q 超时，实际值: %s", id, expected, lastValue)
 }
 
+// expectBrowserStorage 使用 page、expectedKeys、expectedValues 和 timeout 参数等待浏览器只持久化指定状态。
+func expectBrowserStorage(
+	page playwright.Page,
+	expectedKeys []string,
+	expectedValues map[string]string,
+	timeout time.Duration,
+) error {
+	deadline := time.Now().Add(timeout)
+	var lastState string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := page.Evaluate(`() => {
+			const localEntries = {};
+			for (const key of Object.keys(window.localStorage).sort()) {
+				localEntries[key] = window.localStorage.getItem(key) ?? '';
+			}
+			const sessionKeys = Object.keys(window.sessionStorage).sort();
+			return {
+				localKeys: Object.keys(localEntries).sort(),
+				localEntries,
+				sessionKeys,
+			};
+		}`, nil)
+		if err == nil {
+			state, ok := value.(map[string]any)
+			if ok {
+				lastState = fmt.Sprint(state)
+				if browserStorageMatches(state, expectedKeys, expectedValues) {
+					return nil
+				}
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待浏览器持久化状态匹配超时，最后错误: %w", lastErr)
+	}
+	return fmt.Errorf("等待浏览器持久化状态匹配超时，最后状态: %s", lastState)
+}
+
+// browserStorageMatches 使用 state、expectedKeys 和 expectedValues 参数判断浏览器持久化状态是否匹配预期。
+func browserStorageMatches(state map[string]any, expectedKeys []string, expectedValues map[string]string) bool {
+	localKeys, ok := stringSliceFromAny(state["localKeys"])
+	if !ok || !sameStringSlice(localKeys, expectedKeys) {
+		return false
+	}
+	sessionKeys, ok := stringSliceFromAny(state["sessionKeys"])
+	if !ok || len(sessionKeys) != 0 {
+		return false
+	}
+	entries, ok := state["localEntries"].(map[string]any)
+	if !ok {
+		return false
+	}
+	for key, expected := range expectedValues {
+		if fmt.Sprint(entries[key]) != expected {
+			return false
+		}
+	}
+	return true
+}
+
+// stringSliceFromAny 使用 value 参数转换 JavaScript 字符串数组。
+func stringSliceFromAny(value any) ([]string, bool) {
+	items, ok := value.([]any)
+	if !ok {
+		return nil, false
+	}
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		result = append(result, fmt.Sprint(item))
+	}
+	return result, true
+}
+
+// sameStringSlice 使用 actual 和 expected 参数比较字符串切片。
+func sameStringSlice(actual []string, expected []string) bool {
+	if len(actual) != len(expected) {
+		return false
+	}
+	for index, item := range actual {
+		if item != expected[index] {
+			return false
+		}
+	}
+	return true
+}
+
 // expectTestIDDisabled 使用 page、id、expected 和 timeout 参数等待元素禁用状态符合预期。
 func expectTestIDDisabled(page playwright.Page, id string, expected bool, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)

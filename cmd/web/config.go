@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 
@@ -15,6 +16,7 @@ const defaultWebPort = "8080"
 type webConfig struct {
 	Port       string // Port 表示 Web 服务监听端口。
 	LogNoColor bool   // LogNoColor 表示是否禁用日志颜色。
+	Token      string // Token 表示前端访问 WebSocket 时需要提供的 token。
 }
 
 // webCLI 表示 Kong 解析的命令行参数。
@@ -39,6 +41,7 @@ func parseWebConfig(args []string, stdout io.Writer, stderr io.Writer) (webConfi
 	return webConfig{
 		Port:       strings.TrimSpace(cli.Port),
 		LogNoColor: cli.LogNoColor,
+		Token:      strings.TrimSpace(os.Getenv("AGENTHUB_TOKEN")),
 	}, nil
 }
 

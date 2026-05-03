@@ -53,7 +53,7 @@ func main() {
 		Msg("构建信息")
 
 	ctx := log.Logger.WithContext(context.Background())
-	if err := ListenAndServe(ctx, config.Port); err != nil {
+	if err := ListenAndServe(ctx, config); err != nil {
 		log.Panic().Err(err).Msg("服务启动失败")
 	}
 }
