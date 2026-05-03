@@ -22,10 +22,10 @@ func TestResolveAgentConfigUsesBackendMockService(t *testing.T) {
 	t.Setenv("ANTHROPIC_MODEL", "legacy-model")
 	t.Setenv("OPENAI_BASE_URL", "https://legacy-openai.example/v1")
 	t.Setenv("OPENAI_API_KEY", "legacy-openai-key")
-	t.Setenv("CODING_CLAUDE_COMMAND", "legacy-claude")
-	t.Setenv("CODING_CODEX_COMMAND", "legacy-codex")
-	t.Setenv("CODING_MOCK_CLAUDE_COMMAND", "legacy-mock-claude")
-	t.Setenv("CODING_MOCK_CODEX_COMMAND", "legacy-mock-codex")
+	t.Setenv("LEGACY_AGENTHUB_CLAUDE_COMMAND", "legacy-claude")
+	t.Setenv("LEGACY_AGENTHUB_CODEX_COMMAND", "legacy-codex")
+	t.Setenv("LEGACY_AGENTHUB_MOCK_CLAUDE_COMMAND", "legacy-mock-claude")
+	t.Setenv("LEGACY_AGENTHUB_MOCK_CODEX_COMMAND", "legacy-mock-codex")
 
 	config := resolveAgentConfig("6767")
 	if config.AnthropicBaseURL != "" || config.OpenAIBaseURL != "" {

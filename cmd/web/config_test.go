@@ -17,8 +17,8 @@ func TestParseWebConfigUsesOnlyAgentHubEnv(t *testing.T) {
 	t.Setenv("AGENTHUB_TOKEN", "secret-token")
 	t.Setenv("AGENTHUB_DATA", "~/custom-data")
 	t.Setenv("PORT", "7070")
-	t.Setenv("CODING_LOG_NO_COLOR", "false")
-	t.Setenv("CODING_TOKEN", "legacy-token")
+	t.Setenv("LEGACY_AGENTHUB_LOG_NO_COLOR", "false")
+	t.Setenv("LEGACY_AGENTHUB_TOKEN", "legacy-token")
 
 	config, err := parseWebConfig(nil, io.Discard, io.Discard)
 	if err != nil {

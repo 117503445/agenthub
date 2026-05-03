@@ -623,13 +623,13 @@ func (r *AgentRuntime) mockCodexConfigArgs() []string {
 		return nil
 	}
 	providerConfig := fmt.Sprintf(
-		`{name="Coding Mock OpenAI", base_url=%q, env_key="OPENAI_API_KEY", wire_api="responses"}`,
+		`{name="AgentHub Mock OpenAI", base_url=%q, env_key="OPENAI_API_KEY", wire_api="responses"}`,
 		baseURL,
 	)
 	return []string{
 		"--ignore-user-config",
-		"-c", `model_provider="coding_mock"`,
-		"-c", "model_providers.coding_mock=" + providerConfig,
+		"-c", `model_provider="agenthub_mock"`,
+		"-c", "model_providers.agenthub_mock=" + providerConfig,
 	}
 }
 
@@ -1361,7 +1361,7 @@ func (r *AgentRuntime) prepareImageFiles(images []MessageImage) ([]string, error
 	if len(images) == 0 {
 		return nil, nil
 	}
-	dir, err := os.MkdirTemp("", "coding-agent-images-*")
+	dir, err := os.MkdirTemp("", "agenthub-agent-images-*")
 	if err != nil {
 		return nil, fmt.Errorf("创建图片临时目录失败: %w", err)
 	}

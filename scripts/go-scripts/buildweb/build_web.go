@@ -21,7 +21,7 @@ func Run() error {
 // BuildBinary 构建包含前端资源的 WebSocket 后端二进制，outputPath 参数指定二进制输出路径，stdout 和 stderr 参数接收构建日志。
 func BuildBinary(outputPath string, stdout io.Writer, stderr io.Writer) error {
 	distDir := filepath.Join("cmd", "web", "dist")
-	backupDir, err := os.MkdirTemp("", "coding-web-dist-*")
+	backupDir, err := os.MkdirTemp("", "agenthub-web-dist-*")
 	if err != nil {
 		return fmt.Errorf("创建临时目录失败: %w", err)
 	}

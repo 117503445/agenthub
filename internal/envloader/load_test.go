@@ -8,8 +8,8 @@ import (
 
 // TestLoad 验证 t 参数提供的测试上下文中 .env 文件加载行为。
 func TestLoad(t *testing.T) {
-	existingKey := "CODING_TEST_EXISTING"
-	newKey := "CODING_TEST_NEW"
+	existingKey := "AGENTHUB_TEST_EXISTING"
+	newKey := "AGENTHUB_TEST_NEW"
 	t.Setenv(existingKey, "keep")
 	t.Cleanup(func() {
 		_ = os.Unsetenv(newKey)

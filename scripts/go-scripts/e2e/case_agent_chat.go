@@ -42,6 +42,13 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := gotoPage(page, ctx.BaseURL); err != nil {
 		return fail(err)
 	}
+	title, err := page.Title()
+	if err != nil {
+		return fail(err)
+	}
+	if title != "agenthub" {
+		return fail(fmt.Errorf("页面标题应为 agenthub，当前为 %q", title))
+	}
 	if err := installNotificationProbe(page); err != nil {
 		return fail(err)
 	}
@@ -51,7 +58,7 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDText(page, "sidebar-identity", "已连接", 10*time.Second); err != nil {
 		return fail(err)
 	}
-	if err := expectTestIDNotText(page, "sidebar-identity", "Coding Agent", 2*time.Second); err != nil {
+	if err := expectTestIDNotText(page, "sidebar-identity", "AgentHub Projects", 2*time.Second); err != nil {
 		return fail(err)
 	}
 	if err := expectTestIDNotText(page, "sidebar-identity", "Projects", 2*time.Second); err != nil {

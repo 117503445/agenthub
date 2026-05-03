@@ -152,7 +152,7 @@ export function AppSidebar({
               value={projectPath}
               onChange={(event) => onProjectPathChange(event.target.value)}
               className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 font-mono text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-teal-600 focus:ring-2 focus:ring-teal-100"
-              placeholder="/workspace/project/coding"
+              placeholder="/workspace/project/agenthub"
             />
             <button
               data-testid="project-save-button"

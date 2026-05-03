@@ -1,4 +1,4 @@
-# coding
+# agenthub
 
 这是一个 Go WebSocket 后端 + React 前端项目。
 

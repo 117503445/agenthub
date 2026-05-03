@@ -99,9 +99,9 @@ func clickTestID(page playwright.Page, id string) error {
 // installNotificationProbe 使用 page 参数注入桌面通知探针。
 func installNotificationProbe(page playwright.Page) error {
 	_, err := page.Evaluate(`() => {
-		window.__codingNotifications = [];
+		window.__agenthubNotifications = [];
 		function FakeNotification(title, options) {
-			window.__codingNotifications.push({
+			window.__agenthubNotifications.push({
 				title: String(title || ''),
 				body: String(options?.body || ''),
 			});
@@ -493,7 +493,7 @@ func expectNotificationCount(page playwright.Page, minimum int, timeout time.Dur
 	var lastCount int
 	var lastErr error
 	for time.Now().Before(deadline) {
-		value, err := page.Evaluate(`() => window.__codingNotifications?.length ?? 0`, nil)
+		value, err := page.Evaluate(`() => window.__agenthubNotifications?.length ?? 0`, nil)
 		if err == nil {
 			switch typed := value.(type) {
 			case int:
