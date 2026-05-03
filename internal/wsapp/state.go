@@ -244,6 +244,18 @@ func (s *Store) DeleteProject(id string) ([]string, error) {
 	return chatIDs, nil
 }
 
+// DeleteChat 使用 id 参数删除单个聊天页，并返回其所属 project 标识。
+func (s *Store) DeleteChat(id string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	chat, ok := s.chats[id]
+	if !ok {
+		return "", ErrNotFound
+	}
+	delete(s.chats, id)
+	return chat.ProjectID, nil
+}
+
 // CreateChat 使用 projectID 参数创建聊天页。
 func (s *Store) CreateChat(projectID string) (Chat, error) {
 	s.mu.Lock()

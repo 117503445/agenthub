@@ -176,6 +176,18 @@ func (s *Server) handle(ctx context.Context, outbound chan ServerMessage, msg Cl
 		}
 		s.broadcast("chat.changed", map[string]any{"chat": chat})
 		return nil
+	case "chat.delete":
+		var payload IDPayload
+		if err := decodePayload(msg, &payload); err != nil {
+			return err
+		}
+		projectID, err := s.store.DeleteChat(payload.ID)
+		if err != nil {
+			return err
+		}
+		s.agents.Stop(payload.ID)
+		s.broadcast("chat.deleted", map[string]any{"id": payload.ID, "projectId": projectID})
+		return nil
 	case "chat.agent.update":
 		var payload ChatAgentUpdatePayload
 		if err := decodePayload(msg, &payload); err != nil {

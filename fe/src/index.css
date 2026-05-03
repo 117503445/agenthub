@@ -21,7 +21,7 @@ button,
 input,
 select,
 textarea {
-  font: inherit;
+  font-family: inherit;
 }
 
 .theme-paseo {
@@ -45,6 +45,32 @@ textarea {
   --paseo-danger-muted: #fee2e2;
   background: var(--paseo-surface-0) !important;
   color: var(--paseo-foreground) !important;
+}
+
+.theme-paseo * {
+  scrollbar-width: thin;
+  scrollbar-color: var(--paseo-surface-4) transparent;
+}
+
+.theme-paseo *::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.theme-paseo *::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.theme-paseo *::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: var(--paseo-surface-4);
+  background-clip: content-box;
+}
+
+.theme-paseo *::-webkit-scrollbar-thumb:hover {
+  background: var(--paseo-muted-2);
+  background-clip: content-box;
 }
 
 .theme-paseo > aside {
@@ -201,6 +227,33 @@ textarea {
 .theme-paseo textarea:focus {
   border-color: var(--paseo-accent) !important;
   box-shadow: 0 0 0 3px rgb(32 116 74 / 0.12) !important;
+}
+
+.theme-paseo .composer-shell {
+  background-color: var(--paseo-surface-0) !important;
+  box-shadow: 0 18px 44px rgb(15 23 42 / 0.08) !important;
+}
+
+.theme-paseo .composer-shell:focus-within {
+  border-color: var(--paseo-border) !important;
+  box-shadow: 0 18px 44px rgb(15 23 42 / 0.08), 0 0 0 3px rgb(32 116 74 / 0.08) !important;
+}
+
+.theme-paseo .composer-shell textarea,
+.theme-paseo .composer-shell textarea:focus {
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.theme-paseo .composer-select {
+  border-color: transparent !important;
+  background-color: var(--paseo-surface-1) !important;
+  color: var(--paseo-muted) !important;
+}
+
+.theme-paseo .composer-select:focus {
+  border-color: transparent !important;
+  box-shadow: 0 0 0 2px rgb(32 116 74 / 0.1) !important;
 }
 
 .theme-paseo button {

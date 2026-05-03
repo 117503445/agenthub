@@ -73,7 +73,7 @@ const TabsTrigger = React.forwardRef<HTMLButtonElement, TabsTriggerProps>(({ val
         onClick?.(event)
       }}
       className={cn(
-        'inline-flex h-full min-h-10 shrink-0 cursor-pointer items-center gap-2 border-b-2 border-transparent px-3 text-sm text-[var(--paseo-muted)] transition hover:text-[var(--paseo-foreground)] data-[state=active]:border-[var(--paseo-accent)] data-[state=active]:text-[var(--paseo-foreground)]',
+        'inline-flex h-full min-h-8 shrink-0 cursor-pointer items-center gap-1.5 border-b-2 border-transparent px-2 text-xs text-[var(--paseo-muted)] transition hover:text-[var(--paseo-foreground)] data-[state=active]:border-[var(--paseo-accent)] data-[state=active]:text-[var(--paseo-foreground)]',
         className,
       )}
       {...props}

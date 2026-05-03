@@ -51,6 +51,15 @@ func runWSCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDCount(page, "project-name-input", 0, 2*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := expectTestIDCount(page, "project-path-input", 0, 2*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := clickTestID(page, "project-add-button"); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDCount(page, "project-path-input", 1, 2*time.Second); err != nil {
+		return fail(err)
+	}
 	if err := fillTestID(page, "project-path-input", ctx.RootDir); err != nil {
 		return fail(err)
 	}

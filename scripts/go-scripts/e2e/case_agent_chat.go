@@ -43,13 +43,22 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDText(page, "connection-state", "已连接", 10*time.Second); err != nil {
 		return fail(err)
 	}
-	if err := expectTestIDText(page, "sidebar-footer", "已连接", 10*time.Second); err != nil {
+	if err := expectTestIDText(page, "sidebar-identity", "已连接", 10*time.Second); err != nil {
 		return fail(err)
 	}
-	if err := expectTestIDNotText(page, "message-log", "创建聊天后开始", 2*time.Second); err != nil {
+	if err := expectTestIDNotText(page, "sidebar-identity", "Coding Agent", 2*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDNotText(page, "sidebar-identity", "Projects", 2*time.Second); err != nil {
 		return fail(err)
 	}
 	if err := expectTestIDNonEmpty(page, "machine-name", 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDsSameLine(page, "machine-name", "connection-state", 2, 5*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDNotText(page, "message-log", "创建聊天后开始", 2*time.Second); err != nil {
 		return fail(err)
 	}
 	if err := expectTestIDCount(page, "project-add-button", 1, 2*time.Second); err != nil {
@@ -68,6 +77,15 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDCount(page, "project-name-input", 0, 2*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := expectTestIDCount(page, "project-path-input", 0, 2*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := clickTestID(page, "project-add-button"); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDCount(page, "project-path-input", 1, 2*time.Second); err != nil {
+		return fail(err)
+	}
 	if err := fillTestID(page, "project-path-input", projectPath); err != nil {
 		return fail(err)
 	}
@@ -75,6 +93,18 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 		return fail(err)
 	}
 	if err := expectTestIDText(page, "project-list", projectDisplayName, 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDText(page, "project-name", projectDisplayName, 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDCount(page, "project-edit-button", 0, 2*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDCount(page, "project-delete-button", 1, 2*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDsSameLine(page, "project-name", "project-delete-button", 2, 5*time.Second); err != nil {
 		return fail(err)
 	}
 	if err := expectTestIDNotText(page, "project-list", projectPath, 2*time.Second); err != nil {
@@ -89,6 +119,9 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDsSameLine(page, "project-path-text", "project-git-info", 2, 5*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := expectProjectMetaSingleCommit(page, 5*time.Second); err != nil {
+		return fail(err)
+	}
 	if err := expectTestIDCount(page, "agent-config-panel", 0, 2*time.Second); err != nil {
 		return fail(err)
 	}
@@ -98,14 +131,23 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDCount(page, "chat-tab-add-button", 1, 2*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := expectTestIDCount(page, "chat-tab-close-button", 1, 2*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectChatTabCompact(page, 5*time.Second); err != nil {
+		return fail(err)
+	}
 	if err := expectTestIDPinnedToViewportBottom(page, "composer-taskbar", 2*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectComposerShellLayout(page, 5*time.Second); err != nil {
 		return fail(err)
 	}
 	if err := expectTestIDNotText(page, "message-log", "还没有消息", 2*time.Second); err != nil {
 		return fail(err)
 	}
 	screenshot(page, filepath.Join(ctx.ScreenshotsDir, "01-chat-created.png"), true)
-	steps = append(steps, "创建 project 后顶部同一行展示完整路径和 git 信息，侧边栏只显示最后一级目录名，任务栏固定在底部。")
+	steps = append(steps, "创建 project 后顶部同一行展示完整路径和单份 git 信息，侧边栏只显示最后一级目录名，任务栏固定在底部。")
 
 	if err := clickTestID(page, "agent-settings-button"); err != nil {
 		return fail(err)
@@ -166,6 +208,12 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDText(page, "message-log", firstPrompt, 10*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := expectTestIDAttributeValue(page, "chat-status-dot", "data-status", "running", 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDAttributeValue(page, "project-status-dot", "data-status", "running", 10*time.Second); err != nil {
+		return fail(err)
+	}
 	if err := expectTestIDText(page, "chat-tabs", firstPrompt, 10*time.Second); err != nil {
 		return fail(err)
 	}
@@ -187,10 +235,28 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDAttributeAbsent(page, "tool-call-details", "open", 5*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := expectTestIDCount(page, "user-copy-button", 1, 2*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDCount(page, "assistant-copy-button", 1, 2*time.Second); err != nil {
+		return fail(err)
+	}
 	screenshot(page, filepath.Join(ctx.ScreenshotsDir, "02-streaming.png"), true)
 	steps = append(steps, "Mock Codex 通过真实 Codex CLI 请求后端 mock 模型服务，工具调用标题直接展示命令并排在输出前。")
 
 	if err := expectTestIDCount(page, "send-button", 0, 30*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDAttributeValue(page, "chat-status-dot", "data-status", "success", 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDAttributeValue(page, "project-status-dot", "data-status", "success", 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := clickFirstTestID(page, "chat-tab"); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDCount(page, "chat-status-dot", 0, 5*time.Second); err != nil {
 		return fail(err)
 	}
 	if err := expectTestIDDisabled(page, "agent-provider-select", true, 5*time.Second); err != nil {
@@ -288,6 +354,12 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 		return fail(err)
 	}
 	if err := expectTestIDText(page, "message-log", "失败", 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDAttributeValue(page, "chat-status-dot", "data-status", "error", 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDAttributeValue(page, "project-status-dot", "data-status", "error", 10*time.Second); err != nil {
 		return fail(err)
 	}
 	steps = append(steps, "agent 报错时，错误信息会返回并显示在前端聊天记录中。")

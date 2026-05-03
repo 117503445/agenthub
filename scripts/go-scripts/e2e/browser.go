@@ -93,6 +93,11 @@ func clickTestID(page playwright.Page, id string) error {
 	return getByTestID(page, id).Click()
 }
 
+// clickFirstTestID 使用 page 和 id 参数点击首个 data-testid 对应元素。
+func clickFirstTestID(page playwright.Page, id string) error {
+	return getByTestID(page, id).First().Click()
+}
+
 // selectTestID 使用 page、id 和 value 参数选择 data-testid 对应下拉框选项。
 func selectTestID(page playwright.Page, id string, value string) error {
 	_, err := getByTestID(page, id).SelectOption(playwright.SelectOptionValues{
@@ -173,6 +178,40 @@ func expectTestIDAttributeAbsent(page playwright.Page, id string, name string, t
 	return fmt.Errorf("等待元素 %q 属性 %q 不存在超时，实际存在: %v", id, name, lastHasAttribute)
 }
 
+// expectTestIDAttributeValue 使用 page、id、name、expected 和 timeout 参数等待至少一个元素属性符合预期。
+func expectTestIDAttributeValue(page playwright.Page, id string, name string, expected string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastValues string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := page.Evaluate(`([id, name]) => {
+			const elements = Array.from(document.querySelectorAll('[data-testid="' + id + '"]'));
+			return elements.map((element) => element.getAttribute(name) ?? '');
+		}`, []any{id, name})
+		if err == nil {
+			values, ok := value.([]any)
+			if ok {
+				parts := make([]string, 0, len(values))
+				for _, item := range values {
+					text := fmt.Sprint(item)
+					parts = append(parts, text)
+					if text == expected {
+						return nil
+					}
+				}
+				lastValues = strings.Join(parts, ", ")
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待元素 %q 属性 %q 为 %q 超时，最后错误: %w", id, name, expected, lastErr)
+	}
+	return fmt.Errorf("等待元素 %q 属性 %q 为 %q 超时，实际值: %s", id, name, expected, lastValues)
+}
+
 // expectTestIDNonEmpty 使用 page、id 和 timeout 参数等待元素文本非空。
 func expectTestIDNonEmpty(page playwright.Page, id string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
@@ -216,11 +255,13 @@ func expectTestIDsSameLine(page playwright.Page, firstID string, secondID string
 			}
 			const firstRect = first.getBoundingClientRect();
 			const secondRect = second.getBoundingClientRect();
-			const diff = Math.abs(firstRect.top - secondRect.top);
+			const firstCenter = firstRect.top + firstRect.height / 2;
+			const secondCenter = secondRect.top + secondRect.height / 2;
+			const diff = Math.abs(firstCenter - secondCenter);
 			if (diff <= tolerance) {
 				return '';
 			}
-			return 'top diff=' + diff.toFixed(2) + ', first=' + firstRect.top.toFixed(2) + ', second=' + secondRect.top.toFixed(2);
+			return 'center diff=' + diff.toFixed(2) + ', first=' + firstCenter.toFixed(2) + ', second=' + secondCenter.toFixed(2);
 		}`, []any{firstID, secondID, tolerance})
 		if err == nil {
 			if text, ok := value.(string); ok {
@@ -238,6 +279,129 @@ func expectTestIDsSameLine(page playwright.Page, firstID string, secondID string
 		return fmt.Errorf("等待元素 %q 和 %q 同行超时，最后错误: %w", firstID, secondID, lastErr)
 	}
 	return fmt.Errorf("等待元素 %q 和 %q 同行超时，最后状态: %s", firstID, secondID, lastState)
+}
+
+// expectProjectMetaSingleCommit 使用 page 和 timeout 参数等待顶部 Git 哈希只出现一次。
+func expectProjectMetaSingleCommit(page playwright.Page, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastState string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := page.Evaluate(`() => {
+			const meta = document.querySelector('[data-testid="project-meta"]');
+			const commit = document.querySelector('[data-testid="project-commit-text"]');
+			if (!meta || !commit) {
+				return 'missing meta=' + Boolean(meta) + ', commit=' + Boolean(commit);
+			}
+			const commitText = (commit.textContent ?? '').trim();
+			if (!commitText || commitText === '-') {
+				return '';
+			}
+			const metaText = meta.textContent ?? '';
+			const count = metaText.split(commitText).length - 1;
+			if (count === 1) {
+				return '';
+			}
+			return 'commit=' + commitText + ', count=' + count + ', text=' + metaText;
+		}`, nil)
+		if err == nil {
+			if text, ok := value.(string); ok {
+				lastState = text
+				if text == "" {
+					return nil
+				}
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待顶部 Git 哈希只出现一次超时，最后错误: %w", lastErr)
+	}
+	return fmt.Errorf("等待顶部 Git 哈希只出现一次超时，最后状态: %s", lastState)
+}
+
+// expectChatTabCompact 使用 page 和 timeout 参数等待聊天标签页尺寸接近 paseo。
+func expectChatTabCompact(page playwright.Page, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastState string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := page.Evaluate(`() => {
+			const tab = document.querySelector('[data-testid="chat-tab"]');
+			if (!tab) {
+				return 'missing tab';
+			}
+			const close = tab.querySelector('[data-testid="chat-tab-close-button"]');
+			const rect = tab.getBoundingClientRect();
+			const fontSize = Number.parseFloat(getComputedStyle(tab).fontSize);
+			if (close && rect.height <= 34 && fontSize <= 13) {
+				return '';
+			}
+			return 'height=' + rect.height.toFixed(2) + ', font=' + fontSize.toFixed(2) + ', close=' + Boolean(close);
+		}`, nil)
+		if err == nil {
+			if text, ok := value.(string); ok {
+				lastState = text
+				if text == "" {
+					return nil
+				}
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待聊天标签页尺寸变紧凑超时，最后错误: %w", lastErr)
+	}
+	return fmt.Errorf("等待聊天标签页尺寸变紧凑超时，最后状态: %s", lastState)
+}
+
+// expectComposerShellLayout 使用 page 和 timeout 参数等待输入框居中且控件位于输入框内。
+func expectComposerShellLayout(page playwright.Page, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastState string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := page.Evaluate(`() => {
+			const taskbar = document.querySelector('[data-testid="composer-taskbar"]');
+			const shell = document.querySelector('[data-testid="composer-shell"]');
+			if (!taskbar || !shell) {
+				return 'missing taskbar=' + Boolean(taskbar) + ', shell=' + Boolean(shell);
+			}
+			const taskbarRect = taskbar.getBoundingClientRect();
+			const shellRect = shell.getBoundingClientRect();
+			const radius = Number.parseFloat(getComputedStyle(shell).borderTopLeftRadius);
+			const selectCount = shell.querySelectorAll('select').length;
+			const centered = Math.abs((shellRect.left + shellRect.right) / 2 - (taskbarRect.left + taskbarRect.right) / 2) <= 2;
+			const widthOK = shellRect.width < taskbarRect.width * 0.9;
+			if (centered && widthOK && radius >= 16 && selectCount >= 2) {
+				return '';
+			}
+			return 'centered=' + centered +
+				', width=' + shellRect.width.toFixed(2) +
+				', taskbar=' + taskbarRect.width.toFixed(2) +
+				', radius=' + radius.toFixed(2) +
+				', selects=' + selectCount;
+		}`, nil)
+		if err == nil {
+			if text, ok := value.(string); ok {
+				lastState = text
+				if text == "" {
+					return nil
+				}
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待输入框居中布局超时，最后错误: %w", lastErr)
+	}
+	return fmt.Errorf("等待输入框居中布局超时，最后状态: %s", lastState)
 }
 
 // expectTestIDPinnedToViewportBottom 使用 page、id 和 timeout 参数等待元素固定在视口底部。

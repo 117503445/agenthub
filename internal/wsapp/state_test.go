@@ -144,6 +144,21 @@ func TestStoreProjectChatLifecycle(t *testing.T) {
 	if !agentOptionsContainModel(options, AgentProviderClaudeCode, "claude-custom-test") {
 		t.Fatalf("新增模型未出现在 agent 选项中: %#v", options)
 	}
+	extraChat, err := store.CreateChat(project.ID)
+	if err != nil {
+		t.Fatalf("创建待删除聊天页失败: %v", err)
+	}
+	deletedProjectID, err := store.DeleteChat(extraChat.ID)
+	if err != nil {
+		t.Fatalf("删除单个聊天页失败: %v", err)
+	}
+	if deletedProjectID != project.ID {
+		t.Fatalf("删除聊天页返回的 project 不正确: %q", deletedProjectID)
+	}
+	snapshot = store.Snapshot()
+	if len(snapshot.Chats) != 1 {
+		t.Fatalf("删除单个聊天页后数量不正确: %#v", snapshot.Chats)
+	}
 	deletedChatIDs, err := store.DeleteProject(project.ID)
 	if err != nil {
 		t.Fatalf("删除 project 失败: %v", err)

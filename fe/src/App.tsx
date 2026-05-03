@@ -1,16 +1,17 @@
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowUp,
-  Clock3,
+  Bot,
+  Brain,
+  Check,
+  Copy,
   Folder,
   GitBranch,
   GitCommit,
   Loader2,
   MessageSquare,
   Monitor,
-  Pencil,
   Plus,
-  Save,
   Settings,
   Square,
   Trash2,
@@ -29,6 +30,8 @@ import { MarkdownRenderer } from './components/MarkdownRenderer'
 
 type ConnectionState = 'connecting' | 'open' | 'closed' | 'error'
 type ChatStatus = 'idle' | 'running' | 'error'
+type ChatTerminalIndicator = 'success' | 'error'
+type ChatVisualStatus = 'running' | ChatTerminalIndicator
 type MessageRole = 'user' | 'assistant' | 'system'
 type MessageStatus = 'complete' | 'streaming' | 'stopped' | 'error'
 type AgentProvider = 'claude-code' | 'codex' | 'mock-claude-code' | 'mock-codex'
@@ -196,6 +199,13 @@ interface ChatChangedPayload {
   chat: Chat
 }
 
+interface ChatDeletedPayload {
+  /** id 表示被删除的聊天页标识。 */
+  id: string
+  /** projectId 表示被删除聊天页所属 project。 */
+  projectId: string
+}
+
 interface ChatMessageDeltaPayload {
   /** chatId 表示聊天页标识。 */
   chatId: string
@@ -242,6 +252,18 @@ const connectionText: Record<ConnectionState, string> = {
   open: '已连接',
   closed: '已断开',
   error: '连接异常',
+}
+
+const chatStatusLabel: Record<ChatVisualStatus, string> = {
+  running: '工作中',
+  success: '已完成',
+  error: '失败',
+}
+
+const chatStatusClass: Record<ChatVisualStatus, string> = {
+  running: 'bg-amber-400',
+  success: 'bg-emerald-500',
+  error: 'bg-red-500',
 }
 
 const fallbackAgentProviders: AgentProviderOption[] = [
@@ -387,9 +409,54 @@ function projectGitText(project: Project | null) {
     return 'git: none'
   }
   const branch = project.git.branch && project.git.branch !== 'HEAD' ? project.git.branch : 'detached'
-  const commit = project.git.commit || 'no commit'
   const state = project.git.dirty ? 'dirty' : 'clean'
-  return `git: ${branch} · ${commit} · ${state}`
+  return `git: ${branch} · ${state}`
+}
+
+// chatVisualStatus 使用 chat 和 indicators 参数返回当前应该展示的状态图标。
+function chatVisualStatus(chat: Chat, indicators: Record<string, ChatTerminalIndicator>): ChatVisualStatus | null {
+  const terminalStatus = indicators[chat.id]
+  if (terminalStatus) {
+    return terminalStatus
+  }
+  if (chat.status === 'running') {
+    return 'running'
+  }
+  return null
+}
+
+// mergeProjectVisualStatus 使用 current 和 next 参数按优先级归并 project 状态。
+function mergeProjectVisualStatus(current: ChatVisualStatus | null, next: ChatVisualStatus | null) {
+  if (!next) {
+    return current
+  }
+  if (next === 'error' || current === 'error') {
+    return 'error'
+  }
+  if (next === 'running' || current === 'running') {
+    return 'running'
+  }
+  return 'success'
+}
+
+interface StatusDotProps {
+  /** status 表示需要展示的状态。 */
+  status: ChatVisualStatus
+  /** testID 表示测试定位标识。 */
+  testID: string
+}
+
+// StatusDot 使用 status 和 testID 参数渲染紧凑状态圆点。
+function StatusDot({ status, testID }: StatusDotProps) {
+  return (
+    <span
+      data-testid={testID}
+      data-status={status}
+      className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${chatStatusClass[status]}`}
+      title={chatStatusLabel[status]}
+      aria-label={chatStatusLabel[status]}
+    />
+  )
 }
 
 // chatHasStarted 使用 chat 参数判断当前聊天页是否已经发送过消息。
@@ -507,21 +574,25 @@ function normalizeChat(chat: Chat) {
 function App() {
   const wsRef = useRef<WebSocket | null>(null)
   const pendingCreatedChatProjectIdRef = useRef('')
+  const chatsRef = useRef<Chat[]>([])
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting')
   const [hostname, setHostname] = useState('')
   const [projects, setProjects] = useState<Project[]>([])
   const [chats, setChats] = useState<Chat[]>([])
   const [agentProviders, setAgentProviders] = useState<AgentProviderOption[]>(fallbackAgentProviders)
+  const [chatIndicators, setChatIndicators] = useState<Record<string, ChatTerminalIndicator>>({})
   const [routeView, setRouteView] = useState<'chat' | 'settings'>(() => parseHashRoute().view)
   const [selectedProjectId, setSelectedProjectId] = useState(() => parseHashRoute().projectId)
   const [selectedChatId, setSelectedChatId] = useState(() => parseHashRoute().chatId)
   const [projectFormId, setProjectFormId] = useState('')
   const [projectPath, setProjectPath] = useState('')
+  const [projectDialogOpen, setProjectDialogOpen] = useState(false)
   const [newClaudeModelID, setNewClaudeModelID] = useState('')
   const [newClaudeModelLabel, setNewClaudeModelLabel] = useState('')
   const [composerValue, setComposerValue] = useState('')
   const [errorText, setErrorText] = useState('')
   const [hasSnapshot, setHasSnapshot] = useState(false)
+  const [copiedMessageId, setCopiedMessageId] = useState('')
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId) ?? projects[0] ?? null,
@@ -548,12 +619,50 @@ function App() {
   const modelControlsDisabled = agentControlsDisabled || isRunning
   const selectedAgentLabel = agentProviders.find((provider) => provider.id === selectedAgentProvider)?.label ?? 'Agent'
   const claudeCodeModels = agentProviders.find((provider) => provider.id === 'claude-code')?.models ?? []
+  const projectVisualStatuses = useMemo(() => {
+    const statuses = new Map<string, ChatVisualStatus>()
+    for (const chat of chats) {
+      const status = chatVisualStatus(chat, chatIndicators)
+      const mergedStatus = mergeProjectVisualStatus(statuses.get(chat.projectId) ?? null, status)
+      if (mergedStatus) {
+        statuses.set(chat.projectId, mergedStatus)
+      }
+    }
+    return statuses
+  }, [chatIndicators, chats])
+
+  useEffect(() => {
+    chatsRef.current = chats
+  }, [chats])
 
   // resetProjectForm 使用 project 参数重置 project 表单。
   const resetProjectForm = useCallback((project?: Project | null) => {
     setProjectFormId(project?.id ?? '')
     setProjectPath(project?.path ?? '')
     setErrorText('')
+  }, [])
+
+  // clearChatIndicator 使用 chatId 参数清除聊天页的成功或失败提示。
+  const clearChatIndicator = useCallback((chatId: string) => {
+    if (!chatId) {
+      return
+    }
+    setChatIndicators((current) => {
+      if (!current[chatId]) {
+        return current
+      }
+      const next = { ...current }
+      delete next[chatId]
+      return next
+    })
+  }, [])
+
+  // markChatIndicator 使用 chatId 和 status 参数记录聊天页终态提示。
+  const markChatIndicator = useCallback((chatId: string, status: ChatTerminalIndicator) => {
+    if (!chatId) {
+      return
+    }
+    setChatIndicators((current) => ({ ...current, [chatId]: status }))
   }, [])
 
   useEffect(() => {
@@ -624,9 +733,19 @@ function App() {
         const payload = message.payload as SnapshotPayload
         const nextProjects = sortByCreatedAt(payload.projects ?? [])
         const nextChats = sortByCreatedAt((payload.chats ?? []).map(normalizeChat))
+        const nextChatIds = new Set(nextChats.map((chat) => chat.id))
         setAgentProviders(payload.agentProviders?.length ? payload.agentProviders : fallbackAgentProviders)
         setProjects(nextProjects)
         setChats(nextChats)
+        setChatIndicators((current) => {
+          const next: Record<string, ChatTerminalIndicator> = {}
+          for (const [chatId, status] of Object.entries(current)) {
+            if (nextChatIds.has(chatId)) {
+              next[chatId] = status
+            }
+          }
+          return next
+        })
         setHasSnapshot(true)
         setSelectedProjectId((current) => {
           if (current && nextProjects.some((project) => project.id === current)) {
@@ -646,16 +765,25 @@ function App() {
         const payload = message.payload as ProjectChangedPayload
         setProjects((current) => sortByCreatedAt(upsertById(current, payload.project, (project) => project.id)))
         setSelectedProjectId(payload.project.id)
-        resetProjectForm(payload.project)
+        setProjectDialogOpen(false)
+        resetProjectForm(null)
         return
       }
       if (message.type === 'project.deleted') {
         const payload = message.payload as ProjectDeletedPayload
         setProjects((current) => current.filter((project) => project.id !== payload.id))
         setChats((current) => current.filter((chat) => !payload.chatIds.includes(chat.id)))
+        setChatIndicators((current) => {
+          const next = { ...current }
+          for (const chatId of payload.chatIds) {
+            delete next[chatId]
+          }
+          return next
+        })
         setSelectedProjectId((current) => (current === payload.id ? '' : current))
         setSelectedChatId((current) => (payload.chatIds.includes(current) ? '' : current))
         resetProjectForm(null)
+        setProjectDialogOpen(false)
         return
       }
       if (message.type === 'chat.changed') {
@@ -670,6 +798,20 @@ function App() {
           }
           return current || payload.chat.id
         })
+        return
+      }
+      if (message.type === 'chat.deleted') {
+        const payload = message.payload as ChatDeletedPayload
+        setChats((current) => current.filter((chat) => chat.id !== payload.id))
+        setChatIndicators((current) => {
+          if (!current[payload.id]) {
+            return current
+          }
+          const next = { ...current }
+          delete next[payload.id]
+          return next
+        })
+        setSelectedChatId((current) => (current === payload.id ? '' : current))
         return
       }
       if (message.type === 'chat.message.delta') {
@@ -691,6 +833,11 @@ function App() {
       }
       if (message.type === 'chat.message.done') {
         const payload = message.payload as ChatMessageDonePayload
+        if (payload.message.status === 'complete') {
+          markChatIndicator(payload.chatId, 'success')
+        } else if (payload.message.status === 'error') {
+          markChatIndicator(payload.chatId, 'error')
+        }
         setChats((current) =>
           current.map((chat) => {
             if (chat.id !== payload.chatId) {
@@ -706,6 +853,11 @@ function App() {
       }
       if (message.type === 'agent.status') {
         const payload = message.payload as AgentStatusPayload
+        if (payload.status === 'running') {
+          clearChatIndicator(payload.chatId)
+        } else if (payload.status === 'error') {
+          markChatIndicator(payload.chatId, 'error')
+        }
         setChats((current) =>
           current.map((chat) => (chat.id === payload.chatId ? { ...chat, status: payload.status } : chat)),
         )
@@ -723,7 +875,7 @@ function App() {
         setErrorText(payload.message ?? '服务端错误')
       }
     },
-    [resetProjectForm],
+    [clearChatIndicator, markChatIndicator, resetProjectForm],
   )
 
   useEffect(() => {
@@ -751,6 +903,15 @@ function App() {
 
       ws.onerror = () => {
         setConnectionState('error')
+        setChatIndicators((current) => {
+          const next = { ...current }
+          for (const chat of chatsRef.current) {
+            if (chat.status === 'running') {
+              next[chat.id] = 'error'
+            }
+          }
+          return next
+        })
       }
 
       ws.onclose = () => {
@@ -782,9 +943,26 @@ function App() {
     }
   }
 
+  // openProjectDialog 打开新建 project 工作目录输入框。
+  const openProjectDialog = () => {
+    resetProjectForm(null)
+    setProjectDialogOpen(true)
+  }
+
+  // closeProjectDialog 关闭新建 project 工作目录输入框。
+  const closeProjectDialog = () => {
+    setProjectDialogOpen(false)
+    resetProjectForm(null)
+  }
+
   // deleteProject 使用 project 参数删除 project。
   const deleteProject = (project: Project) => {
     sendClientMessage(wsRef.current, 'project.delete', { id: project.id })
+  }
+
+  // deleteChat 使用 chat 参数关闭并删除聊天页。
+  const deleteChat = (chat: Chat) => {
+    sendClientMessage(wsRef.current, 'chat.delete', { id: chat.id })
   }
 
   // createChat 为当前 project 创建聊天页。
@@ -854,7 +1032,6 @@ function App() {
     setRouteView('chat')
     setSelectedProjectId(project.id)
     setSelectedChatId('')
-    resetProjectForm(project)
     updateHashRoute(project.id, '', 'push')
   }
 
@@ -863,7 +1040,23 @@ function App() {
     setRouteView('chat')
     setSelectedProjectId(chat.projectId)
     setSelectedChatId(chat.id)
+    clearChatIndicator(chat.id)
     updateHashRoute(chat.projectId, chat.id, 'push')
+  }
+
+  // copyMessageText 使用 message 参数复制聊天消息文本。
+  const copyMessageText = async (message: ChatMessage) => {
+    const text = message.text.trim()
+    if (!text) {
+      return
+    }
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+    }
+    setCopiedMessageId(message.id)
+    window.setTimeout(() => {
+      setCopiedMessageId((current) => (current === message.id ? '' : current))
+    }, 1200)
   }
 
   // submitComposer 处理 event 参数对应的聊天输入提交。
@@ -904,50 +1097,19 @@ function App() {
 
   return (
     <main className="theme-paseo grid h-[100dvh] min-h-0 overflow-hidden bg-slate-100 text-slate-950 lg:grid-cols-[320px_minmax(0,1fr)]">
-      <aside className="flex h-full min-h-0 flex-col border-r border-slate-800 bg-slate-950 text-slate-100">
-        <div className="border-b border-slate-800 px-4 py-4">
-          <div className="min-w-0">
-            <h1 className="truncate text-base font-semibold">Coding Agent</h1>
-            <p className="mt-1 text-xs text-slate-400">Projects</p>
+      <aside data-testid="sidebar" className="relative flex h-full min-h-0 flex-col border-r border-slate-800 bg-slate-950 text-slate-100">
+        <div className="border-b border-slate-800 px-3 py-3">
+          <div data-testid="sidebar-identity" className="flex min-w-0 items-center gap-2 text-xs text-slate-500">
+            <Monitor className="h-3.5 w-3.5 shrink-0" />
+            <span data-testid="machine-name" className="min-w-0 flex-1 truncate font-mono">
+              {hostname || 'unknown'}
+            </span>
+            <span data-testid="connection-state" className="inline-flex shrink-0 items-center gap-1.5">
+              {connectionIcon}
+              <span>{connectionText[connectionState]}</span>
+            </span>
           </div>
         </div>
-
-        <form className="border-b border-slate-800 p-4" onSubmit={saveProject}>
-          <div className="mb-3 flex items-center justify-between">
-            <span className="text-sm font-medium text-slate-200">{projectFormId ? '编辑 Project' : '新建 Project'}</span>
-            {projectFormId ? (
-              <button
-                type="button"
-                onClick={() => resetProjectForm(null)}
-                className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-800 hover:text-white"
-                aria-label="取消编辑"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            ) : null}
-          </div>
-          <label htmlFor="project-path-input" className="mb-1 block text-xs font-medium text-slate-400">
-            工作目录
-          </label>
-          <Input
-            id="project-path-input"
-            data-testid="project-path-input"
-            value={projectPath}
-            onChange={(event) => setProjectPath(event.target.value)}
-            className="h-9 w-full rounded-md border border-slate-700 bg-slate-900 px-3 font-mono text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/30"
-            placeholder="/workspace/project/coding"
-          />
-          <button
-            data-testid="project-save-button"
-            type="submit"
-            disabled={connectionState !== 'open' || !projectPath.trim()}
-            className="mt-3 inline-flex h-9 w-full cursor-pointer items-center justify-center gap-2 rounded-md bg-teal-600 px-3 text-sm font-medium text-white transition hover:bg-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
-          >
-            <Save className="h-4 w-4" />
-            保存
-          </button>
-          {errorText ? <p className="mt-3 text-sm text-rose-300">{errorText}</p> : null}
-        </form>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-2 py-3" data-testid="project-list">
           {projects.length === 0 ? (
@@ -955,70 +1117,93 @@ function App() {
               还没有 Project
             </div>
           ) : (
-            projects.map((project) => (
-              <div
-                key={project.id}
-                className={`mb-1 rounded-md border px-2 py-2 transition ${
-                  project.id === selectedProjectId
-                    ? 'border-teal-500 bg-teal-500/10'
-                    : 'border-transparent hover:border-slate-700 hover:bg-slate-900'
-                }`}
-              >
-                <button
-                  type="button"
-                  onClick={() => selectProject(project)}
-                  className="flex w-full cursor-pointer items-start gap-2 text-left"
+            projects.map((project) => {
+              const projectStatus = projectVisualStatuses.get(project.id)
+              return (
+                <div
+                  key={project.id}
+                  className={`mb-1 rounded-md border px-2 py-2 transition ${
+                    project.id === selectedProjectId
+                      ? 'border-teal-500 bg-teal-500/10'
+                      : 'border-transparent hover:border-slate-700 hover:bg-slate-900'
+                  }`}
                 >
-                  <Folder className="mt-0.5 h-4 w-4 shrink-0 text-teal-400" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-slate-100">{projectDisplayName(project)}</span>
-                  </span>
-                </button>
-                <div className="mt-2 flex justify-end gap-1">
-                  <button
-                    type="button"
-                    onClick={() => resetProjectForm(project)}
-                    className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-800 hover:text-white"
-                    aria-label="编辑 Project"
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => deleteProject(project)}
-                    className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-slate-400 transition hover:bg-rose-500/15 hover:text-rose-300"
-                    aria-label="删除 Project"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => selectProject(project)}
+                      className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
+                    >
+                      <Folder className="h-4 w-4 shrink-0 text-teal-400" />
+                      <span data-testid="project-name" className="min-w-0 flex-1 truncate text-sm font-medium text-slate-100">
+                        {projectDisplayName(project)}
+                      </span>
+                      {projectStatus ? <StatusDot status={projectStatus} testID="project-status-dot" /> : null}
+                    </button>
+                    <button
+                      data-testid="project-delete-button"
+                      type="button"
+                      onClick={() => deleteProject(project)}
+                      className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-slate-400 transition hover:bg-rose-500/15 hover:text-rose-300"
+                      aria-label="删除 Project"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))
+              )
+            })
           )}
         </div>
 
-        <div data-testid="sidebar-footer" className="border-t border-slate-800 p-3">
-          <div className="mb-3 space-y-1.5">
-            <div data-testid="connection-state" className="flex min-w-0 items-center gap-2 text-xs text-slate-500">
-              {connectionIcon}
-              <span>{connectionText[connectionState]}</span>
-            </div>
-            <div className="flex min-w-0 items-center gap-2 text-xs text-slate-500">
-              <Monitor className="h-3.5 w-3.5 shrink-0" />
-              <span data-testid="machine-name" className="truncate font-mono">
-                {hostname}
-              </span>
-            </div>
+        {projectDialogOpen ? (
+          <div className="absolute bottom-[4.5rem] left-3 right-3 z-20">
+            <form className="rounded-lg border border-slate-200 bg-white p-3 text-slate-900 shadow-lg" onSubmit={saveProject}>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <label htmlFor="project-path-input" className="text-xs font-medium text-slate-500">
+                  工作目录
+                </label>
+                <button
+                  type="button"
+                  onClick={closeProjectDialog}
+                  className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-900"
+                  aria-label="关闭"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <Input
+                id="project-path-input"
+                data-testid="project-path-input"
+                value={projectPath}
+                onChange={(event) => setProjectPath(event.target.value)}
+                className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 font-mono text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-teal-600 focus:ring-2 focus:ring-teal-100"
+                placeholder="/workspace/project/coding"
+              />
+              <button
+                data-testid="project-save-button"
+                type="submit"
+                disabled={connectionState !== 'open' || !projectPath.trim()}
+                className="mt-3 inline-flex h-9 w-full cursor-pointer items-center justify-center gap-2 rounded-md bg-teal-600 px-3 text-sm font-medium text-white transition hover:bg-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-400 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+              >
+                <Plus className="h-4 w-4" />
+                添加
+              </button>
+              {errorText ? <p className="mt-2 text-xs text-rose-600">{errorText}</p> : null}
+            </form>
           </div>
+        ) : null}
+
+        <div data-testid="sidebar-footer" className="border-t border-slate-800 p-3">
           <div className="flex gap-2">
             <Button
               data-testid="project-add-button"
               type="button"
               variant="outline"
-              onClick={() => resetProjectForm(null)}
+              onClick={openProjectDialog}
               className="h-9 flex-1 px-0"
-              aria-label="新建 Project"
-              title="新建 Project"
+              aria-label="添加 Project"
+              title="添加 Project"
             >
               <Plus className="h-4 w-4" />
             </Button>
@@ -1125,7 +1310,7 @@ function App() {
                   {selectedProject?.git?.isRepo ? (
                     <span className="inline-flex items-center gap-1 font-mono">
                       <GitCommit className="h-3.5 w-3.5" />
-                      {selectedProject.git.commit || '-'}
+                      <span data-testid="project-commit-text">{selectedProject.git.commit || '-'}</span>
                     </span>
                   ) : null}
                 </span>
@@ -1142,18 +1327,43 @@ function App() {
               }}
               className="min-h-0 flex-1 overflow-hidden"
             >
-              <div className="flex min-h-11 items-stretch border-b border-slate-200 bg-slate-50 px-3" data-testid="chat-tabs">
+              <div className="flex min-h-8 items-stretch border-b border-slate-200 bg-slate-50 px-2" data-testid="chat-tabs">
                 <TabsList className="h-full flex-1">
                   {projectChats.length === 0 ? (
-                    <span className="flex items-center text-sm text-slate-500">没有聊天页</span>
+                    <span className="flex items-center text-xs text-slate-500">没有聊天页</span>
                   ) : (
-                    projectChats.map((chat) => (
-                      <TabsTrigger key={chat.id} value={chat.id}>
-                        <MessageSquare className="h-4 w-4" />
-                        <span>{chat.title}</span>
-                        {chat.status === 'running' ? <span className="h-2 w-2 rounded-full bg-orange-500" /> : null}
-                      </TabsTrigger>
-                    ))
+                    projectChats.map((chat) => {
+                      const status = chatVisualStatus(chat, chatIndicators)
+                      return (
+                        <TabsTrigger key={chat.id} value={chat.id} data-testid="chat-tab" className="group/tab max-w-60 pr-1">
+                          <MessageSquare className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate">{chat.title}</span>
+                          {status ? <StatusDot status={status} testID="chat-status-dot" /> : null}
+                          <span
+                            data-testid="chat-tab-close-button"
+                            role="button"
+                            tabIndex={0}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              deleteChat(chat)
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key !== 'Enter' && event.key !== ' ') {
+                                return
+                              }
+                              event.preventDefault()
+                              event.stopPropagation()
+                              deleteChat(chat)
+                            }}
+                            className="inline-flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded text-slate-400 opacity-80 transition hover:bg-slate-200 hover:text-slate-900 group-hover/tab:opacity-100"
+                            aria-label="关闭聊天页"
+                            title="关闭"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </span>
+                        </TabsTrigger>
+                      )
+                    })
                   )}
                   <Button
                     data-testid="chat-tab-add-button"
@@ -1161,10 +1371,10 @@ function App() {
                     size="icon"
                     onClick={createChat}
                     disabled={!activeProjectId || connectionState !== 'open'}
-                    className="my-1 h-8 w-8 shrink-0"
+                    className="my-0.5 h-7 w-7 shrink-0"
                     aria-label="新建聊天"
                   >
-                    <Plus className="h-4 w-4" />
+                    <Plus className="h-3.5 w-3.5" />
                   </Button>
                 </TabsList>
               </div>
@@ -1177,7 +1387,7 @@ function App() {
                         {selectedChat.messages.map((message) => (
                           <article
                             key={message.id}
-                            className={`message-card message-${message.role} rounded-md border p-4 ${
+                            className={`message-card message-${message.role} group/message relative rounded-md border p-4 ${
                               message.role === 'user'
                                 ? 'border-teal-200 bg-teal-50'
                                 : message.role === 'system'
@@ -1227,6 +1437,32 @@ function App() {
                             ) : (
                               <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-6 text-slate-800">{message.text}</pre>
                             )}
+                            {message.role === 'user' ? (
+                              <button
+                                data-testid="user-copy-button"
+                                type="button"
+                                onClick={() => void copyMessageText(message)}
+                                className="absolute bottom-2 right-2 inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-slate-500 opacity-0 transition hover:bg-white hover:text-slate-900 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-teal-500/20 group-hover/message:opacity-100"
+                                aria-label="复制消息"
+                                title="复制"
+                              >
+                                {copiedMessageId === message.id ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                              </button>
+                            ) : null}
+                            {message.role === 'assistant' ? (
+                              <div className="mt-2 flex justify-start">
+                                <button
+                                  data-testid="assistant-copy-button"
+                                  type="button"
+                                  onClick={() => void copyMessageText(message)}
+                                  className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                                  aria-label="复制回复"
+                                  title="复制"
+                                >
+                                  {copiedMessageId === message.id ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                                </button>
+                              </div>
+                            ) : null}
                           </article>
                         ))}
                       </div>
@@ -1235,11 +1471,14 @@ function App() {
 
                   <form
                     data-testid="composer-taskbar"
-                    className="sticky bottom-0 z-10 shrink-0 border-t border-slate-200 bg-white px-4 py-3"
+                    className="sticky bottom-0 z-10 shrink-0 bg-white px-4 py-4"
                     onSubmit={submitComposer}
                   >
-                    <div className="mx-auto max-w-4xl">
-                      <div className="relative">
+                    <div
+                      data-testid="composer-shell"
+                      className="composer-shell mx-auto w-full max-w-[860px] rounded-[20px] border border-slate-200 bg-white px-4 py-3 shadow-sm"
+                    >
+                      <div>
                         <label htmlFor="message-input" className="sr-only">
                           Prompt
                         </label>
@@ -1251,69 +1490,65 @@ function App() {
                           onKeyDown={handleComposerKeyDown}
                           disabled={!selectedChat || connectionState !== 'open'}
                           rows={2}
-                          className="max-h-40 min-h-24 pr-14"
+                          className="max-h-40 min-h-24 border-0 px-0 py-0 text-[15px] leading-6 shadow-none focus:ring-0"
                           placeholder={selectedChat ? '输入消息' : '先创建聊天'}
                         />
-                        {composerValue.trim() || isRunning ? (
-                          <Button
-                            data-testid="send-button"
-                            type="submit"
-                            size="icon"
-                            disabled={!selectedChat || connectionState !== 'open' || (!composerValue.trim() && !isRunning)}
-                            className={`absolute bottom-3 right-3 h-9 w-9 rounded-full ${
-                              isRunning && !composerValue.trim() ? 'bg-orange-600 hover:bg-orange-500' : ''
-                            }`}
-                            aria-label={isRunning && !composerValue.trim() ? '停止' : '发送'}
-                          >
-                            {isRunning && !composerValue.trim() ? <Square className="h-4 w-4" fill="currentColor" /> : <ArrowUp className="h-4 w-4" />}
-                          </Button>
-                        ) : null}
                       </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-slate-50 p-2" data-testid="composer-agent-config">
-                        <Select
-                          id="agent-provider-select"
-                          data-testid="agent-provider-select"
-                          value={selectedAgentProvider}
-                          onChange={(event) => changeAgentProvider(event.target.value as AgentProvider)}
-                          disabled={agentControlsDisabled || providerLocked}
-                          aria-label="选择助理"
-                          className="h-8 min-w-44 max-w-52 border-slate-200 bg-white px-3"
-                        >
-                          {agentProviders.map((provider) => (
-                            <option key={provider.id} value={provider.id}>
-                              {provider.label}
-                            </option>
-                          ))}
-                        </Select>
+                      <div className="mt-3 flex flex-wrap items-center gap-2" data-testid="composer-agent-config">
+                        <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-full text-slate-500" aria-label="添加上下文">
+                          <Plus className="h-4 w-4" />
+                        </Button>
+                        <div className="relative">
+                          <Bot className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                          <Select
+                            id="agent-provider-select"
+                            data-testid="agent-provider-select"
+                            value={selectedAgentProvider}
+                            onChange={(event) => changeAgentProvider(event.target.value as AgentProvider)}
+                            disabled={agentControlsDisabled || providerLocked}
+                            aria-label="选择助理"
+                            className="composer-select h-8 min-w-36 max-w-48 rounded-full border-transparent bg-slate-50 pl-8 pr-3 text-xs"
+                          >
+                            {agentProviders.map((provider) => (
+                              <option key={provider.id} value={provider.id}>
+                                {provider.label}
+                              </option>
+                            ))}
+                          </Select>
+                        </div>
                         <label htmlFor="agent-model-select" className="sr-only">
                           模型
                         </label>
-                        <Select
-                          id="agent-model-select"
-                          data-testid="agent-model-select"
-                          value={selectedAgentModel}
-                          onChange={(event) => changeAgentModel(event.target.value)}
-                          disabled={modelControlsDisabled}
-                          className="h-8 min-w-52 max-w-60 border-slate-200 bg-white px-3"
-                        >
-                          {selectedAgentModels.map((model) => (
-                            <option key={model.id} value={model.id}>
-                              {model.label}
-                            </option>
-                          ))}
-                        </Select>
+                        <div className="relative">
+                          <MessageSquare className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                          <Select
+                            id="agent-model-select"
+                            data-testid="agent-model-select"
+                            value={selectedAgentModel}
+                            onChange={(event) => changeAgentModel(event.target.value)}
+                            disabled={modelControlsDisabled}
+                            className="composer-select h-8 min-w-44 max-w-56 rounded-full border-transparent bg-slate-50 pl-8 pr-3 text-xs"
+                          >
+                            {selectedAgentModels.map((model) => (
+                              <option key={model.id} value={model.id}>
+                                {model.label}
+                              </option>
+                            ))}
+                          </Select>
+                        </div>
                         {selectedAgentModelOption?.reasoningLevels?.length ? (
-                          <>
+                          <div className="relative">
                             <label htmlFor="agent-reasoning-select" className="sr-only">
                               推理级别
                             </label>
+                            <Brain className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
                             <Select
                               id="agent-reasoning-select"
                               data-testid="agent-reasoning-select"
                               value={selectedAgentReasoning}
                               onChange={(event) => changeAgentReasoning(event.target.value)}
                               disabled={modelControlsDisabled}
-                              className="h-8 min-w-28 max-w-36 border-slate-200 bg-white px-3"
+                              className="composer-select h-8 min-w-28 max-w-36 rounded-full border-transparent bg-slate-50 pl-8 pr-3 text-xs"
                             >
                               {selectedAgentModelOption.reasoningLevels.map((level) => (
                                 <option key={level.id} value={level.id}>
@@ -1321,13 +1556,22 @@ function App() {
                                 </option>
                               ))}
                             </Select>
-                          </>
+                          </div>
                         ) : null}
-                        {selectedChat?.agentSessionId ? (
-                          <span className="inline-flex min-w-0 items-center gap-1 text-xs text-slate-500">
-                            <Clock3 className="h-3.5 w-3.5 shrink-0" />
-                            <span className="truncate font-mono">session {selectedChat.agentSessionId}</span>
-                          </span>
+                        <span className="min-w-4 flex-1" />
+                        {composerValue.trim() || isRunning ? (
+                          <Button
+                            data-testid="send-button"
+                            type="submit"
+                            size="icon"
+                            disabled={!selectedChat || connectionState !== 'open' || (!composerValue.trim() && !isRunning)}
+                            className={`h-9 w-9 shrink-0 rounded-full ${
+                              isRunning && !composerValue.trim() ? 'bg-orange-600 hover:bg-orange-500' : ''
+                            }`}
+                            aria-label={isRunning && !composerValue.trim() ? '停止' : '发送'}
+                          >
+                            {isRunning && !composerValue.trim() ? <Square className="h-4 w-4" fill="currentColor" /> : <ArrowUp className="h-4 w-4" />}
+                          </Button>
                         ) : null}
                       </div>
                     </div>
