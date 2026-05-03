@@ -20,16 +20,20 @@ import (
 
 // AgentConfig 表示启动外部 agent 子进程所需的配置。
 type AgentConfig struct {
-	Command           string                // Command 表示 Claude 命令，保留该字段兼容旧配置。
-	CodexCommand      string                // CodexCommand 表示 Codex 命令。
-	MockClaudeCommand string                // MockClaudeCommand 表示 Mock Claude Code 命令。
-	MockCodexCommand  string                // MockCodexCommand 表示 Mock Codex 命令。
-	AnthropicBaseURL  string                // AnthropicBaseURL 表示 Anthropic 兼容接口地址。
-	AnthropicModel    string                // AnthropicModel 表示 Claude 使用的模型。
-	AnthropicAPIKey   string                // AnthropicAPIKey 表示 Anthropic API Key。
-	OpenAIBaseURL     string                // OpenAIBaseURL 表示 OpenAI 兼容接口地址。
-	OpenAIAPIKey      string                // OpenAIAPIKey 表示 OpenAI API Key。
-	AgentProviders    []AgentProviderOption // AgentProviders 表示可用 agent 和模型选项。
+	Command              string                // Command 表示 Claude 命令，保留该字段兼容旧配置。
+	CodexCommand         string                // CodexCommand 表示 Codex 命令。
+	MockClaudeCommand    string                // MockClaudeCommand 表示 Mock Claude Code 命令。
+	MockCodexCommand     string                // MockCodexCommand 表示 Mock Codex 命令。
+	AnthropicBaseURL     string                // AnthropicBaseURL 表示 Anthropic 兼容接口地址。
+	AnthropicModel       string                // AnthropicModel 表示 Claude 使用的模型。
+	AnthropicAPIKey      string                // AnthropicAPIKey 表示 Anthropic API Key。
+	OpenAIBaseURL        string                // OpenAIBaseURL 表示 OpenAI 兼容接口地址。
+	OpenAIAPIKey         string                // OpenAIAPIKey 表示 OpenAI API Key。
+	MockAnthropicBaseURL string                // MockAnthropicBaseURL 表示 Mock Claude 固定使用的后端 Anthropic 兼容接口地址。
+	MockAnthropicAPIKey  string                // MockAnthropicAPIKey 表示 Mock Claude 使用的 API Key。
+	MockOpenAIBaseURL    string                // MockOpenAIBaseURL 表示 Mock Codex 固定使用的后端 OpenAI 兼容接口地址。
+	MockOpenAIAPIKey     string                // MockOpenAIAPIKey 表示 Mock Codex 使用的 API Key。
+	AgentProviders       []AgentProviderOption // AgentProviders 表示可用 agent 和模型选项。
 }
 
 // AgentRunCallbacks 表示一次 agent 运行中的回调。
@@ -353,7 +357,7 @@ func (r *AgentRuntime) start(ctx context.Context) error {
 		Str("chatID", r.chatID).
 		Str("command", command).
 		Str("cwd", r.projectPath).
-		Str("baseURL", r.manager.config.AnthropicBaseURL).
+		Str("baseURL", r.anthropicBaseURL()).
 		Str("model", r.model).
 		Msg("Claude runtime 已启动")
 
@@ -537,12 +541,12 @@ func (r *AgentRuntime) childEnv() []string {
 	}
 	env["IS_SANDBOX"] = "1"
 	env["ANTHROPIC_MODEL"] = r.model
-	if strings.TrimSpace(r.manager.config.AnthropicBaseURL) != "" {
-		env["ANTHROPIC_BASE_URL"] = r.manager.config.AnthropicBaseURL
-		env["CLAUDE_CODE_API_BASE_URL"] = r.manager.config.AnthropicBaseURL
+	if baseURL := r.anthropicBaseURL(); baseURL != "" {
+		env["ANTHROPIC_BASE_URL"] = baseURL
+		env["CLAUDE_CODE_API_BASE_URL"] = baseURL
 	}
-	if strings.TrimSpace(r.manager.config.AnthropicAPIKey) != "" {
-		env["ANTHROPIC_API_KEY"] = r.manager.config.AnthropicAPIKey
+	if apiKey := r.anthropicAPIKey(); apiKey != "" {
+		env["ANTHROPIC_API_KEY"] = apiKey
 	}
 	if r.provider == AgentProviderMockClaudeCode {
 		env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
@@ -569,12 +573,14 @@ func (r *AgentRuntime) codexEnv() []string {
 		if baseURL := r.codexBaseURL(); baseURL != "" {
 			env["OPENAI_BASE_URL"] = baseURL
 		}
-		apiKey := strings.TrimSpace(r.manager.config.OpenAIAPIKey)
-		if apiKey == "" {
-			apiKey = strings.TrimSpace(r.manager.config.AnthropicAPIKey)
-		}
-		if apiKey != "" {
+		if apiKey := r.codexAPIKey(); apiKey != "" {
 			env["OPENAI_API_KEY"] = apiKey
+		}
+		if baseURL := r.mockAnthropicBaseURL(); baseURL != "" {
+			env["ANTHROPIC_BASE_URL"] = baseURL
+		}
+		if apiKey := r.mockAnthropicAPIKey(); apiKey != "" {
+			env["ANTHROPIC_API_KEY"] = apiKey
 		}
 	}
 
@@ -605,14 +611,58 @@ func (r *AgentRuntime) mockCodexConfigArgs() []string {
 // codexBaseURL 返回 mock Codex 使用的 OpenAI 兼容接口地址。
 func (r *AgentRuntime) codexBaseURL() string {
 	baseURL := strings.TrimRight(strings.TrimSpace(r.manager.config.OpenAIBaseURL), "/")
+	if r.provider == AgentProviderMockCodex {
+		baseURL = strings.TrimRight(strings.TrimSpace(r.manager.config.MockOpenAIBaseURL), "/")
+	}
 	if baseURL != "" {
 		return baseURL
 	}
 	anthropicBaseURL := strings.TrimRight(strings.TrimSpace(r.manager.config.AnthropicBaseURL), "/")
+	if r.provider == AgentProviderMockCodex {
+		anthropicBaseURL = r.mockAnthropicBaseURL()
+	}
 	if strings.HasSuffix(anthropicBaseURL, "/mock/anthropic") {
 		return strings.TrimSuffix(anthropicBaseURL, "/mock/anthropic") + "/mock/openai/v1"
 	}
 	return ""
+}
+
+// anthropicBaseURL 返回当前 Claude runtime 使用的 Anthropic 兼容接口地址。
+func (r *AgentRuntime) anthropicBaseURL() string {
+	if r.provider == AgentProviderMockClaudeCode {
+		return r.mockAnthropicBaseURL()
+	}
+	return strings.TrimRight(strings.TrimSpace(r.manager.config.AnthropicBaseURL), "/")
+}
+
+// anthropicAPIKey 返回当前 Claude runtime 使用的 API Key。
+func (r *AgentRuntime) anthropicAPIKey() string {
+	if r.provider == AgentProviderMockClaudeCode {
+		return r.mockAnthropicAPIKey()
+	}
+	return strings.TrimSpace(r.manager.config.AnthropicAPIKey)
+}
+
+// mockAnthropicBaseURL 返回 Mock Claude 使用的后端 mock 地址。
+func (r *AgentRuntime) mockAnthropicBaseURL() string {
+	return strings.TrimRight(strings.TrimSpace(r.manager.config.MockAnthropicBaseURL), "/")
+}
+
+// mockAnthropicAPIKey 返回 Mock Claude 使用的 API Key。
+func (r *AgentRuntime) mockAnthropicAPIKey() string {
+	return strings.TrimSpace(r.manager.config.MockAnthropicAPIKey)
+}
+
+// codexAPIKey 返回 Mock Codex 使用的 API Key。
+func (r *AgentRuntime) codexAPIKey() string {
+	apiKey := strings.TrimSpace(r.manager.config.OpenAIAPIKey)
+	if r.provider == AgentProviderMockCodex {
+		apiKey = strings.TrimSpace(r.manager.config.MockOpenAIAPIKey)
+	}
+	if apiKey == "" {
+		apiKey = r.mockAnthropicAPIKey()
+	}
+	return apiKey
 }
 
 // scanStdout 使用 stdout 参数读取并解析 Claude JSON 行输出。

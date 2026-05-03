@@ -1,6 +1,7 @@
 package wsapp
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -148,6 +149,50 @@ func TestBuildClaudeUserMessage(t *testing.T) {
 	}
 }
 
+// TestMockAgentEnvUsesBackendMockService 验证 mock agent 环境变量强制指向后端 mock 服务。
+func TestMockAgentEnvUsesBackendMockService(t *testing.T) {
+	t.Setenv("ANTHROPIC_BASE_URL", "https://real-anthropic.example")
+	t.Setenv("ANTHROPIC_API_KEY", "real-anthropic-key")
+	t.Setenv("OPENAI_BASE_URL", "https://real-openai.example/v1")
+	t.Setenv("OPENAI_API_KEY", "real-openai-key")
+
+	manager := NewAgentManager(context.Background(), AgentConfig{
+		MockAnthropicBaseURL: "http://127.0.0.1:6767/mock/anthropic",
+		MockAnthropicAPIKey:  "mock-anthropic-key",
+		MockOpenAIBaseURL:    "http://127.0.0.1:6767/mock/openai/v1",
+		MockOpenAIAPIKey:     "mock-openai-key",
+	})
+
+	claudeRuntime := &AgentRuntime{
+		manager:  manager,
+		provider: AgentProviderMockClaudeCode,
+		model:    "mock-claude-sonnet",
+	}
+	claudeEnv := envListMap(claudeRuntime.childEnv())
+	if claudeEnv["ANTHROPIC_BASE_URL"] != "http://127.0.0.1:6767/mock/anthropic" {
+		t.Fatalf("Mock Claude base URL 不正确: %q", claudeEnv["ANTHROPIC_BASE_URL"])
+	}
+	if claudeEnv["ANTHROPIC_API_KEY"] != "mock-anthropic-key" {
+		t.Fatalf("Mock Claude API key 不正确: %q", claudeEnv["ANTHROPIC_API_KEY"])
+	}
+
+	codexRuntime := &AgentRuntime{
+		manager:  manager,
+		provider: AgentProviderMockCodex,
+		model:    "mock-codex-gpt-5.5",
+	}
+	codexEnv := envListMap(codexRuntime.codexEnv())
+	if codexEnv["OPENAI_BASE_URL"] != "http://127.0.0.1:6767/mock/openai/v1" {
+		t.Fatalf("Mock Codex base URL 不正确: %q", codexEnv["OPENAI_BASE_URL"])
+	}
+	if codexEnv["OPENAI_API_KEY"] != "mock-openai-key" {
+		t.Fatalf("Mock Codex API key 不正确: %q", codexEnv["OPENAI_API_KEY"])
+	}
+	if codexEnv["ANTHROPIC_BASE_URL"] != "http://127.0.0.1:6767/mock/anthropic" {
+		t.Fatalf("Mock Codex 内置 mock CLI 的 Anthropic 地址不正确: %q", codexEnv["ANTHROPIC_BASE_URL"])
+	}
+}
+
 // containsAll 使用 text 和 parts 参数判断所有片段是否存在。
 func containsAll(text string, parts []string) bool {
 	for _, part := range parts {
@@ -156,4 +201,16 @@ func containsAll(text string, parts []string) bool {
 		}
 	}
 	return true
+}
+
+// envListMap 使用 env 参数把环境变量列表转为 map。
+func envListMap(env []string) map[string]string {
+	result := map[string]string{}
+	for _, item := range env {
+		key, value, ok := strings.Cut(item, "=")
+		if ok {
+			result[key] = value
+		}
+	}
+	return result
 }

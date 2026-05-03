@@ -19,7 +19,7 @@ import (
 // newHTTPHandler 使用 ctx 和 port 参数创建 WebSocket 服务的 HTTP 处理器。
 func newHTTPHandler(ctx context.Context, port string) http.Handler {
 	mux := http.NewServeMux()
-	wsServer := wsapp.NewServer(ctx, buildinfo.Version(), resolveAgentConfig())
+	wsServer := wsapp.NewServer(ctx, buildinfo.Version(), resolveAgentConfig(port))
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -50,8 +50,8 @@ func subpathHandler(wsServer *wsapp.Server, static http.Handler) http.Handler {
 	})
 }
 
-// resolveAgentConfig 生成 agent runtime 配置。
-func resolveAgentConfig() wsapp.AgentConfig {
+// resolveAgentConfig 使用 port 参数生成 agent runtime 配置。
+func resolveAgentConfig(port string) wsapp.AgentConfig {
 	baseURL := strings.TrimSpace(os.Getenv("ANTHROPIC_BASE_URL"))
 	openAIBaseURL := strings.TrimSpace(os.Getenv("OPENAI_BASE_URL"))
 	model := strings.TrimSpace(os.Getenv("ANTHROPIC_MODEL"))
@@ -83,18 +83,32 @@ func resolveAgentConfig() wsapp.AgentConfig {
 		ClaudeDefaultModel: model,
 		CodexDefaultEffort: "xhigh",
 	})
+	mockBaseURL := backendMockBaseURL(port)
 	return wsapp.AgentConfig{
-		Command:           command,
-		CodexCommand:      codexCommand,
-		MockClaudeCommand: mockClaudeCommand,
-		MockCodexCommand:  mockCodexCommand,
-		AnthropicBaseURL:  baseURL,
-		AnthropicModel:    model,
-		AnthropicAPIKey:   apiKey,
-		OpenAIBaseURL:     openAIBaseURL,
-		OpenAIAPIKey:      openAIAPIKey,
-		AgentProviders:    agentProviders,
+		Command:              command,
+		CodexCommand:         codexCommand,
+		MockClaudeCommand:    mockClaudeCommand,
+		MockCodexCommand:     mockCodexCommand,
+		AnthropicBaseURL:     baseURL,
+		AnthropicModel:       model,
+		AnthropicAPIKey:      apiKey,
+		OpenAIBaseURL:        openAIBaseURL,
+		OpenAIAPIKey:         openAIAPIKey,
+		MockAnthropicBaseURL: mockBaseURL + "/mock/anthropic",
+		MockAnthropicAPIKey:  "mock-key",
+		MockOpenAIBaseURL:    mockBaseURL + "/mock/openai/v1",
+		MockOpenAIAPIKey:     "mock-key",
+		AgentProviders:       agentProviders,
 	}
+}
+
+// backendMockBaseURL 使用 port 参数返回后端 mock 服务根地址。
+func backendMockBaseURL(port string) string {
+	trimmedPort := strings.TrimSpace(port)
+	if trimmedPort == "" {
+		trimmedPort = "8080"
+	}
+	return "http://127.0.0.1:" + trimmedPort
 }
 
 // ListenAndServe 使用 ctx 参数记录日志，并在 port 参数指定的端口启动 HTTP 服务。
