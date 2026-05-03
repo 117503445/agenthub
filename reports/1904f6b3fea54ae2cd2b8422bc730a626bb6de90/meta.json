@@ -1,0 +1,32 @@
+{
+  "sha": "1904f6b3fea54ae2cd2b8422bc730a626bb6de90",
+  "shortSHA": "1904f6b3fea5",
+  "refName": "master",
+  "runURL": "https://github.com/117503445/agenthub/actions/runs/25287317554",
+  "pagesURL": "https://117503445.github.io/agenthub/reports/1904f6b3fea54ae2cd2b8422bc730a626bb6de90/",
+  "passed": true,
+  "exitCode": 0,
+  "createdAt": "2026-05-03T18:37:46Z",
+  "cases": [
+    {
+      "name": "case_agent_chat",
+      "passed": true,
+      "reportURL": "cases/case_agent_chat/report.html"
+    },
+    {
+      "name": "case_persistence",
+      "passed": true,
+      "reportURL": "cases/case_persistence/report.html"
+    },
+    {
+      "name": "case_token_auth",
+      "passed": true,
+      "reportURL": "cases/case_token_auth/report.html"
+    },
+    {
+      "name": "case_ws",
+      "passed": true,
+      "reportURL": "cases/case_ws/report.html"
+    }
+  ]
+}
