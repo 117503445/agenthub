@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/117503445/agenthub/scripts/go-scripts/common"
@@ -28,10 +29,13 @@ type E2ECase struct {
 type E2EContext struct {
 	BaseURL        string      // BaseURL 表示被测服务根地址。
 	OutputDir      string      // OutputDir 表示当前用例输出目录。
+	DataDir        string      // DataDir 表示当前用例使用的后端数据目录。
 	ScreenshotsDir string      // ScreenshotsDir 表示当前用例截图目录。
 	LogsDir        string      // LogsDir 表示当前用例日志目录。
 	Logger         *caseLogger // Logger 表示当前用例日志器。
 	RootDir        string      // RootDir 表示项目根目录。
+	ServerCmd      string      // ServerCmd 表示当前用例使用的服务启动命令。
+	StopServer     func()      // StopServer 停止当前用例自动启动的服务。
 }
 
 // caseLogger 包装标准日志器，统一输出到终端和用例日志文件。
@@ -105,7 +109,8 @@ func Run(args []string) int {
 // registeredCases 返回当前仓库内置 E2E 用例。
 func registeredCases() map[string]E2ECase {
 	return map[string]E2ECase{
-		"case_agent_chat": {Name: "case_agent_chat", Run: runAgentChatCase},
+		"case_agent_chat":  {Name: "case_agent_chat", Run: runAgentChatCase},
+		"case_persistence": {Name: "case_persistence", Run: runPersistenceCase},
 		"case_token_auth": {Name: "case_token_auth", Run: runTokenAuthCase, Env: map[string]string{
 			"AGENTHUB_TOKEN": e2eAgentHubToken,
 		}},
@@ -130,6 +135,7 @@ func Install(stdout io.Writer, stderr io.Writer) error {
 // runCase 使用 rootDir、serverCmd 和 item 参数运行单个 E2E 用例。
 func runCase(rootDir string, serverCmd string, item E2ECase) bool {
 	outputDir := filepath.Join(rootDir, "data", "e2e", item.Name)
+	dataDir := filepath.Join(outputDir, "agenthub-data")
 	screenshotsDir := filepath.Join(outputDir, "screenshots")
 	logsDir := filepath.Join(outputDir, "logs")
 	if err := os.RemoveAll(outputDir); err != nil {
@@ -169,12 +175,13 @@ func runCase(rootDir string, serverCmd string, item E2ECase) bool {
 		}
 	}
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
-	process, stopServer, err := startServer(rootDir, serverCmd, port, legacyPort, logsDir, item.Env)
+	process, stopServer, err := startServer(rootDir, serverCmd, port, legacyPort, logsDir, dataDir, item.Env)
 	if err != nil {
 		logger.Errorf("启动服务失败: %v", err)
 		return false
 	}
-	defer stopServer()
+	stopOnce := sync.OnceFunc(stopServer)
+	defer stopOnce()
 	if err := waitUntilReady(baseURL); err != nil {
 		logger.Errorf("服务未就绪: %v", err)
 		if process.ProcessState != nil {
@@ -188,10 +195,13 @@ func runCase(rootDir string, serverCmd string, item E2ECase) bool {
 	success := item.Run(E2EContext{
 		BaseURL:        baseURL,
 		OutputDir:      outputDir,
+		DataDir:        dataDir,
 		ScreenshotsDir: screenshotsDir,
 		LogsDir:        logsDir,
 		Logger:         logger,
 		RootDir:        rootDir,
+		ServerCmd:      serverCmd,
+		StopServer:     stopOnce,
 	})
 	logger.Infof("用例 %s 结果: %s", item.Name, passText(success))
 	return success
@@ -204,11 +214,15 @@ func startServer(
 	port int,
 	legacyPort int,
 	logsDir string,
+	dataDir string,
 	extraEnv map[string]string,
 ) (*exec.Cmd, func(), error) {
 	parts := strings.Fields(serverCmd)
 	if len(parts) == 0 {
 		return nil, nil, fmt.Errorf("server-cmd 不能为空")
+	}
+	if err := os.MkdirAll(logsDir, 0755); err != nil {
+		return nil, nil, err
 	}
 	serverLog, err := os.Create(filepath.Join(logsDir, "server.log"))
 	if err != nil {
@@ -226,6 +240,7 @@ func startServer(
 		"AGENTHUB_PORT":         fmt.Sprintf("%d", port),
 		"AGENTHUB_LOG_NO_COLOR": "true",
 		"AGENTHUB_TOKEN":        "",
+		"AGENTHUB_DATA":         dataDir,
 		"PORT":                  fmt.Sprintf("%d", legacyPort),
 		"HOME":                  homeDir,
 	}

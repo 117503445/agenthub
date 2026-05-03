@@ -33,12 +33,32 @@ func NewServer(ctx context.Context, version string, agentConfig AgentConfig) *Se
 	if len(agentProviders) == 0 {
 		agentProviders = DefaultAgentProviderOptions()
 	}
+	store := NewStoreWithAgentProviders(agentProviders)
+	addWorkdirProjectIfGitRepo(ctx, store)
+	return newServerWithStore(ctx, version, agentConfig, store)
+}
+
+// NewPersistentServer 使用 ctx、version、agentConfig 和 dataDir 参数创建带持久化的 WebSocket 服务。
+func NewPersistentServer(ctx context.Context, version string, agentConfig AgentConfig, dataDir string) (*Server, error) {
+	agentProviders := agentConfig.AgentProviders
+	if len(agentProviders) == 0 {
+		agentProviders = DefaultAgentProviderOptions()
+	}
+	store, err := NewPersistentStore(dataDir, agentProviders)
+	if err != nil {
+		return nil, err
+	}
+	addWorkdirProjectIfGitRepo(ctx, store)
+	return newServerWithStore(ctx, version, agentConfig, store), nil
+}
+
+// newServerWithStore 使用 ctx、version、agentConfig 和 store 参数创建 WebSocket 服务。
+func newServerWithStore(ctx context.Context, version string, agentConfig AgentConfig, store *Store) *Server {
 	hostname, err := os.Hostname()
 	if err != nil || strings.TrimSpace(hostname) == "" {
 		hostname = "unknown"
 	}
-	store := NewStoreWithAgentProviders(agentProviders)
-	addWorkdirProjectIfGitRepo(ctx, store)
+	agentConfig.AgentProviders = store.AgentProviders()
 	return &Server{
 		ctx:         ctx,
 		version:     version,

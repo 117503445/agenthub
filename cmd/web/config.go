@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -17,6 +18,7 @@ type webConfig struct {
 	Port       string // Port 表示 Web 服务监听端口。
 	LogNoColor bool   // LogNoColor 表示是否禁用日志颜色。
 	Token      string // Token 表示前端访问 WebSocket 时需要提供的 token。
+	DataDir    string // DataDir 表示后端持久化数据目录。
 }
 
 // webCLI 表示 Kong 解析的命令行参数。
@@ -38,10 +40,15 @@ func parseWebConfig(args []string, stdout io.Writer, stderr io.Writer) (webConfi
 	if err := validateWebPort(cli.Port); err != nil {
 		return webConfig{}, err
 	}
+	dataDir, err := resolveWebDataDir(os.Getenv("AGENTHUB_DATA"))
+	if err != nil {
+		return webConfig{}, err
+	}
 	return webConfig{
 		Port:       strings.TrimSpace(cli.Port),
 		LogNoColor: cli.LogNoColor,
 		Token:      strings.TrimSpace(os.Getenv("AGENTHUB_TOKEN")),
+		DataDir:    dataDir,
 	}, nil
 }
 
@@ -74,6 +81,36 @@ func validateWebPort(port string) error {
 		return fmt.Errorf("AGENTHUB_PORT 必须是 1-65535 的端口号，当前值: %q", port)
 	}
 	return nil
+}
+
+// resolveWebDataDir 使用 value 参数解析 Web 服务数据目录。
+func resolveWebDataDir(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("读取用户目录失败: %w", err)
+		}
+		trimmed = filepath.Join(homeDir, ".agenthub", "data")
+	}
+	if trimmed == "~" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("读取用户目录失败: %w", err)
+		}
+		trimmed = homeDir
+	} else if strings.HasPrefix(trimmed, "~/") {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("读取用户目录失败: %w", err)
+		}
+		trimmed = filepath.Join(homeDir, strings.TrimPrefix(trimmed, "~/"))
+	}
+	absPath, err := filepath.Abs(trimmed)
+	if err != nil {
+		return "", fmt.Errorf("解析 AGENTHUB_DATA 失败: %w", err)
+	}
+	return filepath.Clean(absPath), nil
 }
 
 // defaultAgentHubBaseURL 使用 port 参数返回默认本机服务地址。

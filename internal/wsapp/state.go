@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -75,6 +74,8 @@ var (
 	ErrNotFound = errors.New("资源不存在")
 	// ErrInvalidInput 表示请求参数不合法。
 	ErrInvalidInput = errors.New("请求参数不合法")
+	// errStoreUnchanged 表示本次提交没有状态变化。
+	errStoreUnchanged = errors.New("状态未变化")
 )
 
 // Project 表示一个后端本机工作目录。
@@ -190,35 +191,6 @@ type Snapshot struct {
 	LastAgentSelection LastAgentSelection    `json:"lastAgentSelection"` // LastAgentSelection 表示新聊天页默认 agent 配置。
 }
 
-// Store 维护 project、聊天页和消息的内存状态。
-type Store struct {
-	mu              sync.RWMutex
-	projects        map[string]Project
-	chats           map[string]Chat
-	nextChatOrdinal map[string]int
-	agentProviders  []AgentProviderOption
-	lastAgent       LastAgentSelection
-}
-
-// NewStore 创建使用默认 agent 选项的内存状态存储。
-func NewStore() *Store {
-	return NewStoreWithAgentProviders(DefaultAgentProviderOptions())
-}
-
-// NewStoreWithAgentProviders 使用 agentProviders 参数创建内存状态存储。
-func NewStoreWithAgentProviders(agentProviders []AgentProviderOption) *Store {
-	if len(agentProviders) == 0 {
-		agentProviders = DefaultAgentProviderOptions()
-	}
-	return &Store{
-		projects:        make(map[string]Project),
-		chats:           make(map[string]Chat),
-		nextChatOrdinal: make(map[string]int),
-		agentProviders:  cloneAgentProviderOptions(agentProviders),
-		lastAgent:       defaultLastAgentSelection(agentProviders),
-	}
-}
-
 // CreateProject 使用 projectPath 参数创建 project。
 func (s *Store) CreateProject(projectPath string) (Project, error) {
 	normalizedName, normalizedPath, err := validateProjectInput(projectPath)
@@ -236,9 +208,12 @@ func (s *Store) CreateProject(projectPath string) (Project, error) {
 		UpdatedAt: now,
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.projects[project.ID] = project
+	if err := s.commit(func(state *storeState) error {
+		state.projects[project.ID] = project
+		return nil
+	}); err != nil {
+		return Project{}, err
+	}
 	return project, nil
 }
 
@@ -263,15 +238,29 @@ func (s *Store) CreateProjectFromGitWorkdir(workdir string) (Project, Chat, bool
 		UpdatedAt: now,
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, existing := range s.projects {
-		if existing.Path == normalizedPath {
-			return existing, Chat{}, false, nil
+	var chat Chat
+	created := true
+	err = s.commit(func(state *storeState) error {
+		for _, existing := range state.projects {
+			if existing.Path == normalizedPath {
+				project = existing
+				created = false
+				return errStoreUnchanged
+			}
 		}
+		state.projects[project.ID] = project
+		chat = createChatInState(state, project.ID, now)
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, errStoreUnchanged) && !created {
+			return project, Chat{}, false, nil
+		}
+		return Project{}, Chat{}, false, err
 	}
-	s.projects[project.ID] = project
-	chat := s.createChatLocked(project.ID, now)
+	if !created {
+		return project, Chat{}, false, nil
+	}
 	return project, cloneChat(chat), true, nil
 }
 
@@ -282,36 +271,44 @@ func (s *Store) UpdateProject(id string, projectPath string) (Project, error) {
 		return Project{}, err
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	project, ok := s.projects[id]
-	if !ok {
-		return Project{}, ErrNotFound
+	var project Project
+	if err := s.commit(func(state *storeState) error {
+		var ok bool
+		project, ok = state.projects[id]
+		if !ok {
+			return ErrNotFound
+		}
+		project.Name = normalizedName
+		project.Path = normalizedPath
+		project.Git = resolveGitInfo(normalizedPath)
+		project.UpdatedAt = time.Now()
+		state.projects[id] = project
+		return nil
+	}); err != nil {
+		return Project{}, err
 	}
-	project.Name = normalizedName
-	project.Path = normalizedPath
-	project.Git = resolveGitInfo(normalizedPath)
-	project.UpdatedAt = time.Now()
-	s.projects[id] = project
 	return project, nil
 }
 
 // DeleteProject 使用 id 参数删除 project 及其聊天页，并返回被删除的聊天页标识。
 func (s *Store) DeleteProject(id string) ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.projects[id]; !ok {
-		return nil, ErrNotFound
-	}
-	delete(s.projects, id)
-	delete(s.nextChatOrdinal, id)
-
 	chatIDs := make([]string, 0)
-	for chatID, chat := range s.chats {
-		if chat.ProjectID == id {
-			chatIDs = append(chatIDs, chatID)
-			delete(s.chats, chatID)
+	if err := s.commit(func(state *storeState) error {
+		if _, ok := state.projects[id]; !ok {
+			return ErrNotFound
 		}
+		delete(state.projects, id)
+		delete(state.nextChatOrdinal, id)
+
+		for chatID, chat := range state.chats {
+			if chat.ProjectID == id {
+				chatIDs = append(chatIDs, chatID)
+				delete(state.chats, chatID)
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	sort.Strings(chatIDs)
 	return chatIDs, nil
@@ -319,35 +316,44 @@ func (s *Store) DeleteProject(id string) ([]string, error) {
 
 // DeleteChat 使用 id 参数删除单个聊天页，并返回其所属 project 标识。
 func (s *Store) DeleteChat(id string) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	chat, ok := s.chats[id]
-	if !ok {
-		return "", ErrNotFound
+	var projectID string
+	if err := s.commit(func(state *storeState) error {
+		chat, ok := state.chats[id]
+		if !ok {
+			return ErrNotFound
+		}
+		delete(state.chats, id)
+		projectID = chat.ProjectID
+		return nil
+	}); err != nil {
+		return "", err
 	}
-	delete(s.chats, id)
-	return chat.ProjectID, nil
+	return projectID, nil
 }
 
 // CreateChat 使用 projectID 参数创建聊天页。
 func (s *Store) CreateChat(projectID string) (Chat, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.projects[projectID]; !ok {
-		return Chat{}, ErrNotFound
+	var chat Chat
+	if err := s.commit(func(state *storeState) error {
+		if _, ok := state.projects[projectID]; !ok {
+			return ErrNotFound
+		}
+		chat = createChatInState(state, projectID, time.Now())
+		return nil
+	}); err != nil {
+		return Chat{}, err
 	}
-	chat := s.createChatLocked(projectID, time.Now())
 	return cloneChat(chat), nil
 }
 
-// createChatLocked 使用 projectID 和 now 参数创建聊天页，调用方必须持有写锁。
-func (s *Store) createChatLocked(projectID string, now time.Time) Chat {
-	s.nextChatOrdinal[projectID]++
-	lastAgent := s.lastAgent
+// createChatInState 使用 state、projectID 和 now 参数创建聊天页。
+func createChatInState(state *storeState, projectID string, now time.Time) Chat {
+	state.nextChatOrdinal[projectID]++
+	lastAgent := state.lastAgent
 	chat := Chat{
 		ID:             newID("chat"),
 		ProjectID:      projectID,
-		Title:          fmt.Sprintf("聊天 %d", s.nextChatOrdinal[projectID]),
+		Title:          fmt.Sprintf("聊天 %d", state.nextChatOrdinal[projectID]),
 		Status:         ChatStatusIdle,
 		AgentProvider:  lastAgent.Provider,
 		AgentModel:     lastAgent.Model,
@@ -357,7 +363,7 @@ func (s *Store) createChatLocked(projectID string, now time.Time) Chat {
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
-	s.chats[chat.ID] = chat
+	state.chats[chat.ID] = chat
 	return chat
 }
 
@@ -376,55 +382,64 @@ func (s *Store) AddAgentModel(provider string, modelID string, label string) ([]
 		normalizedLabel = normalizedModelID
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for providerIndex := range s.agentProviders {
-		option := &s.agentProviders[providerIndex]
-		if option.ID != normalizedProvider {
-			continue
-		}
-		for _, model := range option.Models {
-			if model.ID == normalizedModelID {
-				return nil, fmt.Errorf("%w: 模型已存在", ErrInvalidInput)
+	var options []AgentProviderOption
+	if err := s.commit(func(state *storeState) error {
+		for providerIndex := range state.agentProviders {
+			option := &state.agentProviders[providerIndex]
+			if option.ID != normalizedProvider {
+				continue
 			}
+			for _, model := range option.Models {
+				if model.ID == normalizedModelID {
+					return fmt.Errorf("%w: 模型已存在", ErrInvalidInput)
+				}
+			}
+			option.Models = append(option.Models, AgentModelOption{
+				ID:    normalizedModelID,
+				Label: normalizedLabel,
+			})
+			options = cloneAgentProviderOptions(state.agentProviders)
+			return nil
 		}
-		option.Models = append(option.Models, AgentModelOption{
-			ID:    normalizedModelID,
-			Label: normalizedLabel,
-		})
-		return cloneAgentProviderOptions(s.agentProviders), nil
+		return fmt.Errorf("%w: 不支持的 agent: %s", ErrInvalidInput, provider)
+	}); err != nil {
+		return nil, err
 	}
-	return nil, fmt.Errorf("%w: 不支持的 agent: %s", ErrInvalidInput, provider)
+	return options, nil
 }
 
 // UpdateChatAgent 使用 chatID、provider、model 和 reasoning 参数更新聊天页 agent 配置。
 func (s *Store) UpdateChatAgent(chatID string, provider string, model string, reasoning string) (Chat, error) {
-	normalizedProvider, normalizedModel, normalizedReasoning, err := NormalizeAgentSelection(provider, model, reasoning, s.agentProviders)
-	if err != nil {
-		return Chat{}, err
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	chat, ok := s.chats[chatID]
-	if !ok {
-		return Chat{}, ErrNotFound
-	}
-	if chat.AgentLocked {
-		if chat.AgentProvider != normalizedProvider {
-			return Chat{}, fmt.Errorf("%w: agent 已锁定，不能切换 provider", ErrInvalidInput)
+	var chat Chat
+	if err := s.commit(func(state *storeState) error {
+		normalizedProvider, normalizedModel, normalizedReasoning, err := NormalizeAgentSelection(provider, model, reasoning, state.agentProviders)
+		if err != nil {
+			return err
 		}
-	}
-	chat.AgentProvider = normalizedProvider
-	chat.AgentModel = normalizedModel
-	chat.AgentReasoning = normalizedReasoning
-	chat.ContextWindow = estimateChatContextWindowUsage(chat)
-	chat.UpdatedAt = time.Now()
-	s.chats[chatID] = chat
-	s.lastAgent = LastAgentSelection{
-		Provider:  normalizedProvider,
-		Model:     normalizedModel,
-		Reasoning: normalizedReasoning,
+		var ok bool
+		chat, ok = state.chats[chatID]
+		if !ok {
+			return ErrNotFound
+		}
+		if chat.AgentLocked {
+			if chat.AgentProvider != normalizedProvider {
+				return fmt.Errorf("%w: agent 已锁定，不能切换 provider", ErrInvalidInput)
+			}
+		}
+		chat.AgentProvider = normalizedProvider
+		chat.AgentModel = normalizedModel
+		chat.AgentReasoning = normalizedReasoning
+		chat.ContextWindow = estimateChatContextWindowUsage(chat)
+		chat.UpdatedAt = time.Now()
+		state.chats[chatID] = chat
+		state.lastAgent = LastAgentSelection{
+			Provider:  normalizedProvider,
+			Model:     normalizedModel,
+			Reasoning: normalizedReasoning,
+		}
+		return nil
+	}); err != nil {
+		return Chat{}, err
 	}
 	return cloneChat(chat), nil
 }
@@ -455,13 +470,6 @@ func (s *Store) AddRunMessages(chatID string, prompt string, images []MessageIma
 		return Chat{}, ChatMessage{}, ChatMessage{}, fmt.Errorf("%w: prompt 或图片不能为空", ErrInvalidInput)
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	chat, ok := s.chats[chatID]
-	if !ok {
-		return Chat{}, ChatMessage{}, ChatMessage{}, ErrNotFound
-	}
-
 	now := time.Now()
 	for index := range normalizedImages {
 		normalizedImages[index].CreatedAt = now
@@ -490,20 +498,31 @@ func (s *Store) AddRunMessages(chatID string, prompt string, images []MessageIma
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	chat.Messages = append(chat.Messages, userMessage, assistantMessage)
-	if len(chat.Messages) == 2 {
-		if title := deriveChatTitleFromPrompt(displayText); title != "" {
-			chat.Title = title
+	var chat Chat
+	if err := s.commit(func(state *storeState) error {
+		var ok bool
+		chat, ok = state.chats[chatID]
+		if !ok {
+			return ErrNotFound
 		}
+		chat.Messages = append(chat.Messages, userMessage, assistantMessage)
+		if len(chat.Messages) == 2 {
+			if title := deriveChatTitleFromPrompt(displayText); title != "" {
+				chat.Title = title
+			}
+		}
+		chat.Status = ChatStatusRunning
+		chat.AgentLocked = true
+		if planMode {
+			chat.Plan = nil
+		}
+		chat.ContextWindow = estimateChatContextWindowUsage(chat)
+		chat.UpdatedAt = now
+		state.chats[chatID] = chat
+		return nil
+	}); err != nil {
+		return Chat{}, ChatMessage{}, ChatMessage{}, err
 	}
-	chat.Status = ChatStatusRunning
-	chat.AgentLocked = true
-	if planMode {
-		chat.Plan = nil
-	}
-	chat.ContextWindow = estimateChatContextWindowUsage(chat)
-	chat.UpdatedAt = now
-	s.chats[chatID] = chat
 	return cloneChat(chat), userMessage, assistantMessage, nil
 }
 
@@ -513,42 +532,48 @@ func (s *Store) AppendAssistantDelta(chatID string, messageID string, delta stri
 		return ChatMessage{}, false
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	chat, ok := s.chats[chatID]
-	if !ok {
+	var message ChatMessage
+	err := s.commit(func(state *storeState) error {
+		chat, ok := state.chats[chatID]
+		if !ok {
+			return errStoreUnchanged
+		}
+		for index := range chat.Messages {
+			item := &chat.Messages[index]
+			if item.ID != messageID || item.Role != MessageRoleAssistant {
+				continue
+			}
+			if item.Status != MessageStatusStreaming {
+				return errStoreUnchanged
+			}
+			now := time.Now()
+			item.Text += delta
+			if len(item.Parts) > 0 && item.Parts[len(item.Parts)-1].Type == MessagePartTypeText {
+				part := &item.Parts[len(item.Parts)-1]
+				part.Text += delta
+				part.UpdatedAt = now
+			} else {
+				item.Parts = append(item.Parts, MessagePart{
+					ID:        newID("part"),
+					Type:      MessagePartTypeText,
+					Text:      delta,
+					CreatedAt: now,
+					UpdatedAt: now,
+				})
+			}
+			item.UpdatedAt = now
+			chat.ContextWindow = estimateChatContextWindowUsage(chat)
+			chat.UpdatedAt = now
+			state.chats[chatID] = chat
+			message = *item
+			return nil
+		}
+		return errStoreUnchanged
+	})
+	if err != nil {
 		return ChatMessage{}, false
 	}
-	for index := range chat.Messages {
-		message := &chat.Messages[index]
-		if message.ID != messageID || message.Role != MessageRoleAssistant {
-			continue
-		}
-		if message.Status != MessageStatusStreaming {
-			return ChatMessage{}, false
-		}
-		now := time.Now()
-		message.Text += delta
-		if len(message.Parts) > 0 && message.Parts[len(message.Parts)-1].Type == MessagePartTypeText {
-			part := &message.Parts[len(message.Parts)-1]
-			part.Text += delta
-			part.UpdatedAt = now
-		} else {
-			message.Parts = append(message.Parts, MessagePart{
-				ID:        newID("part"),
-				Type:      MessagePartTypeText,
-				Text:      delta,
-				CreatedAt: now,
-				UpdatedAt: now,
-			})
-		}
-		message.UpdatedAt = now
-		chat.ContextWindow = estimateChatContextWindowUsage(chat)
-		chat.UpdatedAt = now
-		s.chats[chatID] = chat
-		return *message, true
-	}
-	return ChatMessage{}, false
+	return message, true
 }
 
 // UpsertToolCall 使用 chatID、messageID 和 tool 参数插入或更新工具调用。
@@ -561,122 +586,147 @@ func (s *Store) UpsertToolCall(chatID string, messageID string, tool ToolCall) (
 		tool.Status = ToolCallStatusRunning
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	chat, ok := s.chats[chatID]
-	if !ok {
-		return Chat{}, ChatMessage{}, false
-	}
-	for messageIndex := range chat.Messages {
-		message := &chat.Messages[messageIndex]
-		if message.ID != messageID || message.Role != MessageRoleAssistant {
-			continue
+	var chat Chat
+	var toolMessage ChatMessage
+	err := s.commit(func(state *storeState) error {
+		var ok bool
+		chat, ok = state.chats[chatID]
+		if !ok {
+			return errStoreUnchanged
 		}
-		now := time.Now()
-		updated := false
-		var mergedTool ToolCall
-		for toolIndex := range message.ToolCalls {
-			if message.ToolCalls[toolIndex].ID != tool.ID {
+		for messageIndex := range chat.Messages {
+			message := &chat.Messages[messageIndex]
+			if message.ID != messageID || message.Role != MessageRoleAssistant {
 				continue
 			}
-			existing := &message.ToolCalls[toolIndex]
-			existing.Name = firstNonEmpty(tool.Name, existing.Name)
-			existing.Status = firstNonEmpty(tool.Status, existing.Status)
-			existing.Input = firstNonEmpty(tool.Input, existing.Input)
-			existing.Output = firstNonEmpty(tool.Output, existing.Output)
-			existing.UpdatedAt = now
-			mergedTool = *existing
-			updated = true
-			break
-		}
-		if !updated {
-			if tool.Name == "" {
-				return Chat{}, ChatMessage{}, false
+			now := time.Now()
+			updated := false
+			var mergedTool ToolCall
+			for toolIndex := range message.ToolCalls {
+				if message.ToolCalls[toolIndex].ID != tool.ID {
+					continue
+				}
+				existing := &message.ToolCalls[toolIndex]
+				existing.Name = firstNonEmpty(tool.Name, existing.Name)
+				existing.Status = firstNonEmpty(tool.Status, existing.Status)
+				existing.Input = firstNonEmpty(tool.Input, existing.Input)
+				existing.Output = firstNonEmpty(tool.Output, existing.Output)
+				existing.UpdatedAt = now
+				mergedTool = *existing
+				updated = true
+				break
 			}
-			tool.CreatedAt = now
-			tool.UpdatedAt = now
-			message.ToolCalls = append(message.ToolCalls, tool)
-			mergedTool = tool
+			if !updated {
+				if tool.Name == "" {
+					return errStoreUnchanged
+				}
+				tool.CreatedAt = now
+				tool.UpdatedAt = now
+				message.ToolCalls = append(message.ToolCalls, tool)
+				mergedTool = tool
+			}
+			upsertMessageToolPart(message, mergedTool, now)
+			message.UpdatedAt = now
+			chat.ContextWindow = estimateChatContextWindowUsage(chat)
+			chat.UpdatedAt = now
+			state.chats[chatID] = chat
+			toolMessage = cloneChatMessage(*message)
+			return nil
 		}
-		upsertMessageToolPart(message, mergedTool, now)
-		message.UpdatedAt = now
-		chat.ContextWindow = estimateChatContextWindowUsage(chat)
-		chat.UpdatedAt = now
-		s.chats[chatID] = chat
-		return cloneChat(chat), cloneChatMessage(*message), true
+		return errStoreUnchanged
+	})
+	if err != nil {
+		return Chat{}, ChatMessage{}, false
 	}
-	return Chat{}, ChatMessage{}, false
+	return cloneChat(chat), toolMessage, true
 }
 
 // FinishAssistantMessage 使用 chatID、messageID 和 status 参数结束 assistant 消息。
 func (s *Store) FinishAssistantMessage(chatID string, messageID string, status string) (Chat, ChatMessage, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	chat, ok := s.chats[chatID]
-	if !ok {
+	var chat Chat
+	var message ChatMessage
+	err := s.commit(func(state *storeState) error {
+		var ok bool
+		chat, ok = state.chats[chatID]
+		if !ok {
+			return errStoreUnchanged
+		}
+		for index := range chat.Messages {
+			item := &chat.Messages[index]
+			if item.ID != messageID || item.Role != MessageRoleAssistant {
+				continue
+			}
+			message = *item
+			if item.Status != MessageStatusStreaming {
+				return errStoreUnchanged
+			}
+			now := time.Now()
+			item.Status = status
+			item.UpdatedAt = now
+			if status == MessageStatusError {
+				chat.Status = ChatStatusError
+			} else {
+				chat.Status = ChatStatusIdle
+			}
+			chat.UpdatedAt = now
+			state.chats[chatID] = chat
+			message = *item
+			return nil
+		}
+		return errStoreUnchanged
+	})
+	if err != nil {
+		if chat.ID != "" && message.ID != "" {
+			return cloneChat(chat), message, false
+		}
 		return Chat{}, ChatMessage{}, false
 	}
-	for index := range chat.Messages {
-		message := &chat.Messages[index]
-		if message.ID != messageID || message.Role != MessageRoleAssistant {
-			continue
-		}
-		if message.Status != MessageStatusStreaming {
-			return cloneChat(chat), *message, false
-		}
-		now := time.Now()
-		message.Status = status
-		message.UpdatedAt = now
-		if status == MessageStatusError {
-			chat.Status = ChatStatusError
-		} else {
-			chat.Status = ChatStatusIdle
-		}
-		chat.UpdatedAt = now
-		s.chats[chatID] = chat
-		return cloneChat(chat), *message, true
-	}
-	return Chat{}, ChatMessage{}, false
+	return cloneChat(chat), message, true
 }
 
 // StopStreamingMessage 使用 chatID 和 status 参数停止聊天页中最后一条流式 assistant 消息。
 func (s *Store) StopStreamingMessage(chatID string, status string) (Chat, ChatMessage, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	chat, ok := s.chats[chatID]
-	if !ok {
+	var chat Chat
+	var message ChatMessage
+	err := s.commit(func(state *storeState) error {
+		var ok bool
+		chat, ok = state.chats[chatID]
+		if !ok {
+			return errStoreUnchanged
+		}
+		for index := len(chat.Messages) - 1; index >= 0; index-- {
+			item := &chat.Messages[index]
+			if item.Role != MessageRoleAssistant || item.Status != MessageStatusStreaming {
+				continue
+			}
+			now := time.Now()
+			item.Status = status
+			item.UpdatedAt = now
+			chat.Status = ChatStatusIdle
+			chat.UpdatedAt = now
+			state.chats[chatID] = chat
+			message = *item
+			return nil
+		}
+		if chat.Status == ChatStatusRunning {
+			chat.Status = ChatStatusIdle
+			chat.UpdatedAt = time.Now()
+			state.chats[chatID] = chat
+			return nil
+		}
+		return errStoreUnchanged
+	})
+	if err != nil {
+		if chat.ID != "" {
+			return cloneChat(chat), ChatMessage{}, false
+		}
 		return Chat{}, ChatMessage{}, false
 	}
-	for index := len(chat.Messages) - 1; index >= 0; index-- {
-		message := &chat.Messages[index]
-		if message.Role != MessageRoleAssistant || message.Status != MessageStatusStreaming {
-			continue
-		}
-		now := time.Now()
-		message.Status = status
-		message.UpdatedAt = now
-		chat.Status = ChatStatusIdle
-		chat.UpdatedAt = now
-		s.chats[chatID] = chat
-		return cloneChat(chat), *message, true
-	}
-	if chat.Status == ChatStatusRunning {
-		chat.Status = ChatStatusIdle
-		chat.UpdatedAt = time.Now()
-		s.chats[chatID] = chat
-		return cloneChat(chat), ChatMessage{}, true
-	}
-	return cloneChat(chat), ChatMessage{}, false
+	return cloneChat(chat), message, true
 }
 
 // AddSystemMessage 使用 chatID、text 和 status 参数追加系统消息。
 func (s *Store) AddSystemMessage(chatID string, text string, status string) (Chat, ChatMessage, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	chat, ok := s.chats[chatID]
-	if !ok {
-		return Chat{}, ChatMessage{}, ErrNotFound
-	}
 	now := time.Now()
 	message := ChatMessage{
 		ID:        newID("msg"),
@@ -687,10 +737,21 @@ func (s *Store) AddSystemMessage(chatID string, text string, status string) (Cha
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	chat.Messages = append(chat.Messages, message)
-	chat.Status = ChatStatusError
-	chat.UpdatedAt = now
-	s.chats[chatID] = chat
+	var chat Chat
+	if err := s.commit(func(state *storeState) error {
+		var ok bool
+		chat, ok = state.chats[chatID]
+		if !ok {
+			return ErrNotFound
+		}
+		chat.Messages = append(chat.Messages, message)
+		chat.Status = ChatStatusError
+		chat.UpdatedAt = now
+		state.chats[chatID] = chat
+		return nil
+	}); err != nil {
+		return Chat{}, ChatMessage{}, err
+	}
 	return cloneChat(chat), message, nil
 }
 
@@ -700,74 +761,93 @@ func (s *Store) SetChatPlan(chatID string, messageID string, text string) (Chat,
 	if trimmedText == "" {
 		return Chat{}, false
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	chat, ok := s.chats[chatID]
-	if !ok {
+	var chat Chat
+	err := s.commit(func(state *storeState) error {
+		var ok bool
+		chat, ok = state.chats[chatID]
+		if !ok {
+			return errStoreUnchanged
+		}
+		now := time.Now()
+		chat.Plan = &PlanApproval{
+			ID:        newID("plan"),
+			MessageID: messageID,
+			Text:      trimmedText,
+			Status:    "pending",
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+		chat.UpdatedAt = now
+		state.chats[chatID] = chat
+		return nil
+	})
+	if err != nil {
 		return Chat{}, false
 	}
-	now := time.Now()
-	chat.Plan = &PlanApproval{
-		ID:        newID("plan"),
-		MessageID: messageID,
-		Text:      trimmedText,
-		Status:    "pending",
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
-	chat.UpdatedAt = now
-	s.chats[chatID] = chat
 	return cloneChat(chat), true
 }
 
 // MarkPlanExecuting 使用 chatID 和 planID 参数把 plan 标记为执行中并返回 plan 正文。
 func (s *Store) MarkPlanExecuting(chatID string, planID string) (Chat, PlanApproval, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	chat, ok := s.chats[chatID]
-	if !ok {
-		return Chat{}, PlanApproval{}, ErrNotFound
+	var chat Chat
+	var plan PlanApproval
+	if err := s.commit(func(state *storeState) error {
+		var ok bool
+		chat, ok = state.chats[chatID]
+		if !ok {
+			return ErrNotFound
+		}
+		if chat.Plan == nil || chat.Plan.ID != planID {
+			return fmt.Errorf("%w: plan 不存在", ErrNotFound)
+		}
+		if chat.Plan.Status != "pending" {
+			return fmt.Errorf("%w: plan 当前不可执行", ErrInvalidInput)
+		}
+		now := time.Now()
+		chat.Plan.Status = "executing"
+		chat.Plan.UpdatedAt = now
+		chat.UpdatedAt = now
+		state.chats[chatID] = chat
+		plan = *chat.Plan
+		return nil
+	}); err != nil {
+		return Chat{}, PlanApproval{}, err
 	}
-	if chat.Plan == nil || chat.Plan.ID != planID {
-		return Chat{}, PlanApproval{}, fmt.Errorf("%w: plan 不存在", ErrNotFound)
-	}
-	if chat.Plan.Status != "pending" {
-		return Chat{}, PlanApproval{}, fmt.Errorf("%w: plan 当前不可执行", ErrInvalidInput)
-	}
-	now := time.Now()
-	chat.Plan.Status = "executing"
-	chat.Plan.UpdatedAt = now
-	chat.UpdatedAt = now
-	s.chats[chatID] = chat
-	return cloneChat(chat), *chat.Plan, nil
+	return cloneChat(chat), plan, nil
 }
 
 // UpdateContextWindowUsage 使用 chatID 和 usage 参数更新 agent 上报的上下文窗口使用量。
 func (s *Store) UpdateContextWindowUsage(chatID string, usage ContextWindowUsage) (Chat, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	chat, ok := s.chats[chatID]
-	if !ok {
+	var chat Chat
+	err := s.commit(func(state *storeState) error {
+		var ok bool
+		chat, ok = state.chats[chatID]
+		if !ok {
+			return errStoreUnchanged
+		}
+		if usage.MaxTokens <= 0 {
+			usage.MaxTokens = chat.ContextWindow.MaxTokens
+		}
+		if usage.MaxTokens <= 0 {
+			usage.MaxTokens = contextWindowMaxTokens(chat.AgentProvider, chat.AgentModel)
+		}
+		if usage.UsedTokens < 0 {
+			usage.UsedTokens = 0
+		}
+		if usage.UsedTokens > usage.MaxTokens {
+			usage.UsedTokens = usage.MaxTokens
+		}
+		if chat.ContextWindow == usage {
+			return errStoreUnchanged
+		}
+		chat.ContextWindow = usage
+		chat.UpdatedAt = time.Now()
+		state.chats[chatID] = chat
+		return nil
+	})
+	if err != nil {
 		return Chat{}, false
 	}
-	if usage.MaxTokens <= 0 {
-		usage.MaxTokens = chat.ContextWindow.MaxTokens
-	}
-	if usage.MaxTokens <= 0 {
-		usage.MaxTokens = contextWindowMaxTokens(chat.AgentProvider, chat.AgentModel)
-	}
-	if usage.UsedTokens < 0 {
-		usage.UsedTokens = 0
-	}
-	if usage.UsedTokens > usage.MaxTokens {
-		usage.UsedTokens = usage.MaxTokens
-	}
-	if chat.ContextWindow == usage {
-		return Chat{}, false
-	}
-	chat.ContextWindow = usage
-	chat.UpdatedAt = time.Now()
-	s.chats[chatID] = chat
 	return cloneChat(chat), true
 }
 
@@ -776,15 +856,21 @@ func (s *Store) SetChatSessionID(chatID string, sessionID string) (Chat, bool) {
 	if strings.TrimSpace(sessionID) == "" {
 		return Chat{}, false
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	chat, ok := s.chats[chatID]
-	if !ok || chat.AgentSessionID == sessionID {
+	var chat Chat
+	err := s.commit(func(state *storeState) error {
+		var ok bool
+		chat, ok = state.chats[chatID]
+		if !ok || chat.AgentSessionID == sessionID {
+			return errStoreUnchanged
+		}
+		chat.AgentSessionID = sessionID
+		chat.UpdatedAt = time.Now()
+		state.chats[chatID] = chat
+		return nil
+	})
+	if err != nil {
 		return Chat{}, false
 	}
-	chat.AgentSessionID = sessionID
-	chat.UpdatedAt = time.Now()
-	s.chats[chatID] = chat
 	return cloneChat(chat), true
 }
 

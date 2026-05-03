@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"path"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -16,8 +17,26 @@ import (
 
 // newHTTPHandler 使用 ctx 和 config 参数创建 WebSocket 服务的 HTTP 处理器。
 func newHTTPHandler(ctx context.Context, config webConfig) http.Handler {
+	handler, err := newHTTPHandlerWithError(ctx, config)
+	if err != nil {
+		panic(err)
+	}
+	return handler
+}
+
+// newHTTPHandlerWithError 使用 ctx 和 config 参数创建可返回错误的 HTTP 处理器。
+func newHTTPHandlerWithError(ctx context.Context, config webConfig) (http.Handler, error) {
 	mux := http.NewServeMux()
-	wsServer := wsapp.NewServer(ctx, buildinfo.Version(), resolveAgentConfig(config.Port))
+	var wsServer *wsapp.Server
+	var err error
+	if strings.TrimSpace(config.DataDir) == "" {
+		wsServer = wsapp.NewServer(ctx, buildinfo.Version(), resolveAgentConfig(config.Port))
+	} else {
+		wsServer, err = wsapp.NewPersistentServer(ctx, buildinfo.Version(), resolveAgentConfig(config.Port), config.DataDir)
+		if err != nil {
+			return nil, err
+		}
+	}
 	auth := newTokenAuth(config.Token)
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -38,7 +57,7 @@ func newHTTPHandler(ctx context.Context, config webConfig) http.Handler {
 	})
 	mux.Handle("/", subpathHandler(wsServer, auth, staticHandler()))
 
-	return mux
+	return mux, nil
 }
 
 // subpathHandler 使用 wsServer、auth 和 static 参数处理子路径下的前端、鉴权状态与 WebSocket 请求。
@@ -86,6 +105,23 @@ func backendMockBaseURL(port string) string {
 
 // ListenAndServe 使用 ctx 和 config 参数记录日志并启动 HTTP 服务。
 func ListenAndServe(ctx context.Context, config webConfig) error {
+	if strings.TrimSpace(config.DataDir) == "" {
+		dataDir, err := resolveWebDataDir("")
+		if err != nil {
+			return err
+		}
+		config.DataDir = dataDir
+	}
+	dataLock, err := acquireDataDirLock(ctx, config.DataDir)
+	if err != nil {
+		return err
+	}
+	defer dataLock.Release()
+
+	handler, err := newHTTPHandlerWithError(ctx, config)
+	if err != nil {
+		return err
+	}
 	listener, err := net.Listen("tcp", ":"+config.Port)
 	if err != nil {
 		log.Ctx(ctx).Error().Err(err).Msg("监听端口失败")
@@ -97,6 +133,9 @@ func ListenAndServe(ctx context.Context, config webConfig) error {
 		}
 	}()
 
-	log.Ctx(ctx).Info().Str("addr", listener.Addr().String()).Msg("Web 服务已启动")
-	return http.Serve(listener, newHTTPHandler(ctx, config))
+	log.Ctx(ctx).Info().
+		Str("addr", listener.Addr().String()).
+		Str("dataDir", config.DataDir).
+		Msg("Web 服务已启动")
+	return http.Serve(listener, handler)
 }

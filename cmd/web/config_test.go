@@ -3,15 +3,19 @@ package main
 import (
 	"bytes"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
 // TestParseWebConfigUsesOnlyAgentHubEnv 验证 Web 配置只读取 AGENTHUB 前缀环境变量。
 func TestParseWebConfigUsesOnlyAgentHubEnv(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
 	t.Setenv("AGENTHUB_PORT", "6060")
 	t.Setenv("AGENTHUB_LOG_NO_COLOR", "true")
 	t.Setenv("AGENTHUB_TOKEN", "secret-token")
+	t.Setenv("AGENTHUB_DATA", "~/custom-data")
 	t.Setenv("PORT", "7070")
 	t.Setenv("CODING_LOG_NO_COLOR", "false")
 	t.Setenv("CODING_TOKEN", "legacy-token")
@@ -29,10 +33,15 @@ func TestParseWebConfigUsesOnlyAgentHubEnv(t *testing.T) {
 	if config.Token != "secret-token" {
 		t.Fatalf("token 应来自 AGENTHUB_TOKEN，当前值: %q", config.Token)
 	}
+	expectedDataDir := filepath.Join(homeDir, "custom-data")
+	if config.DataDir != expectedDataDir {
+		t.Fatalf("数据目录应来自 AGENTHUB_DATA 并展开 ~，当前值: %q", config.DataDir)
+	}
 }
 
 // TestParseWebConfigFlagOverridesEnv 验证 CLI 参数优先级高于环境变量。
 func TestParseWebConfigFlagOverridesEnv(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	t.Setenv("AGENTHUB_PORT", "6060")
 
 	config, err := parseWebConfig([]string{"--port", "7070"}, io.Discard, io.Discard)
@@ -44,8 +53,24 @@ func TestParseWebConfigFlagOverridesEnv(t *testing.T) {
 	}
 }
 
+// TestParseWebConfigDefaultDataDir 验证默认数据目录位于用户目录下。
+func TestParseWebConfigDefaultDataDir(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	config, err := parseWebConfig(nil, io.Discard, io.Discard)
+	if err != nil {
+		t.Fatalf("解析配置失败: %v", err)
+	}
+	expectedDataDir := filepath.Join(homeDir, ".agenthub", "data")
+	if config.DataDir != expectedDataDir {
+		t.Fatalf("默认数据目录不正确: %q", config.DataDir)
+	}
+}
+
 // TestWebCLIHelpHidesLogNoColor 验证 Kong 帮助信息隐藏日志颜色环境变量。
 func TestWebCLIHelpHidesLogNoColor(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
