@@ -85,18 +85,6 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDCount(page, "project-path-input", 0, 2*time.Second); err != nil {
 		return fail(err)
 	}
-	if err := clickTestID(page, "project-add-button"); err != nil {
-		return fail(err)
-	}
-	if err := expectTestIDCount(page, "project-path-input", 1, 2*time.Second); err != nil {
-		return fail(err)
-	}
-	if err := fillTestID(page, "project-path-input", projectPath); err != nil {
-		return fail(err)
-	}
-	if err := clickTestID(page, "project-save-button"); err != nil {
-		return fail(err)
-	}
 	if err := expectTestIDText(page, "project-list", projectDisplayName, 10*time.Second); err != nil {
 		return fail(err)
 	}
@@ -171,7 +159,7 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 		return fail(err)
 	}
 	screenshot(page, filepath.Join(ctx.ScreenshotsDir, "01-chat-created.png"), true)
-	steps = append(steps, "创建 project 后顶部同一行展示完整路径和单份 git 信息，侧边栏只显示最后一级目录名，任务栏固定在底部。")
+	steps = append(steps, "服务启动后自动添加 Git 工作目录为 project；顶部同一行展示完整路径和单份 git 信息，侧边栏只显示最后一级目录名，任务栏固定在底部。")
 
 	if err := clickTestID(page, "agent-settings-button"); err != nil {
 		return fail(err)
@@ -241,6 +229,9 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	}
 	steps = append(steps, "输入 / 时可以选择后端返回的 skills，并把选中的 skill 插入聊天输入框。")
 
+	if err := expectImageAddButtonUsesPictureLogo(page, 5*time.Second); err != nil {
+		return fail(err)
+	}
 	if err := attachTestImage(page, "local-image.png"); err != nil {
 		return fail(err)
 	}
@@ -253,7 +244,7 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDText(page, "composer-attachments", "pasted-image.png", 5*time.Second); err != nil {
 		return fail(err)
 	}
-	steps = append(steps, "聊天框加号可以选择本地图片，Ctrl+V 可以粘贴剪贴板图片，并在发送前展示附件预览。")
+	steps = append(steps, "聊天框添加图片按钮使用图片 logo，可以选择本地图片，Ctrl+V 可以粘贴剪贴板图片，并在发送前展示附件预览。")
 
 	firstPrompt := "第一条流式测试"
 	if err := fillTestID(page, "message-input", firstPrompt); err != nil {

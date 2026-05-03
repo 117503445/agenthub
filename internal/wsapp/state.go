@@ -242,6 +242,39 @@ func (s *Store) CreateProject(projectPath string) (Project, error) {
 	return project, nil
 }
 
+// CreateProjectFromGitWorkdir 使用 workdir 参数在 Git 仓库目录中创建 project 和首个聊天页。
+func (s *Store) CreateProjectFromGitWorkdir(workdir string) (Project, Chat, bool, error) {
+	normalizedName, normalizedPath, err := validateProjectInput(workdir)
+	if err != nil {
+		return Project{}, Chat{}, false, err
+	}
+	gitInfo := resolveGitInfo(normalizedPath)
+	if !gitInfo.IsRepo {
+		return Project{}, Chat{}, false, nil
+	}
+
+	now := time.Now()
+	project := Project{
+		ID:        newID("project"),
+		Name:      normalizedName,
+		Path:      normalizedPath,
+		Git:       gitInfo,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, existing := range s.projects {
+		if existing.Path == normalizedPath {
+			return existing, Chat{}, false, nil
+		}
+	}
+	s.projects[project.ID] = project
+	chat := s.createChatLocked(project.ID, now)
+	return project, cloneChat(chat), true, nil
+}
+
 // UpdateProject 使用 id 和 projectPath 参数更新 project。
 func (s *Store) UpdateProject(id string, projectPath string) (Project, error) {
 	normalizedName, normalizedPath, err := validateProjectInput(projectPath)
@@ -303,8 +336,13 @@ func (s *Store) CreateChat(projectID string) (Chat, error) {
 	if _, ok := s.projects[projectID]; !ok {
 		return Chat{}, ErrNotFound
 	}
+	chat := s.createChatLocked(projectID, time.Now())
+	return cloneChat(chat), nil
+}
+
+// createChatLocked 使用 projectID 和 now 参数创建聊天页，调用方必须持有写锁。
+func (s *Store) createChatLocked(projectID string, now time.Time) Chat {
 	s.nextChatOrdinal[projectID]++
-	now := time.Now()
 	lastAgent := s.lastAgent
 	chat := Chat{
 		ID:             newID("chat"),
@@ -320,7 +358,7 @@ func (s *Store) CreateChat(projectID string) (Chat, error) {
 		UpdatedAt:      now,
 	}
 	s.chats[chat.ID] = chat
-	return cloneChat(chat), nil
+	return chat
 }
 
 // AddAgentModel 使用 provider、modelID 和 label 参数新增 agent 模型选项。

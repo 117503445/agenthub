@@ -10,7 +10,8 @@ import {
   useRef,
   useState,
 } from 'react'
-import { ArrowUp, Bot, Brain, ChevronDown, ClipboardList, MessageSquare, Plus, Square, X } from 'lucide-react'
+import { ArrowUp, Bot, Brain, ChevronDown, ClipboardList, MessageSquare, Square, X } from 'lucide-react'
+import imagePlusLogo from '../assets/image-plus-logo.svg'
 import { ContextWindowMeter } from './ContextWindowMeter'
 import { Button } from './ui/button'
 import { Select } from './ui/select'
@@ -297,7 +298,7 @@ export function Composer({
             title="添加图片"
             onClick={() => fileInputRef.current?.click()}
           >
-            <Plus className="h-4 w-4" />
+            <img data-testid="image-add-logo" src={imagePlusLogo} alt="" draggable={false} className="h-4 w-4" />
           </Button>
           <Button
             data-testid="plan-mode-toggle"

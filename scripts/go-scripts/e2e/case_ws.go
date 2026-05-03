@@ -54,18 +54,6 @@ func runWSCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDCount(page, "project-path-input", 0, 2*time.Second); err != nil {
 		return fail(err)
 	}
-	if err := clickTestID(page, "project-add-button"); err != nil {
-		return fail(err)
-	}
-	if err := expectTestIDCount(page, "project-path-input", 1, 2*time.Second); err != nil {
-		return fail(err)
-	}
-	if err := fillTestID(page, "project-path-input", ctx.RootDir); err != nil {
-		return fail(err)
-	}
-	if err := clickTestID(page, "project-save-button"); err != nil {
-		return fail(err)
-	}
 	if err := expectTestIDText(page, "project-list", projectName, 10*time.Second); err != nil {
 		return fail(err)
 	}
@@ -90,7 +78,7 @@ func runWSCase(ctx E2EContext) (success bool) {
 		return fail(err)
 	}
 	screenshot(page, filepath.Join(ctx.ScreenshotsDir, "02-restored.png"), true)
-	steps = append(steps, "创建 project 后自动打开聊天页，hash 路由指向 project，刷新页面仍从后端内存状态恢复。")
+	steps = append(steps, "服务启动后自动添加 Git 工作目录为 project 并打开聊天页，hash 路由指向 project，刷新页面仍从后端内存状态恢复。")
 	return true
 }
 

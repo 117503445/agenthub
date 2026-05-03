@@ -2,6 +2,7 @@ package wsapp
 
 import (
 	"errors"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -220,5 +221,40 @@ func TestStoreRejectsInvalidProjectInput(t *testing.T) {
 	}
 	if _, err := store.CreateChat("missing-project"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("不存在 project 创建聊天页应返回 ErrNotFound: %v", err)
+	}
+}
+
+// TestCreateProjectFromGitWorkdir 验证 Git 工作目录会自动创建 project 和首个聊天页。
+func TestCreateProjectFromGitWorkdir(t *testing.T) {
+	repoDir := t.TempDir()
+	if err := exec.Command("git", "init", repoDir).Run(); err != nil {
+		t.Skipf("当前环境无法初始化 Git 仓库: %v", err)
+	}
+
+	store := NewStore()
+	project, chat, created, err := store.CreateProjectFromGitWorkdir(repoDir)
+	if err != nil {
+		t.Fatalf("从 Git 工作目录创建 project 失败: %v", err)
+	}
+	if !created {
+		t.Fatal("Git 工作目录应该创建 project")
+	}
+	if project.Path != filepath.Clean(repoDir) || !project.Git.IsRepo {
+		t.Fatalf("自动创建的 project 不正确: %#v", project)
+	}
+	if chat.ProjectID != project.ID || chat.Title != "聊天 1" {
+		t.Fatalf("自动创建的聊天页不正确: %#v", chat)
+	}
+
+	snapshot := store.Snapshot()
+	if len(snapshot.Projects) != 1 || len(snapshot.Chats) != 1 {
+		t.Fatalf("自动初始化快照数量不正确: %#v", snapshot)
+	}
+	_, _, created, err = store.CreateProjectFromGitWorkdir(t.TempDir())
+	if err != nil {
+		t.Fatalf("非 Git 工作目录不应返回错误: %v", err)
+	}
+	if created {
+		t.Fatal("非 Git 工作目录不应创建 project")
 	}
 }

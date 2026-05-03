@@ -155,6 +155,50 @@ func pasteTestImage(page playwright.Page, name string) error {
 	return err
 }
 
+// expectImageAddButtonUsesPictureLogo 使用 page 和 timeout 参数等待添加图片按钮展示图片 logo。
+func expectImageAddButtonUsesPictureLogo(page playwright.Page, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastState string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := page.Evaluate(`() => {
+			const button = document.querySelector('[data-testid="image-add-button"]');
+			if (!button) {
+				return 'missing button';
+			}
+			const logo = button.querySelector('img[data-testid="image-add-logo"]');
+			const plusIcon = button.querySelector('svg.lucide-plus');
+			if (!logo) {
+				return 'missing image logo';
+			}
+			const rect = logo.getBoundingClientRect();
+			const alt = logo.getAttribute('alt') ?? '';
+			if (rect.width >= 14 && rect.height >= 14 && alt === '' && !plusIcon) {
+				return '';
+			}
+			return 'width=' + rect.width.toFixed(2) +
+				', height=' + rect.height.toFixed(2) +
+				', alt=' + alt +
+				', plus=' + Boolean(plusIcon);
+		}`, nil)
+		if err == nil {
+			if text, ok := value.(string); ok {
+				lastState = text
+				if text == "" {
+					return nil
+				}
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待添加图片按钮展示图片 logo 超时，最后错误: %w", lastErr)
+	}
+	return fmt.Errorf("等待添加图片按钮展示图片 logo 超时，最后状态: %s", lastState)
+}
+
 // clickFirstTestID 使用 page 和 id 参数点击首个 data-testid 对应元素。
 func clickFirstTestID(page playwright.Page, id string) error {
 	return getByTestID(page, id).First().Click()

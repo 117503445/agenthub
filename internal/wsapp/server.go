@@ -37,14 +37,38 @@ func NewServer(ctx context.Context, version string, agentConfig AgentConfig) *Se
 	if err != nil || strings.TrimSpace(hostname) == "" {
 		hostname = "unknown"
 	}
+	store := NewStoreWithAgentProviders(agentProviders)
+	addWorkdirProjectIfGitRepo(ctx, store)
 	return &Server{
 		ctx:         ctx,
 		version:     version,
 		hostname:    hostname,
-		store:       NewStoreWithAgentProviders(agentProviders),
+		store:       store,
 		agents:      NewAgentManager(ctx, agentConfig),
 		subscribers: make(map[string]chan ServerMessage),
 	}
+}
+
+// addWorkdirProjectIfGitRepo 使用 ctx 和 store 参数把后端 Git 工作目录加入初始 project 列表。
+func addWorkdirProjectIfGitRepo(ctx context.Context, store *Store) {
+	workdir, err := os.Getwd()
+	if err != nil {
+		log.Ctx(ctx).Warn().Err(err).Msg("读取后端工作目录失败")
+		return
+	}
+	project, chat, created, err := store.CreateProjectFromGitWorkdir(workdir)
+	if err != nil {
+		log.Ctx(ctx).Warn().Err(err).Str("workdir", workdir).Msg("自动添加工作目录 project 失败")
+		return
+	}
+	if !created {
+		return
+	}
+	log.Ctx(ctx).Info().
+		Str("projectID", project.ID).
+		Str("chatID", chat.ID).
+		Str("workdir", project.Path).
+		Msg("已自动添加后端工作目录 project")
 }
 
 // ServeWS 使用 w 和 r 参数升级 HTTP 请求并处理 WebSocket 消息。
