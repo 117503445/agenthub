@@ -1,0 +1,6 @@
+2026-05-03 18:41:31.973 INF cmd/web/main.go:53 > 构建信息 BuildDir=/src BuildTime=2026-05-03T18:35:00Z GitBranch=master GitCommit=13e7d7679c6b23dba046cb6ae5d7535976f821b9 GitDirty=true GitTag= GitVersion=13e7d76
+2026-05-03 18:41:31.974 INF cmd/web/data_lock.go:44 > 已持有数据目录锁 dataDir=/src/data/e2e/case_agent_chat/agenthub-data lockPath=/src/data/e2e/case_agent_chat/agenthub-data/agenthub.lock
+2026-05-03 18:41:31.986 INF internal/wsapp/server.go:91 > 已自动添加后端工作目录 project chatID=chat_855d6243cefcaf31 projectID=project_ae56e93429de91b1 workdir=/src
+2026-05-03 18:41:31.987 INF cmd/web/server.go:147 > Web 服务已启动 addr=[::]:44185 dataDir=/src/data/e2e/case_agent_chat/agenthub-data
+2026-05-03 18:41:37.562 WRN internal/wsapp/agent.go:701 > 读取 Claude stdout 失败 error="read |0: file already closed" chatID=chat_c1af479dca13335b
+2026-05-03 18:41:43.813 ERR internal/wsapp/agent.go:716 > agent stderr chatID=chat_114b02926217e623 provider=mock-codex stderr="mock codex error: forced failure"
