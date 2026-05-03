@@ -196,6 +196,11 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	}
 	steps = append(steps, "Agent 设置页可以向 Claude Code 模型选项列表添加新模型。")
 
+	if err := expectComposerSelectWidthsFollowOptions(page, 5*time.Second); err != nil {
+		return fail(err)
+	}
+	steps = append(steps, "聊天框中的选择框宽度会根据当前实际选项内容调整。")
+
 	if err := selectTestID(page, "agent-provider-select", "claude-code"); err != nil {
 		return fail(err)
 	}
@@ -291,6 +296,9 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 		return fail(err)
 	}
 	if err := expectTestIDDescendantText(page, "message-log", `[data-testid="assistant-markdown"] h2`, "Mock Codex", 20*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectMessageTimesOutsideBubbles(page, 5*time.Second); err != nil {
 		return fail(err)
 	}
 	if err := expectChatContentFontSize(page, 5*time.Second); err != nil {

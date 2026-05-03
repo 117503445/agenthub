@@ -613,6 +613,143 @@ func expectComposerExpandedSizing(page playwright.Page, timeout time.Duration) e
 	return fmt.Errorf("等待输入框内容增高超时，最后状态: %s", lastState)
 }
 
+// expectComposerSelectWidthsFollowOptions 使用 page 和 timeout 参数等待输入框选择框宽度随实际选项变化。
+func expectComposerSelectWidthsFollowOptions(page playwright.Page, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastState string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		if err := selectTestID(page, "agent-provider-select", "codex"); err != nil {
+			lastErr = err
+			time.Sleep(150 * time.Millisecond)
+			continue
+		}
+		shortProviderWidth, err := testIDWidth(page, "agent-provider-select")
+		if err != nil {
+			lastErr = err
+			time.Sleep(150 * time.Millisecond)
+			continue
+		}
+		codexWidth, err := testIDWidth(page, "agent-model-select")
+		if err != nil {
+			lastErr = err
+			time.Sleep(150 * time.Millisecond)
+			continue
+		}
+		if err := selectTestID(page, "agent-provider-select", "mock-claude-code"); err != nil {
+			lastErr = err
+			time.Sleep(150 * time.Millisecond)
+			continue
+		}
+		longProviderWidth, err := testIDWidth(page, "agent-provider-select")
+		if err != nil {
+			lastErr = err
+			time.Sleep(150 * time.Millisecond)
+			continue
+		}
+		if err := selectTestID(page, "agent-provider-select", "mock-codex"); err != nil {
+			lastErr = err
+			time.Sleep(150 * time.Millisecond)
+			continue
+		}
+		mockCodexWidth, err := testIDWidth(page, "agent-model-select")
+		if err != nil {
+			lastErr = err
+			time.Sleep(150 * time.Millisecond)
+			continue
+		}
+		textFitState, err := composerSelectTextFitState(page)
+		if err != nil {
+			lastErr = err
+			time.Sleep(150 * time.Millisecond)
+			continue
+		}
+		providerFollowsSelection := longProviderWidth >= shortProviderWidth+24
+		modelFollowsOptions := mockCodexWidth >= codexWidth+16
+		if providerFollowsSelection && modelFollowsOptions && textFitState == "" {
+			return nil
+		}
+		lastState = fmt.Sprintf(
+			"shortProviderWidth=%.2f, longProviderWidth=%.2f, codexWidth=%.2f, mockCodexWidth=%.2f, textFit=%s",
+			shortProviderWidth,
+			longProviderWidth,
+			codexWidth,
+			mockCodexWidth,
+			textFitState,
+		)
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待输入框选择框宽度随选项变化超时，最后错误: %w", lastErr)
+	}
+	return fmt.Errorf("等待输入框选择框宽度随选项变化超时，最后状态: %s", lastState)
+}
+
+// composerSelectTextFitState 使用 page 参数返回选择框文本适配状态。
+func composerSelectTextFitState(page playwright.Page) (string, error) {
+	value, err := page.Evaluate(`() => {
+		const ids = ['agent-provider-select', 'agent-model-select', 'agent-reasoning-select'];
+		const context = document.createElement('canvas').getContext('2d');
+		if (!context) {
+			return 'missing canvas context';
+		}
+		const states = [];
+		for (const id of ids) {
+			const select = document.querySelector('[data-testid="' + id + '"]');
+			if (!select) {
+				continue;
+			}
+			const style = getComputedStyle(select);
+			const rect = select.getBoundingClientRect();
+			const option = select.options[select.selectedIndex];
+			const text = option?.textContent?.trim() ?? '';
+			const font = [
+				style.fontStyle,
+				style.fontVariant,
+				style.fontWeight,
+				style.fontSize + '/' + style.lineHeight,
+				style.fontFamily,
+			].join(' ');
+			context.font = font;
+			const textWidth = context.measureText(text).width;
+			const paddingLeft = Number.parseFloat(style.paddingLeft) || 0;
+			const paddingRight = Number.parseFloat(style.paddingRight) || 0;
+			const available = rect.width - paddingLeft - paddingRight;
+			const spare = available - textWidth;
+			if (textWidth > available) {
+				states.push(id + ': text=' + text + ', textWidth=' + textWidth.toFixed(2) + ', available=' + available.toFixed(2));
+			} else if (spare > 18) {
+				states.push(id + ': text=' + text + ', spare=' + spare.toFixed(2));
+			}
+		}
+		return states.join('; ');
+	}`, nil)
+	if err != nil {
+		return "", err
+	}
+	text, ok := value.(string)
+	if !ok {
+		return "", fmt.Errorf("选择框文本适配状态类型异常: %T", value)
+	}
+	return text, nil
+}
+
+// testIDWidth 使用 page 和 id 参数返回首个 data-testid 元素宽度。
+func testIDWidth(page playwright.Page, id string) (float64, error) {
+	value, err := getByTestID(page, id).First().Evaluate(`(element) => element.getBoundingClientRect().width`, nil)
+	if err != nil {
+		return 0, err
+	}
+	switch typed := value.(type) {
+	case int:
+		return float64(typed), nil
+	case float64:
+		return typed, nil
+	default:
+		return 0, fmt.Errorf("元素 %q 宽度类型异常: %T", id, value)
+	}
+}
+
 // expectChatContentFontSize 使用 page 和 timeout 参数等待聊天正文使用 16px 字号。
 func expectChatContentFontSize(page playwright.Page, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
@@ -682,6 +819,63 @@ func expectMessageTimesIncludeSeconds(page playwright.Page, timeout time.Duratio
 		return fmt.Errorf("等待消息时间精确到秒超时，最后错误: %w", lastErr)
 	}
 	return fmt.Errorf("等待消息时间精确到秒超时，最后状态: %s", lastState)
+}
+
+// expectMessageTimesOutsideBubbles 使用 page 和 timeout 参数等待消息时间位于消息内容外侧。
+func expectMessageTimesOutsideBubbles(page playwright.Page, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastState string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := page.Evaluate(`() => {
+			const user = document.querySelector('.message-user');
+			const assistant = document.querySelector('.message-assistant');
+			const userTime = user?.querySelector('[data-testid="message-time"]');
+			const assistantTime = assistant?.querySelector('[data-testid="message-time"]');
+			if (!user || !assistant || !userTime || !assistantTime) {
+				return 'missing user=' + Boolean(user) +
+					', assistant=' + Boolean(assistant) +
+					', userTime=' + Boolean(userTime) +
+					', assistantTime=' + Boolean(assistantTime);
+			}
+			const userRect = user.getBoundingClientRect();
+			const assistantRect = assistant.getBoundingClientRect();
+			const userTimeRect = userTime.getBoundingClientRect();
+			const assistantTimeRect = assistantTime.getBoundingClientRect();
+			const userOutsideTop = userTimeRect.bottom <= userRect.top + 1;
+			const userRight = Math.abs(userTimeRect.right - userRect.right) <= 2;
+			const assistantOutsideTop = assistantTimeRect.bottom <= assistantRect.top + 1;
+			const assistantLeft = Math.abs(assistantTimeRect.left - assistantRect.left) <= 10;
+			if (userOutsideTop && userRight && assistantOutsideTop && assistantLeft) {
+				return '';
+			}
+			return 'userOutsideTop=' + userOutsideTop +
+				', userRight=' + userRight +
+				', assistantOutsideTop=' + assistantOutsideTop +
+				', assistantLeft=' + assistantLeft +
+				', userTop=' + userRect.top.toFixed(2) +
+				', userTimeBottom=' + userTimeRect.bottom.toFixed(2) +
+				', userRightDelta=' + Math.abs(userTimeRect.right - userRect.right).toFixed(2) +
+				', assistantTop=' + assistantRect.top.toFixed(2) +
+				', assistantTimeBottom=' + assistantTimeRect.bottom.toFixed(2) +
+				', assistantLeftDelta=' + Math.abs(assistantTimeRect.left - assistantRect.left).toFixed(2);
+		}`, nil)
+		if err == nil {
+			if text, ok := value.(string); ok {
+				lastState = text
+				if text == "" {
+					return nil
+				}
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待消息时间位于消息外侧超时，最后错误: %w", lastErr)
+	}
+	return fmt.Errorf("等待消息时间位于消息外侧超时，最后状态: %s", lastState)
 }
 
 // expectNoMessageRoleLabels 使用 page 和 timeout 参数等待消息区域不显示角色名。

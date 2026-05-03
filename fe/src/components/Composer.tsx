@@ -1,5 +1,16 @@
-import { ChangeEvent, ClipboardEvent, FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Bot, Brain, ClipboardList, MessageSquare, Plus, Square, X } from 'lucide-react'
+import {
+  ChangeEvent,
+  ClipboardEvent,
+  CSSProperties,
+  FormEvent,
+  KeyboardEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import { ArrowUp, Bot, Brain, ChevronDown, ClipboardList, MessageSquare, Plus, Square, X } from 'lucide-react'
 import { ContextWindowMeter } from './ContextWindowMeter'
 import { Button } from './ui/button'
 import { Select } from './ui/select'
@@ -106,6 +117,10 @@ export function Composer({
   }, [agentSkills, composerValue, skillQuery])
   const skillMenuVisible = filteredSkills.length > 0
   const hasComposerPayload = composerValue.trim() || composerImages.length > 0
+  const selectedProviderLabel = agentProviders.find((provider) => provider.id === selectedAgentProvider)?.label ?? selectedAgentProvider
+  const selectedModelLabel = selectedAgentModels.find((model) => model.id === selectedAgentModel)?.label ?? selectedAgentModel
+  const selectedReasoningLabel =
+    selectedAgentModelOption?.reasoningLevels?.find((level) => level.id === selectedAgentReasoning)?.label ?? selectedAgentReasoning
 
   // resizeTextarea 根据当前内容调整输入框高度，并限制最大高度。
   const resizeTextarea = useCallback(() => {
@@ -307,7 +322,8 @@ export function Composer({
               onChange={(event) => onChangeAgentProvider(event.target.value as AgentProvider)}
               disabled={agentControlsDisabled || providerLocked}
               aria-label="选择助理"
-              className="composer-select h-8 min-w-36 max-w-48 rounded-full border-transparent bg-slate-50 pl-8 pr-3 text-xs"
+              style={composerSelectWidthStyle(selectedProviderLabel, 4, 32)}
+              className="composer-select h-8 appearance-none rounded-full border-transparent bg-slate-50 pl-8 pr-8 text-xs"
             >
               {agentProviders.map((provider) => (
                 <option key={provider.id} value={provider.id}>
@@ -315,6 +331,7 @@ export function Composer({
                 </option>
               ))}
             </Select>
+            <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
           </div>
           <label htmlFor="agent-model-select" className="sr-only">
             模型
@@ -327,7 +344,8 @@ export function Composer({
               value={selectedAgentModel}
               onChange={(event) => onChangeAgentModel(event.target.value)}
               disabled={modelControlsDisabled}
-              className="composer-select h-8 min-w-44 max-w-56 rounded-full border-transparent bg-slate-50 pl-8 pr-3 text-xs"
+              style={composerSelectWidthStyle(selectedModelLabel, 4, 42)}
+              className="composer-select h-8 appearance-none rounded-full border-transparent bg-slate-50 pl-8 pr-8 text-xs"
             >
               {selectedAgentModels.map((model) => (
                 <option key={model.id} value={model.id}>
@@ -335,6 +353,7 @@ export function Composer({
                 </option>
               ))}
             </Select>
+            <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
           </div>
           {selectedAgentModelOption?.reasoningLevels?.length ? (
             <div className="relative">
@@ -348,7 +367,8 @@ export function Composer({
                 value={selectedAgentReasoning}
                 onChange={(event) => onChangeAgentReasoning(event.target.value)}
                 disabled={modelControlsDisabled}
-                className="composer-select h-8 min-w-28 max-w-36 rounded-full border-transparent bg-slate-50 pl-8 pr-3 text-xs"
+                style={composerSelectWidthStyle(selectedReasoningLabel, 4, 24)}
+                className="composer-select h-8 appearance-none rounded-full border-transparent bg-slate-50 pl-8 pr-8 text-xs"
               >
                 {selectedAgentModelOption.reasoningLevels.map((level) => (
                   <option key={level.id} value={level.id}>
@@ -356,6 +376,7 @@ export function Composer({
                   </option>
                 ))}
               </Select>
+              <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
             </div>
           ) : null}
           <span className="min-w-4 flex-1" />
@@ -399,4 +420,15 @@ function readFileAsDataURL(file: File) {
     reader.onerror = () => reject(reader.error ?? new Error('读取图片失败'))
     reader.readAsDataURL(file)
   })
+}
+
+// composerSelectWidthStyle 使用 label、minCh 和 maxCh 参数生成选择框宽度样式。
+function composerSelectWidthStyle(label: string, minCh: number, maxCh: number): CSSProperties {
+  const contentWidth = Math.min(Math.max(visualTextLength(label), minCh), maxCh)
+  return { maxWidth: '100%', width: `calc(${contentWidth}ch + 4.5rem)` }
+}
+
+// visualTextLength 使用 text 参数估算中英文混排文本的视觉宽度。
+function visualTextLength(text: string) {
+  return Array.from(text || '').reduce((width, char) => width + (char.charCodeAt(0) > 255 ? 2 : 1), 0)
 }
