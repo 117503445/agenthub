@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/117503445/agenthub/scripts/go-scripts/buildweb"
+	"github.com/117503445/agenthub/scripts/go-scripts/cireport"
 	"github.com/117503445/agenthub/scripts/go-scripts/e2e"
 	"github.com/117503445/agenthub/scripts/go-scripts/it"
 	"github.com/117503445/agenthub/scripts/go-scripts/runweb"
@@ -38,6 +39,14 @@ func main() {
 		os.Exit(e2e.Run(os.Args[2:]))
 	case "e2e-install":
 		if err := e2e.Install(os.Stdout, os.Stderr); err != nil {
+			exitWithError(err)
+		}
+	case "ci-report":
+		if err := cireport.RunReport(os.Args[2:]); err != nil {
+			exitWithError(err)
+		}
+	case "ci-pages-index":
+		if err := cireport.RunPagesIndex(os.Args[2:]); err != nil {
 			exitWithError(err)
 		}
 	default:

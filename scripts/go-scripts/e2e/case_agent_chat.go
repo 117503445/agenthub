@@ -357,7 +357,7 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 		return fail(err)
 	}
 	screenshot(page, filepath.Join(ctx.ScreenshotsDir, "02-streaming.png"), true)
-	steps = append(steps, "Mock Codex 通过真实 Codex CLI 请求后端 mock 模型服务，工具调用标题直接展示命令并排在输出前。")
+	steps = append(steps, "Mock Codex 通过内置 Codex CLI 请求后端 OpenAI mock 模型服务，工具调用标题直接展示命令并排在输出前。")
 
 	if err := expectTestIDCount(page, "send-button", 0, 30*time.Second); err != nil {
 		return fail(err)

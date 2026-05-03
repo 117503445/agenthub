@@ -34,6 +34,23 @@ type mockAgentResponse struct {
 	} `json:"content"` // Content 表示响应内容。
 }
 
+// mockOpenAIResponse 表示 mock OpenAI Responses 响应体。
+type mockOpenAIResponse struct {
+	Output []mockOpenAIOutput `json:"output"` // Output 表示模型输出项列表。
+}
+
+// mockOpenAIOutput 表示 mock OpenAI Responses 的单个输出项。
+type mockOpenAIOutput struct {
+	Type    string              `json:"type"`    // Type 表示输出项类型。
+	Content []mockOpenAIContent `json:"content"` // Content 表示输出文本内容。
+}
+
+// mockOpenAIContent 表示 mock OpenAI Responses 的输出内容块。
+type mockOpenAIContent struct {
+	Type string `json:"type"` // Type 表示内容块类型。
+	Text string `json:"text"` // Text 表示文本内容。
+}
+
 // runMockAgentCLIIfRequested 使用 args 参数判断并运行 E2E mock agent CLI。
 func runMockAgentCLIIfRequested(args []string) bool {
 	mode := mockAgentMode(args)
@@ -73,7 +90,7 @@ func runMockCodexCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 		"item": map[string]any{
 			"id":                "mock-codex-request",
 			"type":              "command_execution",
-			"command":           "POST " + mockAgentMessagesURL(),
+			"command":           "pwd",
 			"aggregated_output": "",
 			"status":            "in_progress",
 		},
@@ -85,7 +102,7 @@ func runMockCodexCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 		_, _ = fmt.Fprintln(stderr, "mock codex error: forced failure")
 		return 1
 	}
-	text, err := requestMockAgentText(model, prompt)
+	text, err := requestMockCodexText(model, prompt)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "mock codex request failed: %v\n", err)
 		return 1
@@ -96,8 +113,8 @@ func runMockCodexCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 		"item": map[string]any{
 			"id":                "mock-codex-request",
 			"type":              "command_execution",
-			"command":           "POST " + mockAgentMessagesURL(),
-			"aggregated_output": "mock model request complete",
+			"command":           "pwd",
+			"aggregated_output": ".",
 			"exit_code":         0,
 			"status":            "completed",
 		},
@@ -112,7 +129,49 @@ func runMockCodexCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 	})
 	writeMockJSONLine(writer, map[string]any{"type": "turn.completed"})
 	_ = writer.Flush()
+	// 让父进程先消费 stdout，避免极快退出时先收到进程完成回调。
+	time.Sleep(300 * time.Millisecond)
 	return 0
+}
+
+// requestMockCodexText 使用 model 和 prompt 参数请求 OpenAI 兼容 mock 模型服务。
+func requestMockCodexText(model string, prompt string) (string, error) {
+	if model == "" {
+		model = "mock-model"
+	}
+	payload := map[string]any{
+		"model":  model,
+		"stream": false,
+		"input":  prompt,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	response, err := http.Post(mockOpenAIResponsesURL(), "application/json", bytes.NewReader(data))
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		body, _ := io.ReadAll(response.Body)
+		return "", fmt.Errorf("mock 服务状态码 %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var result mockOpenAIResponse
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	for _, output := range result.Output {
+		if output.Type != "message" {
+			continue
+		}
+		for _, content := range output.Content {
+			if content.Type == "output_text" && content.Text != "" {
+				return content.Text, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("mock 服务没有返回文本")
 }
 
 // runMockClaudeCLI 使用 args、stdin、stdout 和 stderr 参数运行 Claude stream-json mock。
@@ -205,6 +264,11 @@ func requestMockAgentText(model string, prompt string) (string, error) {
 func mockAgentMessagesURL() string {
 	baseURL := defaultAgentHubBaseURL(os.Getenv("AGENTHUB_PORT")) + "/mock/anthropic"
 	return baseURL + "/v1/messages"
+}
+
+// mockOpenAIResponsesURL 返回 mock OpenAI Responses 端点地址。
+func mockOpenAIResponsesURL() string {
+	return defaultAgentHubBaseURL(os.Getenv("AGENTHUB_PORT")) + "/mock/openai/v1/responses"
 }
 
 // mockCLIModelFromArgs 使用 args 参数提取 --model 的值。

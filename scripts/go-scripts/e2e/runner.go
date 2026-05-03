@@ -221,6 +221,10 @@ func startServer(
 	if len(parts) == 0 {
 		return nil, nil, fmt.Errorf("server-cmd 不能为空")
 	}
+	mockCodexCommand, mockClaudeCommand, err := prepareMockAgentCommands(rootDir, parts[0])
+	if err != nil {
+		return nil, nil, err
+	}
 	if err := os.MkdirAll(logsDir, 0755); err != nil {
 		return nil, nil, err
 	}
@@ -237,12 +241,14 @@ func startServer(
 	cmd := exec.Command(parts[0], parts[1:]...)
 	cmd.Dir = rootDir
 	envOverride := map[string]string{
-		"AGENTHUB_PORT":         fmt.Sprintf("%d", port),
-		"AGENTHUB_LOG_NO_COLOR": "true",
-		"AGENTHUB_TOKEN":        "",
-		"AGENTHUB_DATA":         dataDir,
-		"PORT":                  fmt.Sprintf("%d", legacyPort),
-		"HOME":                  homeDir,
+		"AGENTHUB_PORT":                fmt.Sprintf("%d", port),
+		"AGENTHUB_LOG_NO_COLOR":        "true",
+		"AGENTHUB_TOKEN":               "",
+		"AGENTHUB_DATA":                dataDir,
+		"AGENTHUB_MOCK_CODEX_COMMAND":  mockCodexCommand,
+		"AGENTHUB_MOCK_CLAUDE_COMMAND": mockClaudeCommand,
+		"PORT":                         fmt.Sprintf("%d", legacyPort),
+		"HOME":                         homeDir,
 	}
 	for key, value := range extraEnv {
 		envOverride[key] = value

@@ -876,8 +876,6 @@ func composerSelectTextFitState(page playwright.Page) (string, error) {
 			const spare = available - textWidth;
 			if (textWidth > available) {
 				states.push(id + ': text=' + text + ', textWidth=' + textWidth.toFixed(2) + ', available=' + available.toFixed(2));
-			} else if (spare > 18) {
-				states.push(id + ': text=' + text + ', spare=' + spare.toFixed(2));
 			}
 		}
 		return states.join('; ');

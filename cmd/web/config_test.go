@@ -16,6 +16,8 @@ func TestParseWebConfigUsesOnlyAgentHubEnv(t *testing.T) {
 	t.Setenv("AGENTHUB_LOG_NO_COLOR", "true")
 	t.Setenv("AGENTHUB_TOKEN", "secret-token")
 	t.Setenv("AGENTHUB_DATA", "~/custom-data")
+	t.Setenv("AGENTHUB_MOCK_CLAUDE_COMMAND", "/tmp/mock-claude")
+	t.Setenv("AGENTHUB_MOCK_CODEX_COMMAND", "/tmp/mock-codex")
 	t.Setenv("PORT", "7070")
 	t.Setenv("LEGACY_AGENTHUB_LOG_NO_COLOR", "false")
 	t.Setenv("LEGACY_AGENTHUB_TOKEN", "legacy-token")
@@ -36,6 +38,9 @@ func TestParseWebConfigUsesOnlyAgentHubEnv(t *testing.T) {
 	expectedDataDir := filepath.Join(homeDir, "custom-data")
 	if config.DataDir != expectedDataDir {
 		t.Fatalf("数据目录应来自 AGENTHUB_DATA 并展开 ~，当前值: %q", config.DataDir)
+	}
+	if config.MockClaudeCommand != "/tmp/mock-claude" || config.MockCodexCommand != "/tmp/mock-codex" {
+		t.Fatalf("mock 命令应来自 AGENTHUB 环境变量: claude=%q codex=%q", config.MockClaudeCommand, config.MockCodexCommand)
 	}
 }
 

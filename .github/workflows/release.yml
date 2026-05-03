@@ -1,9 +1,9 @@
-name: release
+name: ci
 
 on:
   push:
-    branches:
-      - "**"
+    branches-ignore:
+      - gh-pages
     tags:
       - "**"
   workflow_dispatch:
@@ -11,15 +11,179 @@ on:
 permissions:
   actions: write
   contents: write
+  id-token: write
   packages: write
+  pages: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    outputs:
+      exit_code: ${{ steps.run_e2e.outputs.exit_code }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 构建 E2E 镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: scripts/docker/e2e.Dockerfile
+          target: e2e-runner
+          platforms: linux/amd64
+          load: true
+          tags: agenthub-e2e:${{ github.sha }}
+          cache-from: |
+            type=gha,scope=agenthub-e2e
+            type=gha,scope=agenthub-release
+          cache-to: type=gha,scope=agenthub-e2e,mode=max
+
+      - name: 运行 E2E 容器
+        id: run_e2e
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf data/ci-report
+          mkdir -p data/ci-report
+          docker run --rm \
+            -e GITHUB_SHA="${GITHUB_SHA}" \
+            -e GITHUB_REF_NAME="${GITHUB_REF_NAME}" \
+            -e GITHUB_REPOSITORY="${GITHUB_REPOSITORY}" \
+            -e GITHUB_REPOSITORY_OWNER="${GITHUB_REPOSITORY_OWNER}" \
+            -e GITHUB_SERVER_URL="${GITHUB_SERVER_URL}" \
+            -e GITHUB_RUN_ID="${GITHUB_RUN_ID}" \
+            -e AGENTHUB_REPORT_DIR=/report \
+            -v "${PWD}/data/ci-report:/report" \
+            "agenthub-e2e:${GITHUB_SHA}"
+          exit_code="$(cat data/ci-report/e2e-exit-code 2>/dev/null || echo 1)"
+          echo "exit_code=${exit_code}" >> "${GITHUB_OUTPUT}"
+          exit 0
+
+      - name: 写入 Workflow Summary
+        if: always()
+        run: cat data/ci-report/summary.md >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: 上传 E2E 报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-report-${{ github.sha }}
+          path: data/ci-report
+          if-no-files-found: error
+
+      - name: 检查 E2E 结果
+        if: always()
+        shell: bash
+        run: |
+          exit_code="${{ steps.run_e2e.outputs.exit_code || '1' }}"
+          if [[ "${exit_code}" != "0" ]]; then
+            echo "E2E 失败，退出码: ${exit_code}" >&2
+            exit "${exit_code}"
+          fi
+
+  pages:
+    name: publish e2e pages
+    needs: e2e
+    if: always() && needs.e2e.result != 'cancelled'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: 下载当前 E2E 报告
+        uses: actions/download-artifact@v4
+        with:
+          name: e2e-report-${{ github.sha }}
+          path: current-report
+
+      - name: 检出 Pages 历史
+        id: checkout_pages
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: pages-site
+
+      - name: 准备 Pages 目录
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ steps.checkout_pages.outcome }}" != "success" ]]; then
+            rm -rf pages-site
+            mkdir -p pages-site
+            git -C pages-site init
+            git -C pages-site checkout -b gh-pages
+            git -C pages-site remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          fi
+          mkdir -p pages-site/reports
+          rm -rf "pages-site/reports/${GITHUB_SHA}"
+          mkdir -p "pages-site/reports/${GITHUB_SHA}"
+          cp -R current-report/. "pages-site/reports/${GITHUB_SHA}/"
+          go run ./scripts/go-scripts ci-pages-index --site-dir pages-site
+
+      - name: 保存 Pages 历史
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C pages-site config user.name "github-actions[bot]"
+          git -C pages-site config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C pages-site add -A
+          if git -C pages-site diff --cached --quiet; then
+            echo "Pages 内容没有变化"
+          else
+            git -C pages-site commit -m "docs(pages): 发布 E2E 报告 ${GITHUB_SHA::12}"
+            git -C pages-site push origin gh-pages
+          fi
+
+      - name: 准备 Pages 部署包
+        shell: bash
+        run: |
+          rm -rf pages-upload
+          mkdir -p pages-upload
+          cp -R pages-site/. pages-upload/
+          rm -rf pages-upload/.git
+
+      - name: 配置 GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: 上传 GitHub Pages 部署包
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages-upload
+
+      - name: 部署 GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
   build-release:
     name: build release
+    needs: e2e
+    if: needs.e2e.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: 检出代码
@@ -86,7 +250,9 @@ jobs:
             GIT_DIRTY=false
             GIT_TAG=${{ steps.vars.outputs.git_tag }}
             GIT_VERSION=${{ steps.vars.outputs.git_version }}
-          cache-from: type=gha,scope=agenthub-release
+          cache-from: |
+            type=gha,scope=agenthub-release
+            type=gha,scope=agenthub-e2e
           cache-to: type=gha,scope=agenthub-release,mode=max
 
       - name: 上传工作流产物
@@ -132,7 +298,9 @@ jobs:
             GIT_DIRTY=false
             GIT_TAG=${{ steps.vars.outputs.git_tag }}
             GIT_VERSION=${{ steps.vars.outputs.git_version }}
-          cache-from: type=gha,scope=agenthub-release
+          cache-from: |
+            type=gha,scope=agenthub-release
+            type=gha,scope=agenthub-e2e
           cache-to: type=gha,scope=agenthub-release,mode=max
 
       - name: 发布 GitHub Release

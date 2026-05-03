@@ -30,9 +30,9 @@ func newHTTPHandlerWithError(ctx context.Context, config webConfig) (http.Handle
 	var wsServer *wsapp.Server
 	var err error
 	if strings.TrimSpace(config.DataDir) == "" {
-		wsServer = wsapp.NewServer(ctx, buildinfo.Version(), resolveAgentConfig(config.Port))
+		wsServer = wsapp.NewServer(ctx, buildinfo.Version(), resolveAgentConfig(config))
 	} else {
-		wsServer, err = wsapp.NewPersistentServer(ctx, buildinfo.Version(), resolveAgentConfig(config.Port), config.DataDir)
+		wsServer, err = wsapp.NewPersistentServer(ctx, buildinfo.Version(), resolveAgentConfig(config), config.DataDir)
 		if err != nil {
 			return nil, err
 		}
@@ -76,19 +76,27 @@ func subpathHandler(wsServer *wsapp.Server, auth tokenAuth, static http.Handler)
 	})
 }
 
-// resolveAgentConfig 使用 port 参数生成 agent runtime 配置。
-func resolveAgentConfig(port string) wsapp.AgentConfig {
+// resolveAgentConfig 使用 config 参数生成 agent runtime 配置。
+func resolveAgentConfig(config webConfig) wsapp.AgentConfig {
 	model := "sonnet"
 	agentProviders := wsapp.AgentProviderOptions(wsapp.AgentOptionsConfig{
 		ClaudeDefaultModel: model,
 		CodexDefaultEffort: "xhigh",
 	})
-	mockBaseURL := backendMockBaseURL(port)
+	mockBaseURL := backendMockBaseURL(config.Port)
+	mockClaudeCommand := "claude"
+	if strings.TrimSpace(config.MockClaudeCommand) != "" {
+		mockClaudeCommand = strings.TrimSpace(config.MockClaudeCommand)
+	}
+	mockCodexCommand := "codex"
+	if strings.TrimSpace(config.MockCodexCommand) != "" {
+		mockCodexCommand = strings.TrimSpace(config.MockCodexCommand)
+	}
 	return wsapp.AgentConfig{
 		Command:              "claude",
 		CodexCommand:         "codex",
-		MockClaudeCommand:    "claude",
-		MockCodexCommand:     "codex",
+		MockClaudeCommand:    mockClaudeCommand,
+		MockCodexCommand:     mockCodexCommand,
 		AnthropicModel:       model,
 		MockAnthropicBaseURL: mockBaseURL + "/mock/anthropic",
 		MockAnthropicAPIKey:  "mock-key",

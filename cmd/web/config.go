@@ -15,10 +15,12 @@ const defaultWebPort = "8080"
 
 // webConfig 表示 Web 服务启动配置。
 type webConfig struct {
-	Port       string // Port 表示 Web 服务监听端口。
-	LogNoColor bool   // LogNoColor 表示是否禁用日志颜色。
-	Token      string // Token 表示前端访问 WebSocket 时需要提供的 token。
-	DataDir    string // DataDir 表示后端持久化数据目录。
+	Port              string // Port 表示 Web 服务监听端口。
+	LogNoColor        bool   // LogNoColor 表示是否禁用日志颜色。
+	Token             string // Token 表示前端访问 WebSocket 时需要提供的 token。
+	DataDir           string // DataDir 表示后端持久化数据目录。
+	MockClaudeCommand string // MockClaudeCommand 表示 E2E Mock Claude Code 命令。
+	MockCodexCommand  string // MockCodexCommand 表示 E2E Mock Codex 命令。
 }
 
 // webCLI 表示 Kong 解析的命令行参数。
@@ -45,10 +47,12 @@ func parseWebConfig(args []string, stdout io.Writer, stderr io.Writer) (webConfi
 		return webConfig{}, err
 	}
 	return webConfig{
-		Port:       strings.TrimSpace(cli.Port),
-		LogNoColor: cli.LogNoColor,
-		Token:      strings.TrimSpace(os.Getenv("AGENTHUB_TOKEN")),
-		DataDir:    dataDir,
+		Port:              strings.TrimSpace(cli.Port),
+		LogNoColor:        cli.LogNoColor,
+		Token:             strings.TrimSpace(os.Getenv("AGENTHUB_TOKEN")),
+		DataDir:           dataDir,
+		MockClaudeCommand: strings.TrimSpace(os.Getenv("AGENTHUB_MOCK_CLAUDE_COMMAND")),
+		MockCodexCommand:  strings.TrimSpace(os.Getenv("AGENTHUB_MOCK_CODEX_COMMAND")),
 	}, nil
 }
 

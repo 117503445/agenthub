@@ -27,7 +27,7 @@ func TestResolveAgentConfigUsesBackendMockService(t *testing.T) {
 	t.Setenv("LEGACY_AGENTHUB_MOCK_CLAUDE_COMMAND", "legacy-mock-claude")
 	t.Setenv("LEGACY_AGENTHUB_MOCK_CODEX_COMMAND", "legacy-mock-codex")
 
-	config := resolveAgentConfig("6767")
+	config := resolveAgentConfig(webConfig{Port: "6767"})
 	if config.AnthropicBaseURL != "" || config.OpenAIBaseURL != "" {
 		t.Fatalf("真实 provider 不应该被默认 mock 地址污染: anthropic=%q openai=%q", config.AnthropicBaseURL, config.OpenAIBaseURL)
 	}
@@ -51,6 +51,11 @@ func TestResolveAgentConfigUsesBackendMockService(t *testing.T) {
 	}
 	if config.MockAnthropicAPIKey == "" || config.MockOpenAIAPIKey == "" {
 		t.Fatalf("mock agent 应该带有 mock API key")
+	}
+
+	config = resolveAgentConfig(webConfig{Port: "6767", MockClaudeCommand: "/tmp/mock-claude", MockCodexCommand: "/tmp/mock-codex"})
+	if config.MockClaudeCommand != "/tmp/mock-claude" || config.MockCodexCommand != "/tmp/mock-codex" {
+		t.Fatalf("mock 命令应支持 E2E 显式覆盖: claude=%q codex=%q", config.MockClaudeCommand, config.MockCodexCommand)
 	}
 }
 
