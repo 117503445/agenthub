@@ -84,6 +84,8 @@ interface ChatWorkspaceProps {
   onComposerValueChange: (value: string) => void
   /** onComposerImagesChange 使用 images 参数更新图片附件草稿。 */
   onComposerImagesChange: (images: ComposerImageAttachment[]) => void
+  /** onRefreshAgentSkills 请求后端刷新最新 skills。 */
+  onRefreshAgentSkills: () => void
   /** onPlanModeChange 使用 enabled 参数切换 plan 模式。 */
   onPlanModeChange: (enabled: boolean) => void
   /** onSubmitComposer 使用 event 参数提交输入框。 */
@@ -129,6 +131,7 @@ export function ChatWorkspace({
   onSaveChatScrollMemory,
   onComposerValueChange,
   onComposerImagesChange,
+  onRefreshAgentSkills,
   onPlanModeChange,
   onSubmitComposer,
   onChangeAgentProvider,
@@ -249,6 +252,7 @@ export function ChatWorkspace({
               modelControlsDisabled={modelControlsDisabled}
               onComposerValueChange={onComposerValueChange}
               onComposerImagesChange={onComposerImagesChange}
+              onRefreshAgentSkills={onRefreshAgentSkills}
               onPlanModeChange={onPlanModeChange}
               onSubmitComposer={onSubmitComposer}
               onChangeAgentProvider={onChangeAgentProvider}

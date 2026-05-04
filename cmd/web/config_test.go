@@ -115,6 +115,7 @@ func TestParseWebConfigUsesDefaultPort(t *testing.T) {
 func TestParseWebConfigDefaultDataDir(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
+	unsetEnv(t, "AGENTHUB_DATA")
 
 	config, err := parseWebConfig(nil, io.Discard, io.Discard)
 	if err != nil {

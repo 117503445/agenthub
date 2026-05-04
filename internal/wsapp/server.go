@@ -18,14 +18,16 @@ import (
 
 // Server 提供项目、聊天和 agent 流式输出的 WebSocket 服务。
 type Server struct {
-	ctx         context.Context
-	version     string
-	hostname    string
-	store       *Store
-	agents      *AgentManager
-	agentConfig AgentConfig
-	subscribers map[string]chan ServerMessage
-	mu          sync.Mutex
+	ctx             context.Context
+	version         string
+	hostname        string
+	store           *Store
+	agents          *AgentManager
+	agentConfig     AgentConfig
+	subscribers     map[string]chan ServerMessage
+	lastAgentSkills []AgentSkillOption
+	mu              sync.Mutex
+	skillsMu        sync.Mutex
 }
 
 // NewServer 使用 ctx、version 和 agentConfig 参数创建 WebSocket 服务。
@@ -65,13 +67,14 @@ func newServerWithStore(ctx context.Context, version string, agentConfig AgentCo
 		agentConfig.BackendEnv = BackendEnvSnapshot()
 	}
 	return &Server{
-		ctx:         ctx,
-		version:     version,
-		hostname:    hostname,
-		store:       store,
-		agents:      NewAgentManager(ctx, agentConfig),
-		agentConfig: agentConfig,
-		subscribers: make(map[string]chan ServerMessage),
+		ctx:             ctx,
+		version:         version,
+		hostname:        hostname,
+		store:           store,
+		agents:          NewAgentManager(ctx, agentConfig),
+		agentConfig:     agentConfig,
+		subscribers:     make(map[string]chan ServerMessage),
+		lastAgentSkills: store.AgentSkills(),
 	}
 }
 
@@ -174,6 +177,9 @@ func (s *Server) handle(ctx context.Context, outbound chan ServerMessage, msg Cl
 	case "ping":
 		s.sendTo(outbound, "pong", map[string]any{"message": "pong"})
 		return nil
+	case "agent.skills.refresh":
+		s.refreshAgentSkills(s.ctx)
+		return nil
 	case "project.create":
 		var payload ProjectMutationPayload
 		if err := decodePayload(msg, &payload); err != nil {
@@ -189,7 +195,7 @@ func (s *Server) handle(ctx context.Context, outbound chan ServerMessage, msg Cl
 		}
 		s.broadcast("project.changed", map[string]any{"project": project})
 		s.broadcast("chat.changed", map[string]any{"chat": chat})
-		s.broadcast("agent.skills.changed", map[string]any{"agentSkills": s.store.AgentSkills()})
+		s.broadcastAgentSkills()
 		return nil
 	case "project.update":
 		var payload ProjectMutationPayload
@@ -201,7 +207,7 @@ func (s *Server) handle(ctx context.Context, outbound chan ServerMessage, msg Cl
 			return err
 		}
 		s.broadcast("project.changed", map[string]any{"project": project})
-		s.broadcast("agent.skills.changed", map[string]any{"agentSkills": s.store.AgentSkills()})
+		s.broadcastAgentSkills()
 		return nil
 	case "project.delete":
 		var payload IDPayload
@@ -216,7 +222,7 @@ func (s *Server) handle(ctx context.Context, outbound chan ServerMessage, msg Cl
 			s.agents.Stop(chatID)
 		}
 		s.broadcast("project.deleted", map[string]any{"id": payload.ID, "chatIds": chatIDs})
-		s.broadcast("agent.skills.changed", map[string]any{"agentSkills": s.store.AgentSkills()})
+		s.broadcastAgentSkills()
 		return nil
 	case "chat.create":
 		var payload ChatCreatePayload
@@ -536,6 +542,71 @@ func (s *Server) agentOptionsConfig() AgentOptionsConfig {
 		MockOpenAIAPIKey:     s.agentConfig.MockOpenAIAPIKey,
 		EnableMockAgent:      s.agentConfig.EnableMockAgent,
 	}
+}
+
+// refreshAgentSkills 使用 ctx 参数刷新 skill 列表，并在列表变化时广播和记录日志。
+func (s *Server) refreshAgentSkills(ctx context.Context) {
+	skills := s.store.AgentSkills()
+	if !s.updateLastAgentSkills(skills) {
+		return
+	}
+	log.Ctx(ctx).Info().
+		Int("skillCount", len(skills)).
+		Strs("skills", agentSkillIDs(skills)).
+		Msg("agent skills 列表已更新")
+	s.broadcast("agent.skills.changed", map[string]any{"agentSkills": skills})
+}
+
+// broadcastAgentSkills 读取当前 skill 列表并广播给前端。
+func (s *Server) broadcastAgentSkills() {
+	skills := s.store.AgentSkills()
+	s.setLastAgentSkills(skills)
+	s.broadcast("agent.skills.changed", map[string]any{"agentSkills": skills})
+}
+
+// updateLastAgentSkills 使用 skills 参数更新上一次 skill 列表，并返回列表是否变化。
+func (s *Server) updateLastAgentSkills(skills []AgentSkillOption) bool {
+	s.skillsMu.Lock()
+	defer s.skillsMu.Unlock()
+	if agentSkillOptionsEqual(s.lastAgentSkills, skills) {
+		return false
+	}
+	s.lastAgentSkills = cloneAgentSkillOptions(skills)
+	return true
+}
+
+// setLastAgentSkills 使用 skills 参数更新服务端缓存的上一次 skill 列表。
+func (s *Server) setLastAgentSkills(skills []AgentSkillOption) {
+	s.skillsMu.Lock()
+	s.lastAgentSkills = cloneAgentSkillOptions(skills)
+	s.skillsMu.Unlock()
+}
+
+// cloneAgentSkillOptions 使用 skills 参数复制 skill 列表。
+func cloneAgentSkillOptions(skills []AgentSkillOption) []AgentSkillOption {
+	return append([]AgentSkillOption(nil), skills...)
+}
+
+// agentSkillIDs 使用 skills 参数返回日志中展示的 skill 标识列表。
+func agentSkillIDs(skills []AgentSkillOption) []string {
+	ids := make([]string, 0, len(skills))
+	for _, skill := range skills {
+		ids = append(ids, skill.ID)
+	}
+	return ids
+}
+
+// agentSkillOptionsEqual 使用 left 和 right 参数判断两个 skill 列表是否完全一致。
+func agentSkillOptionsEqual(left []AgentSkillOption, right []AgentSkillOption) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 // subscribe 创建新的消息订阅通道。

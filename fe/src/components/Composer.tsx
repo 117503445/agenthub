@@ -64,6 +64,8 @@ interface ComposerProps {
   onComposerValueChange: (value: string) => void
   /** onComposerImagesChange 使用 images 参数更新图片附件草稿。 */
   onComposerImagesChange: (images: ComposerImageAttachment[]) => void
+  /** onRefreshAgentSkills 请求后端刷新最新 skills。 */
+  onRefreshAgentSkills: () => void
   /** onPlanModeChange 使用 enabled 参数切换 plan 模式。 */
   onPlanModeChange: (enabled: boolean) => void
   /** onSubmitComposer 使用 event 参数提交输入框。 */
@@ -96,6 +98,7 @@ export function Composer({
   modelControlsDisabled,
   onComposerValueChange,
   onComposerImagesChange,
+  onRefreshAgentSkills,
   onPlanModeChange,
   onSubmitComposer,
   onChangeAgentProvider,
@@ -183,9 +186,12 @@ export function Composer({
     void appendImages(files)
   }
 
-  // handleComposerValueChange 使用 value 参数更新输入内容并重置 skill 键盘选中项。
+  // handleComposerValueChange 使用 value 参数更新输入内容、刷新 skills 并重置 skill 键盘选中项。
   const handleComposerValueChange = (value: string) => {
     setSelectedSkillIndex(0)
+    if (value === '/' && composerValue !== '/') {
+      onRefreshAgentSkills()
+    }
     onComposerValueChange(value)
   }
 

@@ -221,7 +221,20 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	}
 	events = append(events, reportStep("聊天框下方可以选择 agent、模型和推理级别，未输入时不显示发送按钮和 Agent 标签。"))
 
+	dynamicSkillName := "e2e-dynamic"
+	if err := writeE2ESkill(filepath.Join(ctx.RootDir, "data", "e2e", "home", ".codex", "skills"), dynamicSkillName, "E2E 动态刷新 Skill。"); err != nil {
+		return fail(fmt.Errorf("写入动态 skill 失败: %w", err))
+	}
 	if err := fillTestID(page, "message-input", "/"); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDText(page, "skill-menu", dynamicSkillName, 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectFileText(filepath.Join(ctx.LogsDir, "server.log"), "agent skills 列表已更新", 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectFileText(filepath.Join(ctx.LogsDir, "server.log"), dynamicSkillName, 10*time.Second); err != nil {
 		return fail(err)
 	}
 	if err := expectTestIDText(page, "skill-menu", "e2e-skill", 10*time.Second); err != nil {
@@ -272,7 +285,7 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := fillTestID(page, "message-input", ""); err != nil {
 		return fail(err)
 	}
-	events = append(events, reportStep("输入 / 时可以选择后端返回的 skills，支持点击、键盘上下键选择和 Tab 快速确认当前项，并把选中的 skill 插入聊天输入框。"))
+	events = append(events, reportStep("输入 / 时后端会刷新最新 skills；列表变化时服务日志输出 skills 列表，前端菜单同步展示新 skill，并支持点击、键盘上下键选择和 Tab 快速确认当前项。"))
 
 	if err := expectImageAddButtonUsesPictureLogo(page, 5*time.Second); err != nil {
 		return fail(err)

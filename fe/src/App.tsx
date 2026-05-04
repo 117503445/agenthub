@@ -902,6 +902,11 @@ function App() {
     sendClientMessage(wsRef.current, 'chat.plan.execute', { chatId: selectedChat.id, planId: plan.id })
   }
 
+  // refreshAgentSkills 请求后端重新扫描最新 skills。
+  const refreshAgentSkills = () => {
+    sendClientMessage(wsRef.current, 'agent.skills.refresh')
+  }
+
   // submitComposer 处理 event 参数对应的聊天输入提交。
   const submitComposer = (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault()
@@ -1057,6 +1062,7 @@ function App() {
             onSaveChatScrollMemory={saveChatScrollMemory}
             onComposerValueChange={updateSelectedComposerValue}
             onComposerImagesChange={updateSelectedComposerImages}
+            onRefreshAgentSkills={refreshAgentSkills}
             onPlanModeChange={updateSelectedPlanMode}
             onSubmitComposer={submitComposer}
             onChangeAgentProvider={changeAgentProvider}
