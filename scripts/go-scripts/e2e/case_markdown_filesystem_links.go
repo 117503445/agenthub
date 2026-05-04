@@ -51,7 +51,9 @@ func runMarkdownFilesystemLinksCase(ctx E2EContext) (success bool) {
 	relativePath := "docs/需求.md"
 	relativeAbsPath := filepath.Join(ctx.RootDir, relativePath)
 	absolutePath := filepath.Join(ctx.RootDir, "README.md")
-	prompt := fmt.Sprintf("请原样返回这些链接：[相对需求](%s) 和 [绝对说明](%s)。", relativePath, absolutePath)
+	relativeLinePath := "README.md:1"
+	absoluteLinePath := absolutePath + ":1:2"
+	prompt := fmt.Sprintf("请原样返回这些链接：[相对需求](%s) 和 [绝对说明](%s) 和 [相对行号](%s) 和 [绝对行号](%s)。", relativePath, absolutePath, relativeLinePath, absoluteLinePath)
 	if err := fillTestID(page, "message-input", prompt); err != nil {
 		return fail(err)
 	}
@@ -67,10 +69,22 @@ func runMarkdownFilesystemLinksCase(ctx E2EContext) (success bool) {
 	if err := expectMarkdownLinkFilesystemHref(page, "绝对说明", absolutePath, 10*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := expectMarkdownLinkFilesystemHref(page, "相对行号", absolutePath, 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectMarkdownLinkFilesystemHref(page, "绝对行号", absolutePath, 10*time.Second); err != nil {
+		return fail(err)
+	}
 	if err := expectMarkdownLinkFetchText(page, "相对需求", "# 需求", 10*time.Second); err != nil {
 		return fail(err)
 	}
 	if err := expectMarkdownLinkFetchText(page, "绝对说明", "agenthub", 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectMarkdownLinkFetchText(page, "相对行号", "agenthub", 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectMarkdownLinkFetchText(page, "绝对行号", "agenthub", 10*time.Second); err != nil {
 		return fail(err)
 	}
 	if err := expectTestIDCount(page, "send-button", 0, 30*time.Second); err != nil {
@@ -83,6 +97,12 @@ func runMarkdownFilesystemLinksCase(ctx E2EContext) (success bool) {
 		return fail(err)
 	}
 	if err := expectClipboardText(page, fmt.Sprintf("[绝对说明](%s)", absolutePath), 5*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectClipboardText(page, "[相对行号](README.md:1)", 5*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectClipboardText(page, fmt.Sprintf("[绝对行号](%s)", absoluteLinePath), 5*time.Second); err != nil {
 		return fail(err)
 	}
 	if err := expectClipboardNotText(page, "/fs/content", 2*time.Second); err != nil {

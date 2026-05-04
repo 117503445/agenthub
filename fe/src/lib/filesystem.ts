@@ -18,14 +18,20 @@ export function resolveMarkdownFilesystemHref(href: string, projectRoot?: string
   if (!trimmed || /^(https?:\/\/|#)/i.test(trimmed)) {
     return trimmed
   }
-  if (isFilesystemAbsolutePath(trimmed)) {
-    return getFilesystemContentUrl(trimmed)
+  const filesystemPath = stripFilesystemLineSuffix(trimmed)
+  if (isFilesystemAbsolutePath(filesystemPath)) {
+    return getFilesystemContentUrl(filesystemPath)
   }
   const root = projectRoot?.trim()
-  if (!root || isUnsafeRelativeFilesystemPath(trimmed)) {
+  if (!root || isUnsafeRelativeFilesystemPath(filesystemPath)) {
     return ''
   }
-  return getFilesystemContentUrl(joinProjectPath(root, trimmed))
+  return getFilesystemContentUrl(joinProjectPath(root, filesystemPath))
+}
+
+// stripFilesystemLineSuffix 使用 value 参数去掉文件路径末尾的行号或行列号后缀。
+function stripFilesystemLineSuffix(value: string) {
+  return value.trim().replace(/:\d+(?::\d+)?$/, '')
 }
 
 // isFilesystemAbsolutePath 使用 value 参数判断是否为后端文件系统绝对路径。

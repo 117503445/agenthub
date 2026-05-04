@@ -169,6 +169,23 @@ func TestFilesystemContentEndpoint(t *testing.T) {
 		t.Fatalf("文件接口响应内容不正确: %s", string(body))
 	}
 
+	lineRequestURL := server.URL + "/console" + filesystemContentRoute + "?token=secret&path=" + url.QueryEscape(filePath+":1:2")
+	response, err = http.Get(lineRequestURL)
+	if err != nil {
+		t.Fatalf("请求带行号文件接口失败: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("带行号文件接口状态码应为 200，当前值: %d", response.StatusCode)
+	}
+	body, err = io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("读取带行号文件接口响应失败: %v", err)
+	}
+	if !strings.Contains(string(body), "文件内容") {
+		t.Fatalf("带行号文件接口响应内容不正确: %s", string(body))
+	}
+
 	response, err = http.Get(server.URL + filesystemContentRoute + "?token=secret&path=README.md")
 	if err != nil {
 		t.Fatalf("请求相对路径文件接口失败: %v", err)
