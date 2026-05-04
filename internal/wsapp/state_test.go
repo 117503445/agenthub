@@ -31,7 +31,7 @@ func TestStoreProjectChatLifecycle(t *testing.T) {
 	if chat.Status != ChatStatusIdle || len(chat.Messages) != 0 {
 		t.Fatalf("新聊天页状态不正确: status=%s messages=%d", chat.Status, len(chat.Messages))
 	}
-	if chat.AgentProvider != AgentProviderMockClaudeCode || chat.AgentModel != "mock-claude-sonnet" {
+	if chat.AgentProvider != AgentProviderClaudeCode || chat.AgentModel != "sonnet" {
 		t.Fatalf("新聊天页 agent 默认值不正确: %#v", chat)
 	}
 	chat, err = store.UpdateChatAgent(chat.ID, AgentProviderCodex, "gpt-5.5", "xhigh")

@@ -19,6 +19,7 @@ type webConfig struct {
 	LogNoColor        bool   // LogNoColor 表示是否禁用日志颜色。
 	Token             string // Token 表示前端访问 WebSocket 时需要提供的 token。
 	DataDir           string // DataDir 表示后端持久化数据目录。
+	MockAgent         bool   // MockAgent 表示是否启用 Mock Agent profile。
 	MockClaudeCommand string // MockClaudeCommand 表示 E2E Mock Claude Code 命令。
 	MockCodexCommand  string // MockCodexCommand 表示 E2E Mock Codex 命令。
 }
@@ -56,6 +57,7 @@ func parseWebConfig(args []string, stdout io.Writer, stderr io.Writer) (webConfi
 		LogNoColor:        cli.LogNoColor,
 		Token:             token,
 		DataDir:           dataDir,
+		MockAgent:         envFlagEnabled(os.Getenv("MOCK_AGENT")),
 		MockClaudeCommand: strings.TrimSpace(os.Getenv("AGENTHUB_MOCK_CLAUDE_COMMAND")),
 		MockCodexCommand:  strings.TrimSpace(os.Getenv("AGENTHUB_MOCK_CODEX_COMMAND")),
 	}, nil
@@ -129,4 +131,14 @@ func defaultAgentHubBaseURL(port string) string {
 		trimmedPort = defaultWebPort
 	}
 	return "http://127.0.0.1:" + trimmedPort
+}
+
+// envFlagEnabled 使用 value 参数判断环境变量开关是否启用。
+func envFlagEnabled(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "y", "on", "enabled":
+		return true
+	default:
+		return false
+	}
 }

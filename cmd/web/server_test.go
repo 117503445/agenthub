@@ -52,11 +52,27 @@ func TestResolveAgentConfigUsesBackendMockService(t *testing.T) {
 	if config.MockAnthropicAPIKey == "" || config.MockOpenAIAPIKey == "" {
 		t.Fatalf("mock agent 应该带有 mock API key")
 	}
+	if serverTestAgentProvidersContain(config.AgentProviders, wsapp.AgentProviderMockClaudeCode) || serverTestAgentProvidersContain(config.AgentProviders, wsapp.AgentProviderMockCodex) {
+		t.Fatalf("未启用 MOCK_AGENT 时不应返回 mock provider: %#v", config.AgentProviders)
+	}
 
-	config = resolveAgentConfig(webConfig{Port: "6767", MockClaudeCommand: "/tmp/mock-claude", MockCodexCommand: "/tmp/mock-codex"})
+	config = resolveAgentConfig(webConfig{Port: "6767", MockAgent: true, MockClaudeCommand: "/tmp/mock-claude", MockCodexCommand: "/tmp/mock-codex"})
 	if config.MockClaudeCommand != "/tmp/mock-claude" || config.MockCodexCommand != "/tmp/mock-codex" {
 		t.Fatalf("mock 命令应支持 E2E 显式覆盖: claude=%q codex=%q", config.MockClaudeCommand, config.MockCodexCommand)
 	}
+	if !serverTestAgentProvidersContain(config.AgentProviders, wsapp.AgentProviderMockClaudeCode) || !serverTestAgentProvidersContain(config.AgentProviders, wsapp.AgentProviderMockCodex) {
+		t.Fatalf("启用 MOCK_AGENT 后应返回 mock provider: %#v", config.AgentProviders)
+	}
+}
+
+// serverTestAgentProvidersContain 使用 providers 和 provider 参数判断测试配置中是否包含指定 provider。
+func serverTestAgentProvidersContain(providers []wsapp.AgentProviderOption, provider string) bool {
+	for _, item := range providers {
+		if item.ID == provider {
+			return true
+		}
+	}
+	return false
 }
 
 // TestAuthStatusSupportsSubpaths 验证鉴权状态接口支持根路径和子路径部署。

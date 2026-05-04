@@ -96,7 +96,7 @@ function App() {
   const selectedComposerImages = selectedChat ? (composerImages[selectedChat.id] ?? []) : []
   const selectedPlanMode = selectedChat ? (planModes[selectedChat.id] ?? false) : false
   const isRunning = selectedChat?.status === 'running'
-  const selectedAgentProvider = selectedChat?.agentProvider ?? 'mock-claude-code'
+  const selectedAgentProvider = selectedChat?.agentProvider ?? 'claude-code'
   const selectedAgentModels = agentProviders.find((provider) => provider.id === selectedAgentProvider)?.models ?? []
   const selectedAgentModel = selectedChat?.agentModel ?? defaultModelForProvider(agentProviders, selectedAgentProvider)
   const selectedAgentModelOption = selectedAgentModels.find((model) => model.id === selectedAgentModel) ?? null

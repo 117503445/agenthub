@@ -35,6 +35,7 @@ func TestParseWebConfigUsesOnlyAgentHubEnv(t *testing.T) {
 	t.Setenv("AGENTHUB_DATA", "~/custom-data")
 	t.Setenv("AGENTHUB_MOCK_CLAUDE_COMMAND", "/tmp/mock-claude")
 	t.Setenv("AGENTHUB_MOCK_CODEX_COMMAND", "/tmp/mock-codex")
+	unsetEnv(t, "MOCK_AGENT")
 	t.Setenv("PORT", "7070")
 	t.Setenv("LEGACY_AGENTHUB_LOG_NO_COLOR", "false")
 	t.Setenv("LEGACY_AGENTHUB_TOKEN", "legacy-token")
@@ -58,6 +59,23 @@ func TestParseWebConfigUsesOnlyAgentHubEnv(t *testing.T) {
 	}
 	if config.MockClaudeCommand != "/tmp/mock-claude" || config.MockCodexCommand != "/tmp/mock-codex" {
 		t.Fatalf("mock 命令应来自 AGENTHUB 环境变量: claude=%q codex=%q", config.MockClaudeCommand, config.MockCodexCommand)
+	}
+	if config.MockAgent {
+		t.Fatalf("未设置 MOCK_AGENT 时不应启用 Mock Agent")
+	}
+}
+
+// TestParseWebConfigEnablesMockAgent 验证 MOCK_AGENT 环境变量可以启用 Mock Agent。
+func TestParseWebConfigEnablesMockAgent(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MOCK_AGENT", "1")
+
+	config, err := parseWebConfig(nil, io.Discard, io.Discard)
+	if err != nil {
+		t.Fatalf("解析配置失败: %v", err)
+	}
+	if !config.MockAgent {
+		t.Fatalf("MOCK_AGENT=1 应启用 Mock Agent")
 	}
 }
 

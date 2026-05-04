@@ -9,6 +9,7 @@ import (
 type AgentOptionsConfig struct {
 	ClaudeDefaultModel string // ClaudeDefaultModel 表示 Claude 默认模型。
 	CodexDefaultEffort string // CodexDefaultEffort 表示 Codex 默认推理级别。
+	EnableMockAgent    bool   // EnableMockAgent 表示是否展示 Mock Agent 选项。
 }
 
 // AgentReasoningOption 表示一个可选推理级别。
@@ -55,7 +56,7 @@ func AgentProviderOptions(config AgentOptionsConfig) []AgentProviderOption {
 		{ID: "high", Label: "High", Description: "更深入推理，适合复杂问题。"},
 		{ID: "xhigh", Label: "Extra high", Description: "最深推理，适合复杂实现和排障。"},
 	}, codexDefaultEffort)
-	return []AgentProviderOption{
+	options := []AgentProviderOption{
 		{
 			ID:     AgentProviderClaudeCode,
 			Label:  "Claude Code",
@@ -71,7 +72,12 @@ func AgentProviderOptions(config AgentOptionsConfig) []AgentProviderOption {
 				{ID: "gpt-5.3-codex", Label: "GPT-5.3 Codex"},
 			},
 		},
-		{
+	}
+	if !config.EnableMockAgent {
+		return options
+	}
+	return append(options,
+		AgentProviderOption{
 			ID:    AgentProviderMockClaudeCode,
 			Label: "Mock Claude Code",
 			Models: []AgentModelOption{
@@ -79,7 +85,7 @@ func AgentProviderOptions(config AgentOptionsConfig) []AgentProviderOption {
 				{ID: "mock-claude-opus", Label: "Mock Claude Opus"},
 			},
 		},
-		{
+		AgentProviderOption{
 			ID:    AgentProviderMockCodex,
 			Label: "Mock Codex",
 			Models: []AgentModelOption{
@@ -87,7 +93,7 @@ func AgentProviderOptions(config AgentOptionsConfig) []AgentProviderOption {
 				{ID: "mock-codex-fast", Label: "Mock Codex Fast"},
 			},
 		},
-	}
+	)
 }
 
 // DefaultAgentProviderOptions 返回默认 agent provider 和模型列表。
@@ -113,7 +119,11 @@ func DefaultAgentModel(provider string, options []AgentProviderOption) string {
 			return option.Models[0].ID
 		}
 	}
-	return "mock-claude-sonnet"
+	defaultProvider := DefaultAgentProvider(options)
+	if defaultProvider != provider && defaultProvider != "" {
+		return DefaultAgentModel(defaultProvider, options)
+	}
+	return ""
 }
 
 // DefaultAgentReasoning 使用 provider、model 和 options 参数返回默认推理级别。
@@ -144,7 +154,7 @@ func DefaultAgentReasoning(provider string, model string, options []AgentProvide
 
 // defaultLastAgentSelection 使用 options 参数返回新聊天页的初始 agent 配置。
 func defaultLastAgentSelection(options []AgentProviderOption) LastAgentSelection {
-	provider := AgentProviderMockClaudeCode
+	provider := DefaultAgentProvider(options)
 	model := DefaultAgentModel(provider, options)
 	return LastAgentSelection{
 		Provider:  provider,
@@ -160,7 +170,7 @@ func NormalizeAgentSelection(provider string, model string, reasoning string, op
 	}
 	normalizedProvider := strings.TrimSpace(provider)
 	if normalizedProvider == "" {
-		normalizedProvider = AgentProviderMockClaudeCode
+		normalizedProvider = DefaultAgentProvider(options)
 	}
 	for _, option := range options {
 		if option.ID != normalizedProvider {
@@ -191,6 +201,19 @@ func NormalizeAgentSelection(provider string, model string, reasoning string, op
 		return "", "", "", fmt.Errorf("%w: 不支持的模型: %s", ErrInvalidInput, model)
 	}
 	return "", "", "", fmt.Errorf("%w: 不支持的 agent: %s", ErrInvalidInput, provider)
+}
+
+// DefaultAgentProvider 使用 options 参数返回默认 agent provider。
+func DefaultAgentProvider(options []AgentProviderOption) string {
+	if len(options) == 0 {
+		options = DefaultAgentProviderOptions()
+	}
+	for _, option := range options {
+		if strings.TrimSpace(option.ID) != "" {
+			return option.ID
+		}
+	}
+	return AgentProviderClaudeCode
 }
 
 // withDefaultModel 使用 models 和 defaultModel 参数生成默认模型列表。

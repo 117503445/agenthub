@@ -140,8 +140,25 @@ func normalizeStoreState(state *storeState) {
 	} else {
 		state.agentProviders = cloneAgentProviderOptions(state.agentProviders)
 	}
-	if strings.TrimSpace(state.lastAgent.Provider) == "" || strings.TrimSpace(state.lastAgent.Model) == "" {
+	if strings.TrimSpace(state.lastAgent.Provider) == "" ||
+		strings.TrimSpace(state.lastAgent.Model) == "" ||
+		!agentSelectionExists(state.lastAgent.Provider, state.lastAgent.Model, state.agentProviders) {
 		state.lastAgent = defaultLastAgentSelection(state.agentProviders)
+	}
+	for chatID, chat := range state.chats {
+		if chat.AgentLocked && strings.TrimSpace(chat.AgentProvider) != "" && strings.TrimSpace(chat.AgentModel) != "" {
+			continue
+		}
+		if strings.TrimSpace(chat.AgentProvider) != "" &&
+			strings.TrimSpace(chat.AgentModel) != "" &&
+			agentSelectionExists(chat.AgentProvider, chat.AgentModel, state.agentProviders) {
+			continue
+		}
+		defaultAgent := defaultLastAgentSelection(state.agentProviders)
+		chat.AgentProvider = defaultAgent.Provider
+		chat.AgentModel = defaultAgent.Model
+		chat.AgentReasoning = defaultAgent.Reasoning
+		state.chats[chatID] = chat
 	}
 	for projectID := range state.projects {
 		if _, ok := state.nextChatOrdinal[projectID]; !ok {
@@ -159,4 +176,19 @@ func countProjectChats(chats map[string]Chat, projectID string) int {
 		}
 	}
 	return count
+}
+
+// agentSelectionExists 使用 provider、model 和 options 参数判断 agent 选择是否存在。
+func agentSelectionExists(provider string, model string, options []AgentProviderOption) bool {
+	for _, option := range options {
+		if option.ID != strings.TrimSpace(provider) {
+			continue
+		}
+		for _, item := range option.Models {
+			if item.ID == strings.TrimSpace(model) {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -82,6 +82,7 @@ func resolveAgentConfig(config webConfig) wsapp.AgentConfig {
 	agentProviders := wsapp.AgentProviderOptions(wsapp.AgentOptionsConfig{
 		ClaudeDefaultModel: model,
 		CodexDefaultEffort: "xhigh",
+		EnableMockAgent:    config.MockAgent,
 	})
 	mockBaseURL := backendMockBaseURL(config.Port)
 	mockClaudeCommand := "claude"

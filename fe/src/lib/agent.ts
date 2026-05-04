@@ -30,32 +30,6 @@ export const fallbackAgentProviders: AgentProviderOption[] = [
       { id: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' },
     ],
   },
-  {
-    id: 'mock-claude-code',
-    label: 'Mock Claude Code',
-    models: [
-      { id: 'mock-claude-sonnet', label: 'Mock Claude Sonnet', default: true },
-      { id: 'mock-claude-opus', label: 'Mock Claude Opus' },
-    ],
-  },
-  {
-    id: 'mock-codex',
-    label: 'Mock Codex',
-    models: [
-      {
-        id: 'mock-codex-gpt-5.5',
-        label: 'Mock Codex GPT-5.5',
-        default: true,
-        reasoningLevels: [
-          { id: 'low', label: 'Low', description: '快速响应，使用较轻推理。' },
-          { id: 'medium', label: 'Medium', description: '默认级别，平衡速度和推理深度。' },
-          { id: 'high', label: 'High', description: '更深入推理，适合复杂问题。' },
-          { id: 'xhigh', label: 'Extra high', description: '最深推理，适合复杂实现和排障。', default: true },
-        ],
-      },
-      { id: 'mock-codex-fast', label: 'Mock Codex Fast' },
-    ],
-  },
 ]
 
 // defaultModelForProvider 使用 providers 和 provider 参数返回默认模型。
@@ -80,8 +54,8 @@ export function chatHasStarted(chat: Chat | null) {
 export function normalizeChat(chat: Chat) {
   return {
     ...chat,
-    agentProvider: chat.agentProvider ?? 'mock-claude-code',
-    agentModel: chat.agentModel ?? 'mock-claude-sonnet',
+    agentProvider: chat.agentProvider ?? 'claude-code',
+    agentModel: chat.agentModel ?? 'sonnet',
     agentReasoning: chat.agentReasoning ?? '',
     agentLocked: chat.agentLocked ?? (chat.messages?.length ?? 0) > 0,
     contextWindow: chat.contextWindow,
