@@ -1,0 +1,4 @@
+2026-05-04 13:16:08.619 INF cmd/web/main.go:53 > 构建信息 BuildDir=/src BuildTime=2026-05-04T13:14:59Z GitBranch=master GitCommit=dbd1d476ec0693f7fc62cee1652634dbdd4688fa GitDirty=true GitTag= GitVersion=dbd1d47
+2026-05-04 13:16:08.620 INF cmd/web/data_lock.go:44 > 已持有数据目录锁 dataDir=/src/data/e2e/case_persistence/agenthub-data lockPath=/src/data/e2e/case_persistence/agenthub-data/agenthub.lock
+2026-05-04 13:16:08.629 INF internal/wsapp/server.go:100 > 已自动添加后端工作目录 project chatID=chat_1d00f73f28d6a136 projectID=project_778d6ff14b8fa630 workdir=/src
+2026-05-04 13:16:08.630 INF cmd/web/server.go:167 > Web 服务已启动 addr=[::]:43827 dataDir=/src/data/e2e/case_persistence/agenthub-data

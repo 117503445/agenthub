@@ -1,0 +1,62 @@
+{
+  "sha": "4433a90a293abffa03c8d8ee155ba147cc81a389",
+  "shortSHA": "4433a90a293a",
+  "refName": "master",
+  "runURL": "https://github.com/117503445/agenthub/actions/runs/25321078391",
+  "pagesURL": "https://117503445.github.io/agenthub/reports/4433a90a293abffa03c8d8ee155ba147cc81a389/",
+  "passed": true,
+  "exitCode": 0,
+  "createdAt": "2026-05-04T13:16:16Z",
+  "cases": [
+    {
+      "name": "case_agent_chat",
+      "passed": true,
+      "reportURL": "cases/case_agent_chat/report.html"
+    },
+    {
+      "name": "case_agent_profile",
+      "passed": true,
+      "reportURL": "cases/case_agent_profile/report.html"
+    },
+    {
+      "name": "case_markdown_filesystem_links",
+      "passed": true,
+      "reportURL": "cases/case_markdown_filesystem_links/report.html"
+    },
+    {
+      "name": "case_mock_agent_gate",
+      "passed": true,
+      "reportURL": "cases/case_mock_agent_gate/report.html"
+    },
+    {
+      "name": "case_persistence",
+      "passed": true,
+      "reportURL": "cases/case_persistence/report.html"
+    },
+    {
+      "name": "case_project_icon",
+      "passed": true,
+      "reportURL": "cases/case_project_icon/report.html"
+    },
+    {
+      "name": "case_settings_backend_version",
+      "passed": true,
+      "reportURL": "cases/case_settings_backend_version/report.html"
+    },
+    {
+      "name": "case_token_auth",
+      "passed": true,
+      "reportURL": "cases/case_token_auth/report.html"
+    },
+    {
+      "name": "case_token_cli_auth",
+      "passed": true,
+      "reportURL": "cases/case_token_cli_auth/report.html"
+    },
+    {
+      "name": "case_ws",
+      "passed": true,
+      "reportURL": "cases/case_ws/report.html"
+    }
+  ]
+}
