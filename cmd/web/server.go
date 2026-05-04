@@ -52,6 +52,9 @@ func newHTTPHandlerWithError(ctx context.Context, config webConfig) (http.Handle
 	mux.HandleFunc("/mock/openai/v1/responses", wsapp.ServeMockOpenAIResponses)
 	mux.HandleFunc("/mock/openai/responses", wsapp.ServeMockOpenAIResponses)
 	mux.HandleFunc("/auth/status", auth.ServeStatus)
+	mux.HandleFunc(filesystemContentRoute, func(w http.ResponseWriter, r *http.Request) {
+		auth.ServeHTTP(w, r, serveFilesystemContent)
+	})
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		auth.ServeWS(w, r, wsServer.ServeWS)
 	})
@@ -70,6 +73,10 @@ func subpathHandler(wsServer *wsapp.Server, auth tokenAuth, static http.Handler)
 		}
 		if isAuthStatusPath(requestPath) {
 			auth.ServeStatus(w, r)
+			return
+		}
+		if isFilesystemContentPath(requestPath) {
+			auth.ServeHTTP(w, r, serveFilesystemContent)
 			return
 		}
 		static.ServeHTTP(w, r)

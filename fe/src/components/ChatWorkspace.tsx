@@ -227,6 +227,7 @@ export function ChatWorkspace({
             <MessageLog
               key={selectedChat.id}
               chat={selectedChat}
+              projectRoot={selectedProject?.path}
               copiedMessageId={copiedMessageId}
               onCopyMessage={onCopyMessage}
               onExecutePlan={onExecutePlan}

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { resolveMarkdownFilesystemHref } from '../lib/filesystem'
 
 type MarkdownBlockType = 'heading' | 'paragraph' | 'list' | 'code'
 
@@ -18,17 +19,19 @@ interface MarkdownBlock {
 interface MarkdownRendererProps {
   /** text 表示需要渲染的 markdown 文本。 */
   text: string
+  /** projectRoot 表示相对文件路径所属的 project 根目录。 */
+  projectRoot?: string
 }
 
-// MarkdownRenderer 使用 text 参数渲染安全的轻量 markdown 内容。
-export function MarkdownRenderer({ text }: MarkdownRendererProps) {
+// MarkdownRenderer 使用 text 和 projectRoot 参数渲染安全的轻量 markdown 内容。
+export function MarkdownRenderer({ text, projectRoot }: MarkdownRendererProps) {
   const blocks = splitMarkdownBlocks(text)
   if (blocks.length === 0) {
     return null
   }
   return (
     <div data-testid="assistant-markdown" className="markdown-body">
-      {blocks.map((block, index) => renderMarkdownBlock(block, `block-${index}`))}
+      {blocks.map((block, index) => renderMarkdownBlock(block, `block-${index}`, projectRoot))}
     </div>
   )
 }
@@ -121,33 +124,33 @@ function splitMarkdownBlocks(text: string) {
   return blocks
 }
 
-// renderMarkdownBlock 使用 block 和 key 参数渲染 markdown 块。
-function renderMarkdownBlock(block: MarkdownBlock, key: string) {
+// renderMarkdownBlock 使用 block、key 和 projectRoot 参数渲染 markdown 块。
+function renderMarkdownBlock(block: MarkdownBlock, key: string, projectRoot?: string) {
   if (block.type === 'heading') {
     const level = Math.min(Math.max(block.level ?? 2, 1), 6)
     if (level === 1) {
-      return <h1 key={key}>{renderInlineMarkdown(block.text ?? '', key)}</h1>
+      return <h1 key={key}>{renderInlineMarkdown(block.text ?? '', key, projectRoot)}</h1>
     }
     if (level === 2) {
-      return <h2 key={key}>{renderInlineMarkdown(block.text ?? '', key)}</h2>
+      return <h2 key={key}>{renderInlineMarkdown(block.text ?? '', key, projectRoot)}</h2>
     }
     if (level === 3) {
-      return <h3 key={key}>{renderInlineMarkdown(block.text ?? '', key)}</h3>
+      return <h3 key={key}>{renderInlineMarkdown(block.text ?? '', key, projectRoot)}</h3>
     }
     if (level === 4) {
-      return <h4 key={key}>{renderInlineMarkdown(block.text ?? '', key)}</h4>
+      return <h4 key={key}>{renderInlineMarkdown(block.text ?? '', key, projectRoot)}</h4>
     }
     if (level === 5) {
-      return <h5 key={key}>{renderInlineMarkdown(block.text ?? '', key)}</h5>
+      return <h5 key={key}>{renderInlineMarkdown(block.text ?? '', key, projectRoot)}</h5>
     }
-    return <h6 key={key}>{renderInlineMarkdown(block.text ?? '', key)}</h6>
+    return <h6 key={key}>{renderInlineMarkdown(block.text ?? '', key, projectRoot)}</h6>
   }
   if (block.type === 'list') {
     if (block.ordered) {
       return (
         <ol key={key}>
           {(block.items ?? []).map((item, index) => (
-            <li key={`${key}-item-${index}`}>{renderInlineMarkdown(item, `${key}-item-${index}`)}</li>
+            <li key={`${key}-item-${index}`}>{renderInlineMarkdown(item, `${key}-item-${index}`, projectRoot)}</li>
           ))}
         </ol>
       )
@@ -155,7 +158,7 @@ function renderMarkdownBlock(block: MarkdownBlock, key: string) {
     return (
       <ul key={key}>
         {(block.items ?? []).map((item, index) => (
-          <li key={`${key}-item-${index}`}>{renderInlineMarkdown(item, `${key}-item-${index}`)}</li>
+          <li key={`${key}-item-${index}`}>{renderInlineMarkdown(item, `${key}-item-${index}`, projectRoot)}</li>
         ))}
       </ul>
     )
@@ -167,11 +170,11 @@ function renderMarkdownBlock(block: MarkdownBlock, key: string) {
       </pre>
     )
   }
-  return <p key={key}>{renderInlineMarkdown(block.text ?? '', key)}</p>
+  return <p key={key}>{renderInlineMarkdown(block.text ?? '', key, projectRoot)}</p>
 }
 
-// renderInlineMarkdown 使用 text 和 keyPrefix 参数渲染行内 markdown。
-function renderInlineMarkdown(text: string, keyPrefix: string) {
+// renderInlineMarkdown 使用 text、keyPrefix 和 projectRoot 参数渲染行内 markdown。
+function renderInlineMarkdown(text: string, keyPrefix: string, projectRoot?: string) {
   const nodes: ReactNode[] = []
   const pattern = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\))/g
   let cursor = 0
@@ -180,7 +183,7 @@ function renderInlineMarkdown(text: string, keyPrefix: string) {
     if (match.index > cursor) {
       nodes.push(text.slice(cursor, match.index))
     }
-    nodes.push(renderInlineToken(match[0], `${keyPrefix}-inline-${nodes.length}`))
+    nodes.push(renderInlineToken(match[0], `${keyPrefix}-inline-${nodes.length}`, projectRoot))
     cursor = match.index + match[0].length
   }
   if (cursor < text.length) {
@@ -189,8 +192,8 @@ function renderInlineMarkdown(text: string, keyPrefix: string) {
   return nodes
 }
 
-// renderInlineToken 使用 token 和 key 参数渲染单个行内 token。
-function renderInlineToken(token: string, key: string) {
+// renderInlineToken 使用 token、key 和 projectRoot 参数渲染单个行内 token。
+function renderInlineToken(token: string, key: string, projectRoot?: string) {
   if (token.startsWith('**') && token.endsWith('**')) {
     return <strong key={key}>{token.slice(2, -2)}</strong>
   }
@@ -199,7 +202,7 @@ function renderInlineToken(token: string, key: string) {
   }
   const link = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token)
   if (link) {
-    const href = sanitizeMarkdownHref(link[2])
+    const href = sanitizeMarkdownHref(link[2], projectRoot)
     if (href) {
       return (
         <a key={key} href={href} target="_blank" rel="noreferrer">
@@ -211,11 +214,11 @@ function renderInlineToken(token: string, key: string) {
   return token
 }
 
-// sanitizeMarkdownHref 使用 href 参数限制 markdown 链接地址。
-function sanitizeMarkdownHref(href: string) {
-  const trimmed = href.trim()
-  if (/^(https?:\/\/|\/|#)/.test(trimmed)) {
-    return trimmed
+// sanitizeMarkdownHref 使用 href 和 projectRoot 参数限制 markdown 链接地址。
+function sanitizeMarkdownHref(href: string, projectRoot?: string) {
+  const resolved = resolveMarkdownFilesystemHref(href, projectRoot)
+  if (/^(https?:\/\/|\/|#)/i.test(resolved)) {
+    return resolved
   }
   return ''
 }

@@ -117,6 +117,22 @@ func installNotificationProbe(page playwright.Page) error {
 	return err
 }
 
+// installClipboardProbe 使用 page 参数注入复制内容探针。
+func installClipboardProbe(page playwright.Page) error {
+	_, err := page.Evaluate(`() => {
+		window.__agenthubClipboard = '';
+		Object.defineProperty(navigator, 'clipboard', {
+			configurable: true,
+			value: {
+				writeText: async (text) => {
+					window.__agenthubClipboard = String(text || '');
+				},
+			},
+		});
+	}`, nil)
+	return err
+}
+
 // attachTestImage 使用 page 和 name 参数通过文件选择控件添加测试图片。
 func attachTestImage(page playwright.Page, name string) error {
 	buffer, err := base64.StdEncoding.DecodeString(testPNGBase64)
@@ -685,6 +701,52 @@ func expectNotificationCount(page playwright.Page, minimum int, timeout time.Dur
 		return fmt.Errorf("等待桌面通知数量达到 %d 超时，最后错误: %w", minimum, lastErr)
 	}
 	return fmt.Errorf("等待桌面通知数量达到 %d 超时，实际数量: %d", minimum, lastCount)
+}
+
+// expectClipboardText 使用 page、expected 和 timeout 参数等待复制内容包含 expected。
+func expectClipboardText(page playwright.Page, expected string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastText string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := page.Evaluate(`() => window.__agenthubClipboard ?? ''`, nil)
+		if err == nil {
+			lastText = fmt.Sprint(value)
+			if strings.Contains(lastText, expected) {
+				return nil
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待复制内容包含 %q 超时，最后错误: %w", expected, lastErr)
+	}
+	return fmt.Errorf("等待复制内容包含 %q 超时，实际内容: %s", expected, lastText)
+}
+
+// expectClipboardNotText 使用 page、unexpected 和 timeout 参数等待复制内容不包含 unexpected。
+func expectClipboardNotText(page playwright.Page, unexpected string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastText string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := page.Evaluate(`() => window.__agenthubClipboard ?? ''`, nil)
+		if err == nil {
+			lastText = fmt.Sprint(value)
+			if !strings.Contains(lastText, unexpected) {
+				return nil
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待复制内容不包含 %q 超时，最后错误: %w", unexpected, lastErr)
+	}
+	return fmt.Errorf("等待复制内容不包含 %q 超时，实际内容: %s", unexpected, lastText)
 }
 
 // expectTestIDDescendantText 使用 page、id、selector、expected 和 timeout 参数等待后代元素文本。

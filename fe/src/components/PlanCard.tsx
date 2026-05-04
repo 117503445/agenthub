@@ -6,6 +6,8 @@ import type { PlanApproval } from '../types'
 interface PlanCardProps {
   /** plan 表示待确认或执行中的 plan。 */
   plan: PlanApproval
+  /** projectRoot 表示相对文件路径所属的 project 根目录。 */
+  projectRoot?: string
   /** onExecute 使用 plan 参数开始执行已确认 plan。 */
   onExecute: (plan: PlanApproval) => void
 }
@@ -21,8 +23,8 @@ function planStatusText(status: PlanApproval['status']) {
   return '待确认'
 }
 
-// PlanCard 使用 plan 参数渲染 plan 模式确认卡片。
-export function PlanCard({ plan, onExecute }: PlanCardProps) {
+// PlanCard 使用 plan、projectRoot 和 onExecute 参数渲染 plan 模式确认卡片。
+export function PlanCard({ plan, projectRoot, onExecute }: PlanCardProps) {
   const executing = plan.status !== 'pending'
 
   return (
@@ -45,7 +47,7 @@ export function PlanCard({ plan, onExecute }: PlanCardProps) {
           开始执行
         </Button>
       </div>
-      <MarkdownRenderer text={plan.text} />
+      <MarkdownRenderer text={plan.text} projectRoot={projectRoot} />
     </section>
   )
 }

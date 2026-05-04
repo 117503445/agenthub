@@ -8,6 +8,8 @@ import type { Chat, ChatMessage, ChatScrollMemory, PlanApproval } from '../types
 interface MessageLogProps {
   /** chat 表示当前聊天页。 */
   chat: Chat
+  /** projectRoot 表示当前 project 根目录。 */
+  projectRoot?: string
   /** copiedMessageId 表示刚复制成功的消息标识。 */
   copiedMessageId: string
   /** onCopyMessage 使用 message 参数复制消息。 */
@@ -48,6 +50,7 @@ function buildChatScrollSignature(chat: Chat) {
 // MessageLog 使用 props 参数渲染聊天消息列表。
 export function MessageLog({
   chat,
+  projectRoot,
   copiedMessageId,
   onCopyMessage,
   onExecutePlan,
@@ -127,7 +130,7 @@ export function MessageLog({
                 {message.role === 'assistant' ? (
                   <div className="space-y-2">
                     {chat.plan?.messageId === message.id ? (
-                      <PlanCard plan={chat.plan} onExecute={onExecutePlan} />
+                      <PlanCard plan={chat.plan} projectRoot={projectRoot} onExecute={onExecutePlan} />
                     ) : (
                       messagePartsForRender(message).map((part) =>
                         part.type === 'tool_call' && part.toolCall ? (
@@ -153,7 +156,7 @@ export function MessageLog({
                             ) : null}
                           </details>
                         ) : (
-                          <MarkdownRenderer key={part.id} text={part.text ?? ''} />
+                          <MarkdownRenderer key={part.id} text={part.text ?? ''} projectRoot={projectRoot} />
                         ),
                       )
                     )}

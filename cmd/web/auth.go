@@ -45,6 +45,15 @@ func (a tokenAuth) ServeWS(w http.ResponseWriter, r *http.Request, next func(htt
 	next(w, r)
 }
 
+// ServeHTTP 使用 w、r 和 next 参数校验 token 后继续处理普通 HTTP 请求。
+func (a tokenAuth) ServeHTTP(w http.ResponseWriter, r *http.Request, next func(http.ResponseWriter, *http.Request)) {
+	if !a.Valid(r) {
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
+	}
+	next(w, r)
+}
+
 // Valid 使用 r 参数判断请求是否携带正确 token。
 func (a tokenAuth) Valid(r *http.Request) bool {
 	if !a.Required() {

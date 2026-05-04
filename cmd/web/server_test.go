@@ -3,8 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -126,6 +130,52 @@ func TestTokenProtectedWebSocket(t *testing.T) {
 	}
 	if snapshot.Type != "state.snapshot" {
 		t.Fatalf("首条消息应为状态快照，当前值: %s", snapshot.Type)
+	}
+}
+
+// TestFilesystemContentEndpoint 验证文件系统内容接口支持子路径、token 和绝对路径校验。
+func TestFilesystemContentEndpoint(t *testing.T) {
+	tempDir := t.TempDir()
+	filePath := filepath.Join(tempDir, "demo.md")
+	if err := os.WriteFile(filePath, []byte("# Demo\n\n文件内容"), 0600); err != nil {
+		t.Fatalf("写入测试文件失败: %v", err)
+	}
+	server := httptest.NewServer(newHTTPHandler(context.Background(), webConfig{Port: "0", Token: "secret"}))
+	defer server.Close()
+
+	response, err := http.Get(server.URL + filesystemContentRoute + "?path=" + url.QueryEscape(filePath))
+	if err != nil {
+		t.Fatalf("请求缺少 token 的文件接口失败: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("缺少 token 时文件接口应返回 401，当前值: %d", response.StatusCode)
+	}
+
+	requestURL := server.URL + "/console" + filesystemContentRoute + "?token=secret&path=" + url.QueryEscape(filePath)
+	response, err = http.Get(requestURL)
+	if err != nil {
+		t.Fatalf("请求文件接口失败: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("文件接口状态码应为 200，当前值: %d", response.StatusCode)
+	}
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("读取文件接口响应失败: %v", err)
+	}
+	if !strings.Contains(string(body), "文件内容") {
+		t.Fatalf("文件接口响应内容不正确: %s", string(body))
+	}
+
+	response, err = http.Get(server.URL + filesystemContentRoute + "?token=secret&path=README.md")
+	if err != nil {
+		t.Fatalf("请求相对路径文件接口失败: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("文件接口应拒绝相对路径，当前状态码: %d", response.StatusCode)
 	}
 }
 
