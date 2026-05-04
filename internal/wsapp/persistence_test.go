@@ -48,8 +48,14 @@ func TestPersistentStoreSaveLoad(t *testing.T) {
 			t.Fatalf("结束 assistant 输出失败")
 		}
 	}
-	if _, err := store.CreateChat(project.ID); err != nil {
+	secondChat, err := store.CreateChat(project.ID)
+	if err != nil {
 		t.Fatalf("创建第二个聊天页失败: %v", err)
+	}
+	if _, changed, err := store.UpdateChatDraft(secondChat.ID, "持久化草稿"); err != nil {
+		t.Fatalf("保存第二个聊天页草稿失败: %v", err)
+	} else if !changed {
+		t.Fatalf("第二个聊天页草稿应该发生变化")
 	}
 	if _, err := os.Stat(filepath.Join(dataDir, persistedStateFileName)); err != nil {
 		t.Fatalf("状态文件未写入: %v", err)
@@ -66,6 +72,9 @@ func TestPersistentStoreSaveLoad(t *testing.T) {
 	if !agentOptionsContainModel(snapshot.AgentProviders, AgentProviderClaudeCode, "claude-custom-test") {
 		t.Fatalf("恢复后的自定义模型缺失: %#v", snapshot.AgentProviders)
 	}
+	if restored := findChatByID(snapshot.Chats, secondChat.ID); restored == nil || restored.DraftText != "持久化草稿" {
+		t.Fatalf("恢复后的聊天页草稿不正确: %#v", snapshot.Chats)
+	}
 	if snapshot.LastAgentSelection.Provider != AgentProviderCodex || snapshot.LastAgentSelection.Model != "gpt-5.5" {
 		t.Fatalf("恢复后的上次 agent 选择不正确: %#v", snapshot.LastAgentSelection)
 	}
@@ -76,6 +85,16 @@ func TestPersistentStoreSaveLoad(t *testing.T) {
 	if nextChat.Title != "聊天 3" {
 		t.Fatalf("恢复后的聊天页序号不正确: %q", nextChat.Title)
 	}
+}
+
+// findChatByID 使用 chats 和 chatID 参数查找聊天页。
+func findChatByID(chats []Chat, chatID string) *Chat {
+	for index := range chats {
+		if chats[index].ID == chatID {
+			return &chats[index]
+		}
+	}
+	return nil
 }
 
 // TestPersistentStoreSaveFailureKeepsMemory 验证保存失败时不会更新内存状态。

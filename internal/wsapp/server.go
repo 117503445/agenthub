@@ -263,6 +263,19 @@ func (s *Server) handle(ctx context.Context, outbound chan ServerMessage, msg Cl
 		s.agents.Stop(payload.ChatID)
 		s.broadcast("chat.changed", map[string]any{"chat": chat})
 		return nil
+	case "chat.draft.update":
+		var payload ChatDraftUpdatePayload
+		if err := decodePayload(msg, &payload); err != nil {
+			return err
+		}
+		chat, changed, err := s.store.UpdateChatDraft(payload.ChatID, payload.Text)
+		if err != nil {
+			return err
+		}
+		if changed {
+			s.broadcast("chat.changed", map[string]any{"chat": chat})
+		}
+		return nil
 	case "agent.model.add":
 		var payload AgentModelAddPayload
 		if err := decodePayload(msg, &payload); err != nil {

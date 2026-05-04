@@ -248,6 +248,8 @@ export interface Chat {
   contextWindow?: ContextWindowUsage
   /** plan 表示当前待确认或执行中的 plan。 */
   plan?: PlanApproval
+  /** draftText 表示输入框尚未发送的文字草稿。 */
+  draftText?: string
   /** messages 表示消息列表。 */
   messages: ChatMessage[]
   /** createdAt 表示创建时间。 */

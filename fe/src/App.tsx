@@ -98,7 +98,7 @@ function App() {
     () => projectChats.find((chat) => chat.id === selectedChatId) ?? projectChats[0] ?? null,
     [projectChats, selectedChatId],
   )
-  const selectedComposerValue = selectedChat ? (composerValues[selectedChat.id] ?? '') : ''
+  const selectedComposerValue = selectedChat ? (composerValues[selectedChat.id] ?? selectedChat.draftText ?? '') : ''
   const selectedComposerImages = selectedChat ? (composerImages[selectedChat.id] ?? []) : []
   const selectedPlanMode = selectedChat ? (planModes[selectedChat.id] ?? false) : false
   const isRunning = selectedChat?.status === 'running'
@@ -313,19 +313,12 @@ function App() {
       return
     }
     setComposerValues((current) => {
-      if (value === '') {
-        if (!(chatId in current)) {
-          return current
-        }
-        const next = { ...current }
-        delete next[chatId]
-        return next
-      }
       if (current[chatId] === value) {
         return current
       }
       return { ...current, [chatId]: value }
     })
+    sendClientMessage(wsRef.current, 'chat.draft.update', { chatId, text: value })
   }, [selectedChat?.id])
 
   // updateSelectedComposerImages 使用 images 参数更新当前聊天页图片附件草稿。

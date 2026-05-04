@@ -46,6 +46,12 @@ type ChatStopPayload struct {
 	ChatID string `json:"chatId"` // ChatID 表示目标聊天页标识。
 }
 
+// ChatDraftUpdatePayload 表示更新聊天输入框文字草稿的请求参数。
+type ChatDraftUpdatePayload struct {
+	ChatID string `json:"chatId"` // ChatID 表示目标聊天页标识。
+	Text   string `json:"text"`   // Text 表示尚未发送的输入框文字。
+}
+
 // ChatPlanExecutePayload 表示执行已确认 plan 的请求参数。
 type ChatPlanExecutePayload struct {
 	ChatID string `json:"chatId"` // ChatID 表示目标聊天页标识。

@@ -41,6 +41,13 @@ func TestStoreProjectChatLifecycle(t *testing.T) {
 	if chat.AgentProvider != AgentProviderCodex || chat.AgentModel != "gpt-5.5" || chat.AgentReasoning != "xhigh" {
 		t.Fatalf("聊天页 agent 未更新: %#v", chat)
 	}
+	chat, changed, err := store.UpdateChatDraft(chat.ID, "  未发送草稿\n第二行  ")
+	if err != nil {
+		t.Fatalf("保存聊天页草稿失败: %v", err)
+	}
+	if !changed || chat.DraftText != "  未发送草稿\n第二行  " {
+		t.Fatalf("聊天页草稿未保存原文: changed=%v chat=%#v", changed, chat)
+	}
 
 	chat, userMessage, assistantMessage, err := store.AddRunMessages(chat.ID, "  第一条 prompt  ", nil, false)
 	if err != nil {
@@ -51,6 +58,9 @@ func TestStoreProjectChatLifecycle(t *testing.T) {
 	}
 	if chat.Title != "第一条 prompt" {
 		t.Fatalf("聊天页标题未从首条 prompt 派生: %q", chat.Title)
+	}
+	if chat.DraftText != "" {
+		t.Fatalf("发送消息后应清空草稿: %q", chat.DraftText)
 	}
 	if userMessage.Text != "第一条 prompt" || userMessage.Status != MessageStatusComplete {
 		t.Fatalf("用户消息不正确: %#v", userMessage)

@@ -171,6 +171,7 @@ type Chat struct {
 	AgentProfile   AgentProfile       `json:"agentProfile,omitempty"`   // AgentProfile 表示聊天页绑定的 Profile 快照。
 	ContextWindow  ContextWindowUsage `json:"contextWindow"`            // ContextWindow 表示当前上下文窗口使用情况。
 	Plan           *PlanApproval      `json:"plan,omitempty"`           // Plan 表示当前待确认或执行中的 plan。
+	DraftText      string             `json:"draftText,omitempty"`      // DraftText 表示聊天输入框尚未发送的文字草稿。
 	Messages       []ChatMessage      `json:"messages"`                 // Messages 表示聊天消息列表。
 	CreatedAt      time.Time          `json:"createdAt"`                // CreatedAt 表示创建时间。
 	UpdatedAt      time.Time          `json:"updatedAt"`                // UpdatedAt 表示更新时间。
@@ -657,6 +658,31 @@ func (s *Store) UpdateChatAgent(chatID string, provider string, model string, re
 	return cloneChat(chat), nil
 }
 
+// UpdateChatDraft 使用 chatID 和 text 参数保存聊天输入框文字草稿。
+func (s *Store) UpdateChatDraft(chatID string, text string) (Chat, bool, error) {
+	var chat Chat
+	if err := s.commit(func(state *storeState) error {
+		var ok bool
+		chat, ok = state.chats[chatID]
+		if !ok {
+			return ErrNotFound
+		}
+		if chat.DraftText == text {
+			return errStoreUnchanged
+		}
+		chat.DraftText = text
+		chat.UpdatedAt = time.Now()
+		state.chats[chatID] = chat
+		return nil
+	}); err != nil {
+		if errors.Is(err, errStoreUnchanged) {
+			return cloneChat(chat), false, nil
+		}
+		return Chat{}, false, err
+	}
+	return cloneChat(chat), true, nil
+}
+
 // GetProjectAndChat 使用 chatID 参数读取聊天页及其 project。
 func (s *Store) GetProjectAndChat(chatID string) (Project, Chat, error) {
 	s.mu.RLock()
@@ -738,6 +764,7 @@ func (s *Store) AddRunMessages(chatID string, prompt string, images []MessageIma
 		if planMode {
 			chat.Plan = nil
 		}
+		chat.DraftText = ""
 		chat.ContextWindow = estimateChatContextWindowUsage(chat)
 		chat.UpdatedAt = now
 		state.chats[chatID] = chat

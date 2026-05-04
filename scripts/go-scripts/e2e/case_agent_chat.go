@@ -479,6 +479,15 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDValue(page, "message-input", secondDraft, 5*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := reloadPage(page); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDText(page, "connection-state", "已连接", 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDValue(page, "message-input", secondDraft, 10*time.Second); err != nil {
+		return fail(err)
+	}
 	if err := expectTestIDValue(page, "agent-provider-select", "mock-codex", 10*time.Second); err != nil {
 		return fail(err)
 	}
@@ -494,7 +503,7 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDValue(page, "agent-model-select", "mock-claude-sonnet", 10*time.Second); err != nil {
 		return fail(err)
 	}
-	events = append(events, reportStep("新聊天默认继承上一次选择的 agent、模型和推理级别；每个聊天 Tab 保留独立输入草稿和滚动位置，离开期间有新输出时切回会滚动到底部；E2E 使用 Mock Claude Code 命令连接服务端 mock 模型服务。"))
+	events = append(events, reportStep("新聊天默认继承上一次选择的 agent、模型和推理级别；每个聊天 Tab 保留独立输入草稿和滚动位置，文字草稿刷新后从后端恢复，离开期间有新输出时切回会滚动到底部；E2E 使用 Mock Claude Code 命令连接服务端 mock 模型服务。"))
 
 	secondPrompt := "第二条长流式测试"
 	if err := fillTestID(page, "message-input", secondPrompt); err != nil {
