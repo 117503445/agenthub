@@ -844,6 +844,15 @@ function App() {
     })
   }
 
+  // setProfileDefaultModel 使用 profileId 和 modelId 参数设置 Profile 默认模型。
+  const setProfileDefaultModel = (profileId: string, modelId: string) => {
+    sendClientMessage(wsRef.current, 'agent.profile.model.update', {
+      profileId,
+      id: modelId,
+      default: true,
+    })
+  }
+
   // selectProject 使用 project 参数切换当前 project 并写入 hash 路由。
   const selectProject = (project: Project) => {
     setRouteView('chat')
@@ -1013,6 +1022,7 @@ function App() {
             onModelIDChange={setNewClaudeModelID}
             onAddProfileModel={addProfileModel}
             onDeleteProfileModel={deleteProfileModel}
+            onSetProfileDefaultModel={setProfileDefaultModel}
           />
         ) : (
           <ChatWorkspace

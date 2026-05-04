@@ -44,6 +44,8 @@ interface AgentSettingsPageProps {
   onAddProfileModel: (event: FormEvent<HTMLFormElement>) => void
   /** onDeleteProfileModel 使用 profileId 和 modelId 参数删除模型。 */
   onDeleteProfileModel: (profileId: string, modelId: string) => void
+  /** onSetProfileDefaultModel 使用 profileId 和 modelId 参数设置默认模型。 */
+  onSetProfileDefaultModel: (profileId: string, modelId: string) => void
 }
 
 // AgentSettingsPage 使用 props 参数渲染 agent Profile 设置页。
@@ -64,6 +66,7 @@ export function AgentSettingsPage({
   onModelIDChange,
   onAddProfileModel,
   onDeleteProfileModel,
+  onSetProfileDefaultModel,
 }: AgentSettingsPageProps) {
   const selectedProfile = agentProfiles.find((profile) => profile.id === selectedProfileId) ?? agentProfiles[0] ?? null
   const [labelDraft, setLabelDraft] = useState('')
@@ -264,12 +267,29 @@ export function AgentSettingsPage({
               </div>
               <div className="overflow-hidden rounded-md border border-slate-200 bg-white" data-testid="agent-settings-model-list">
                 {models.map((model) => (
-                  <div key={model.id} className="flex items-center justify-between gap-3 border-b border-slate-100 px-3 py-3 last:border-b-0">
+                  <div
+                    key={model.id}
+                    data-testid="agent-model-row"
+                    data-model-id={model.id}
+                    className="flex items-center justify-between gap-3 border-b border-slate-100 px-3 py-3 last:border-b-0"
+                  >
                     <div className="min-w-0">
                       <div className="truncate font-mono text-sm font-medium text-slate-900">{model.id}</div>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       {model.default ? <span className="text-xs font-medium text-teal-700">默认</span> : null}
+                      {!model.default ? (
+                        <button
+                          type="button"
+                          data-testid="agent-model-default-button"
+                          data-model-id={model.id}
+                          onClick={() => selectedProfile && onSetProfileDefaultModel(selectedProfile.id, model.id)}
+                          disabled={connectionState !== 'open' || !selectedProfile}
+                          className="inline-flex h-7 cursor-pointer items-center justify-center rounded-md border border-slate-200 px-2 text-xs font-medium text-slate-600 transition hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700 disabled:cursor-not-allowed disabled:text-slate-300"
+                        >
+                          设为默认
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         data-testid="agent-model-delete-button"

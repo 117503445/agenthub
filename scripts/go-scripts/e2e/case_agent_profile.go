@@ -170,7 +170,7 @@ func runAgentProfileCase(ctx E2EContext) (success bool) {
 	if err := assertAgentProfileSettingsUI(ctx); err != nil {
 		return fail(err)
 	}
-	events = append(events, reportStep("设置页展示 Profile 列表、后端启动环境变量和完整 Effective Env。"))
+	events = append(events, reportStep("设置页展示 Profile 列表、后端启动环境变量和完整 Effective Env，并支持切换默认模型。"))
 	return true
 }
 
@@ -312,6 +312,13 @@ func assertAgentProfileSettingsUI(ctx E2EContext) error {
 		return err
 	}
 	if err := expectTestIDText(page, "agent-profile-effective-env", "profile-secret-value", 10*time.Second); err != nil {
+		return err
+	}
+	if err := page.Locator(`[data-testid="agent-model-default-button"][data-model-id="mock-codex-fast"]`).Click(); err != nil {
+		return err
+	}
+	fastModelRow := page.Locator(`[data-testid="agent-model-row"][data-model-id="mock-codex-fast"]`)
+	if err := expectLocatorText(fastModelRow, "默认", 5*time.Second); err != nil {
 		return err
 	}
 	if err := page.Locator(`[data-testid="agent-model-delete-button"][data-model-id="mock-codex-fast"]`).Click(); err != nil {
