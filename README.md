@@ -36,7 +36,7 @@ go-task run:web
 ```
 
 运行后端服务，默认监听 `17375` 端口，可用 `AGENTHUB_PORT` 或 `--port` 修改。
-如果 `.env` 中配置了非空 `AGENTHUB_TOKEN`，前端需要输入相同 token 才能连接 WebSocket。
+如果 `.env` 中配置了非空 `AGENTHUB_TOKEN`，或启动时传入 `--token`，前端需要输入相同 token 才能连接 WebSocket；CLI 参数优先于环境变量。
 
 ```bash
 go-task fe:dev

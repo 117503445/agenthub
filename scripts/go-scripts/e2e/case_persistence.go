@@ -209,7 +209,7 @@ func assertSameDataDirSecondProcessExits(ctx E2EContext) error {
 		return err
 	}
 	lockLogsDir := filepath.Join(ctx.OutputDir, "lock-logs")
-	process, stop, err := startServer(ctx.RootDir, ctx.ServerCmd, port, legacyPort, lockLogsDir, ctx.DataDir, nil)
+	process, stop, err := startServer(ctx.RootDir, ctx.ServerCmd, port, legacyPort, lockLogsDir, ctx.DataDir, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -234,7 +234,7 @@ func startPersistenceServer(ctx E2EContext, logDirName string) (string, func(), 
 		return "", nil, err
 	}
 	logsDir := filepath.Join(ctx.OutputDir, logDirName)
-	_, stop, err := startServer(ctx.RootDir, ctx.ServerCmd, port, legacyPort, logsDir, ctx.DataDir, nil)
+	_, stop, err := startServer(ctx.RootDir, ctx.ServerCmd, port, legacyPort, logsDir, ctx.DataDir, nil, nil)
 	if err != nil {
 		return "", nil, err
 	}

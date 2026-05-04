@@ -25,8 +25,9 @@ type webConfig struct {
 
 // webCLI 表示 Kong 解析的命令行参数。
 type webCLI struct {
-	Port       string `name:"port" env:"AGENTHUB_PORT" default:"17375" help:"Web 服务监听端口。"`
-	LogNoColor bool   `name:"log-no-color" env:"AGENTHUB_LOG_NO_COLOR" hidden:"" help:"禁用日志颜色。"`
+	Port       string  `name:"port" env:"AGENTHUB_PORT" default:"17375" help:"Web 服务监听端口。"`
+	Token      *string `name:"token" help:"前端访问 token。"`
+	LogNoColor bool    `name:"log-no-color" env:"AGENTHUB_LOG_NO_COLOR" hidden:"" help:"禁用日志颜色。"`
 }
 
 // parseWebConfig 使用 args 参数解析 Web 服务启动配置。
@@ -46,10 +47,14 @@ func parseWebConfig(args []string, stdout io.Writer, stderr io.Writer) (webConfi
 	if err != nil {
 		return webConfig{}, err
 	}
+	token := strings.TrimSpace(os.Getenv("AGENTHUB_TOKEN"))
+	if cli.Token != nil {
+		token = strings.TrimSpace(*cli.Token)
+	}
 	return webConfig{
 		Port:              strings.TrimSpace(cli.Port),
 		LogNoColor:        cli.LogNoColor,
-		Token:             strings.TrimSpace(os.Getenv("AGENTHUB_TOKEN")),
+		Token:             token,
 		DataDir:           dataDir,
 		MockClaudeCommand: strings.TrimSpace(os.Getenv("AGENTHUB_MOCK_CLAUDE_COMMAND")),
 		MockCodexCommand:  strings.TrimSpace(os.Getenv("AGENTHUB_MOCK_CODEX_COMMAND")),

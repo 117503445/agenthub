@@ -23,6 +23,7 @@ type E2ECase struct {
 	Name string                // Name 表示用例名称。
 	Run  func(E2EContext) bool // Run 使用 E2EContext 参数运行用例。
 	Env  map[string]string     // Env 表示当前用例额外覆盖的环境变量。
+	Args []string              // Args 表示当前用例额外传递给服务的 CLI 参数。
 }
 
 // E2EContext 表示 E2E 用例运行所需上下文。
@@ -115,6 +116,9 @@ func registeredCases() map[string]E2ECase {
 		"case_token_auth": {Name: "case_token_auth", Run: runTokenAuthCase, Env: map[string]string{
 			"AGENTHUB_TOKEN": e2eAgentHubToken,
 		}},
+		"case_token_cli_auth": {Name: "case_token_cli_auth", Run: runTokenAuthCase, Args: []string{
+			"--token", e2eAgentHubToken,
+		}},
 		"case_ws": {Name: "case_ws", Run: runWSCase},
 	}
 }
@@ -176,7 +180,7 @@ func runCase(rootDir string, serverCmd string, item E2ECase) bool {
 		}
 	}
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
-	process, stopServer, err := startServer(rootDir, serverCmd, port, legacyPort, logsDir, dataDir, item.Env)
+	process, stopServer, err := startServer(rootDir, serverCmd, port, legacyPort, logsDir, dataDir, item.Env, item.Args)
 	if err != nil {
 		logger.Errorf("启动服务失败: %v", err)
 		return false
@@ -208,7 +212,7 @@ func runCase(rootDir string, serverCmd string, item E2ECase) bool {
 	return success
 }
 
-// startServer 使用 rootDir、serverCmd、port、legacyPort、logsDir 和 extraEnv 参数启动被测服务。
+// startServer 使用 rootDir、serverCmd、port、legacyPort、logsDir、dataDir、extraEnv 和 extraArgs 参数启动被测服务。
 func startServer(
 	rootDir string,
 	serverCmd string,
@@ -217,6 +221,7 @@ func startServer(
 	logsDir string,
 	dataDir string,
 	extraEnv map[string]string,
+	extraArgs []string,
 ) (*exec.Cmd, func(), error) {
 	parts := strings.Fields(serverCmd)
 	if len(parts) == 0 {
@@ -239,7 +244,9 @@ func startServer(
 		return nil, nil, err
 	}
 
-	cmd := exec.Command(parts[0], parts[1:]...)
+	args := append([]string{}, parts[1:]...)
+	args = append(args, extraArgs...)
+	cmd := exec.Command(parts[0], args...)
 	cmd.Dir = rootDir
 	envOverride := map[string]string{
 		"AGENTHUB_PORT":                fmt.Sprintf("%d", port),

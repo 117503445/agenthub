@@ -65,13 +65,17 @@ func TestParseWebConfigUsesOnlyAgentHubEnv(t *testing.T) {
 func TestParseWebConfigFlagOverridesEnv(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("AGENTHUB_PORT", "6060")
+	t.Setenv("AGENTHUB_TOKEN", "env-token")
 
-	config, err := parseWebConfig([]string{"--port", "7070"}, io.Discard, io.Discard)
+	config, err := parseWebConfig([]string{"--port", "7070", "--token", "cli-token"}, io.Discard, io.Discard)
 	if err != nil {
 		t.Fatalf("解析配置失败: %v", err)
 	}
 	if config.Port != "7070" {
 		t.Fatalf("CLI 端口应覆盖环境变量，当前值: %q", config.Port)
+	}
+	if config.Token != "cli-token" {
+		t.Fatalf("CLI token 应覆盖环境变量，当前值: %q", config.Token)
 	}
 }
 
@@ -117,10 +121,13 @@ func TestWebCLIHelpHidesLogNoColor(t *testing.T) {
 	if !strings.Contains(help, "AGENTHUB_PORT") {
 		t.Fatalf("帮助信息应展示 AGENTHUB_PORT，当前帮助: %s", help)
 	}
+	if !strings.Contains(help, "--token") {
+		t.Fatalf("帮助信息应展示 token 参数，当前帮助: %s", help)
+	}
 	if strings.Contains(help, "AGENTHUB_LOG_NO_COLOR") || strings.Contains(help, "log-no-color") {
 		t.Fatalf("帮助信息不应展示日志颜色配置，当前帮助: %s", help)
 	}
-	if strings.Contains(help, "AGENTHUB_TOKEN") || strings.Contains(help, "token") {
-		t.Fatalf("帮助信息不应展示 token 配置，当前帮助: %s", help)
+	if strings.Contains(help, "AGENTHUB_TOKEN") {
+		t.Fatalf("帮助信息不应展示 token 环境变量，当前帮助: %s", help)
 	}
 }
