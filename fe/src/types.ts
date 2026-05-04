@@ -4,7 +4,9 @@ export type ChatTerminalIndicator = 'success' | 'error'
 export type ChatVisualStatus = 'running' | ChatTerminalIndicator
 export type MessageRole = 'user' | 'assistant' | 'system'
 export type MessageStatus = 'complete' | 'streaming' | 'stopped' | 'error'
-export type AgentProvider = 'claude-code' | 'codex' | 'mock-claude-code' | 'mock-codex'
+export type AgentProvider = string
+export type AgentProfileType = 'claude_code' | 'codex'
+export type AgentBuiltinProfileKind = 'claude_code' | 'codex' | 'mock_claude_code' | 'mock_codex'
 
 export interface ContextWindowUsage {
   /** maxTokens 表示当前模型上下文窗口上限。 */
@@ -85,6 +87,43 @@ export interface AgentProviderOption {
   label: string
   /** models 表示 provider 可选模型。 */
   models: AgentModelOption[]
+}
+
+export interface AgentEnvVar {
+  /** name 表示环境变量名。 */
+  name: string
+  /** value 表示环境变量完整值。 */
+  value?: string
+  /** unset 表示是否删除后端同名环境变量。 */
+  unset?: boolean
+}
+
+export interface BackendEnvVar {
+  /** name 表示后端启动环境变量名。 */
+  name: string
+  /** value 表示后端启动环境变量完整值。 */
+  value: string
+}
+
+export interface AgentProfile {
+  /** id 表示 Profile 唯一标识。 */
+  id: string
+  /** label 表示 Profile 展示名称。 */
+  label: string
+  /** type 表示 Profile 类型。 */
+  type: AgentProfileType
+  /** command 表示启动命令。 */
+  command: string
+  /** args 表示固定命令参数。 */
+  args: string[]
+  /** env 表示 Profile 环境变量配置。 */
+  env: AgentEnvVar[]
+  /** models 表示聊天中可切换的模型。 */
+  models: AgentModelOption[]
+  /** builtin 表示是否内置 Profile。 */
+  builtin?: boolean
+  /** mock 表示是否 Mock Profile。 */
+  mock?: boolean
 }
 
 export interface AgentSkillOption {
@@ -205,6 +244,8 @@ export interface Chat {
   agentLocked: boolean
   /** agentSessionId 表示 agent 会话标识。 */
   agentSessionId?: string
+  /** agentProfile 表示聊天页绑定的 Profile 快照。 */
+  agentProfile?: AgentProfile
   /** contextWindow 表示当前聊天的上下文窗口使用情况。 */
   contextWindow?: ContextWindowUsage
   /** plan 表示当前待确认或执行中的 plan。 */
@@ -231,6 +272,10 @@ export interface SnapshotPayload {
   chats: Chat[]
   /** agentProviders 表示可选 agent 和模型。 */
   agentProviders?: AgentProviderOption[]
+  /** agentProfiles 表示可编辑的 Profile 列表。 */
+  agentProfiles?: AgentProfile[]
+  /** backendEnv 表示后端启动环境变量。 */
+  backendEnv?: BackendEnvVar[]
   /** agentSkills 表示可选 skills。 */
   agentSkills?: AgentSkillOption[]
   /** lastAgentSelection 表示后端保存的上次 agent 配置。 */
@@ -290,6 +335,13 @@ export interface AgentStatusPayload {
 
 export interface AgentProvidersChangedPayload {
   /** agentProviders 表示更新后的 agent 和模型选项。 */
+  agentProviders: AgentProviderOption[]
+}
+
+export interface AgentProfilesChangedPayload {
+  /** agentProfiles 表示更新后的 Profile 列表。 */
+  agentProfiles: AgentProfile[]
+  /** agentProviders 表示兼容聊天选择框的 Profile 选项。 */
   agentProviders: AgentProviderOption[]
 }
 

@@ -23,28 +23,29 @@ type Server struct {
 	hostname    string
 	store       *Store
 	agents      *AgentManager
+	agentConfig AgentConfig
 	subscribers map[string]chan ServerMessage
 	mu          sync.Mutex
 }
 
 // NewServer 使用 ctx、version 和 agentConfig 参数创建 WebSocket 服务。
 func NewServer(ctx context.Context, version string, agentConfig AgentConfig) *Server {
-	agentProviders := agentConfig.AgentProviders
-	if len(agentProviders) == 0 {
-		agentProviders = DefaultAgentProviderOptions()
+	agentProfiles := agentConfig.AgentProfiles
+	if len(agentProfiles) == 0 {
+		agentProfiles = AgentProfiles(AgentOptionsConfig{})
 	}
-	store := NewStoreWithAgentProviders(agentProviders)
+	store := NewStoreWithAgentProfiles(agentProfiles)
 	addWorkdirProjectIfGitRepo(ctx, store)
 	return newServerWithStore(ctx, version, agentConfig, store)
 }
 
 // NewPersistentServer 使用 ctx、version、agentConfig 和 dataDir 参数创建带持久化的 WebSocket 服务。
 func NewPersistentServer(ctx context.Context, version string, agentConfig AgentConfig, dataDir string) (*Server, error) {
-	agentProviders := agentConfig.AgentProviders
-	if len(agentProviders) == 0 {
-		agentProviders = DefaultAgentProviderOptions()
+	agentProfiles := agentConfig.AgentProfiles
+	if len(agentProfiles) == 0 {
+		agentProfiles = AgentProfiles(AgentOptionsConfig{})
 	}
-	store, err := NewPersistentStore(dataDir, agentProviders)
+	store, err := NewPersistentStore(dataDir, agentProfiles)
 	if err != nil {
 		return nil, err
 	}
@@ -58,13 +59,18 @@ func newServerWithStore(ctx context.Context, version string, agentConfig AgentCo
 	if err != nil || strings.TrimSpace(hostname) == "" {
 		hostname = "unknown"
 	}
+	agentConfig.AgentProfiles = store.AgentProfiles()
 	agentConfig.AgentProviders = store.AgentProviders()
+	if len(agentConfig.BackendEnv) == 0 {
+		agentConfig.BackendEnv = BackendEnvSnapshot()
+	}
 	return &Server{
 		ctx:         ctx,
 		version:     version,
 		hostname:    hostname,
 		store:       store,
 		agents:      NewAgentManager(ctx, agentConfig),
+		agentConfig: agentConfig,
 		subscribers: make(map[string]chan ServerMessage),
 	}
 }
@@ -260,8 +266,97 @@ func (s *Server) handle(ctx context.Context, outbound chan ServerMessage, msg Cl
 		if err != nil {
 			return err
 		}
-		s.agents.SetAgentProviders(options)
+		s.agents.SetAgentProfiles(s.store.AgentProfiles())
 		s.broadcast("agent.providers.changed", map[string]any{"agentProviders": options})
+		s.broadcastAgentProfilesChanged()
+		return nil
+	case "agent.profile.create":
+		var payload AgentProfile
+		if err := decodePayload(msg, &payload); err != nil {
+			return err
+		}
+		if _, err := s.store.CreateAgentProfile(payload); err != nil {
+			return err
+		}
+		s.broadcastAgentProfilesChanged()
+		return nil
+	case "agent.profile.update":
+		var payload AgentProfile
+		if err := decodePayload(msg, &payload); err != nil {
+			return err
+		}
+		if _, err := s.store.UpdateAgentProfile(payload); err != nil {
+			return err
+		}
+		s.broadcastAgentProfilesChanged()
+		return nil
+	case "agent.profile.delete":
+		var payload IDPayload
+		if err := decodePayload(msg, &payload); err != nil {
+			return err
+		}
+		if _, err := s.store.DeleteAgentProfile(payload.ID); err != nil {
+			return err
+		}
+		s.broadcastAgentProfilesChanged()
+		return nil
+	case "agent.profile.add_builtin":
+		var payload AgentBuiltinProfilePayload
+		if err := decodePayload(msg, &payload); err != nil {
+			return err
+		}
+		profile, err := BuiltinAgentProfile(payload.Kind, s.agentOptionsConfig(), s.store.AgentProfiles())
+		if err != nil {
+			return err
+		}
+		if _, err := s.store.CreateAgentProfile(profile); err != nil {
+			return err
+		}
+		s.broadcastAgentProfilesChanged()
+		return nil
+	case "agent.profile.model.add":
+		var payload AgentProfileModelPayload
+		if err := decodePayload(msg, &payload); err != nil {
+			return err
+		}
+		if _, err := s.store.AddAgentProfileModel(payload.ProfileID, payload.ID, payload.Label); err != nil {
+			return err
+		}
+		s.broadcastAgentProfilesChanged()
+		return nil
+	case "agent.profile.model.update":
+		var payload AgentProfileModelPayload
+		if err := decodePayload(msg, &payload); err != nil {
+			return err
+		}
+		if _, err := s.store.UpdateAgentProfileModel(payload.ProfileID, payload.ID, payload.Label, payload.Default); err != nil {
+			return err
+		}
+		s.broadcastAgentProfilesChanged()
+		return nil
+	case "agent.profile.model.delete":
+		var payload AgentProfileModelPayload
+		if err := decodePayload(msg, &payload); err != nil {
+			return err
+		}
+		if _, err := s.store.DeleteAgentProfileModel(payload.ProfileID, payload.ID); err != nil {
+			return err
+		}
+		s.broadcastAgentProfilesChanged()
+		return nil
+	case "agent.profile.effective_env.get":
+		var payload IDPayload
+		if err := decodePayload(msg, &payload); err != nil {
+			return err
+		}
+		profile, ok := AgentProfileByID(s.store.AgentProfiles(), payload.ID)
+		if !ok {
+			return ErrNotFound
+		}
+		s.sendTo(outbound, "agent.profile.effective_env", map[string]any{
+			"id":  profile.ID,
+			"env": EffectiveAgentEnv(s.agentConfig.BackendEnv, profile),
+		})
 		return nil
 	case "chat.send":
 		var payload ChatSendPayload
@@ -368,6 +463,7 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string,
 		ChatID:             chatID,
 		ProjectPath:        project.Path,
 		Provider:           chat.AgentProvider,
+		Profile:            chat.AgentProfile,
 		Model:              chat.AgentModel,
 		Reasoning:          chat.AgentReasoning,
 		Prompt:             prompt,
@@ -413,6 +509,33 @@ func (s *Server) stopChatRun(chatID string) {
 	}
 	s.broadcast("chat.changed", map[string]any{"chat": chat})
 	s.broadcast("agent.status", map[string]any{"chatId": chatID, "status": ChatStatusIdle})
+}
+
+// broadcastAgentProfilesChanged 广播 Profile 和兼容 provider 列表变更。
+func (s *Server) broadcastAgentProfilesChanged() {
+	profiles := s.store.AgentProfiles()
+	providers := AgentProviderOptionsFromProfiles(profiles)
+	s.agents.SetAgentProfiles(profiles)
+	s.broadcast("agent.profiles.changed", map[string]any{
+		"agentProfiles":  profiles,
+		"agentProviders": providers,
+	})
+	s.broadcast("agent.providers.changed", map[string]any{"agentProviders": providers})
+}
+
+// agentOptionsConfig 返回当前服务重新添加内置 Profile 所需的启动配置。
+func (s *Server) agentOptionsConfig() AgentOptionsConfig {
+	return AgentOptionsConfig{
+		ClaudeCommand:        s.agentConfig.Command,
+		CodexCommand:         s.agentConfig.CodexCommand,
+		MockClaudeCommand:    s.agentConfig.MockClaudeCommand,
+		MockCodexCommand:     s.agentConfig.MockCodexCommand,
+		MockAnthropicBaseURL: s.agentConfig.MockAnthropicBaseURL,
+		MockAnthropicAPIKey:  s.agentConfig.MockAnthropicAPIKey,
+		MockOpenAIBaseURL:    s.agentConfig.MockOpenAIBaseURL,
+		MockOpenAIAPIKey:     s.agentConfig.MockOpenAIAPIKey,
+		EnableMockAgent:      hasMockProfile(s.agentConfig.AgentProfiles),
+	}
 }
 
 // subscribe 创建新的消息订阅通道。

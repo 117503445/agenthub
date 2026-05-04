@@ -163,11 +163,12 @@ type Chat struct {
 	ProjectID      string             `json:"projectId"`                // ProjectID 表示聊天页所属 project。
 	Title          string             `json:"title"`                    // Title 表示聊天页标题。
 	Status         string             `json:"status"`                   // Status 表示聊天页运行状态。
-	AgentProvider  string             `json:"agentProvider"`            // AgentProvider 表示当前聊天页使用的 agent 类型。
+	AgentProvider  string             `json:"agentProvider"`            // AgentProvider 表示当前聊天页使用的 Profile 标识。
 	AgentModel     string             `json:"agentModel"`               // AgentModel 表示当前聊天页使用的模型。
 	AgentReasoning string             `json:"agentReasoning,omitempty"` // AgentReasoning 表示当前聊天页使用的推理级别。
 	AgentLocked    bool               `json:"agentLocked"`              // AgentLocked 表示会话开始后 agent 配置是否锁定。
 	AgentSessionID string             `json:"agentSessionId,omitempty"` // AgentSessionID 表示 agent 会话标识。
+	AgentProfile   AgentProfile       `json:"agentProfile,omitempty"`   // AgentProfile 表示聊天页绑定的 Profile 快照。
 	ContextWindow  ContextWindowUsage `json:"contextWindow"`            // ContextWindow 表示当前上下文窗口使用情况。
 	Plan           *PlanApproval      `json:"plan,omitempty"`           // Plan 表示当前待确认或执行中的 plan。
 	Messages       []ChatMessage      `json:"messages"`                 // Messages 表示聊天消息列表。
@@ -177,7 +178,7 @@ type Chat struct {
 
 // LastAgentSelection 表示新聊天页默认继承的 agent 配置。
 type LastAgentSelection struct {
-	Provider  string `json:"provider"`  // Provider 表示最近一次选择的 agent provider。
+	Provider  string `json:"provider"`  // Provider 表示最近一次选择的 Profile 标识。
 	Model     string `json:"model"`     // Model 表示最近一次选择的模型。
 	Reasoning string `json:"reasoning"` // Reasoning 表示最近一次选择的推理级别。
 }
@@ -187,6 +188,8 @@ type Snapshot struct {
 	Projects           []Project             `json:"projects"`           // Projects 表示所有 project。
 	Chats              []Chat                `json:"chats"`              // Chats 表示所有聊天页。
 	AgentProviders     []AgentProviderOption `json:"agentProviders"`     // AgentProviders 表示可选 agent 和模型。
+	AgentProfiles      []AgentProfile        `json:"agentProfiles"`      // AgentProfiles 表示可编辑的 Profile 列表。
+	BackendEnv         []BackendEnvVar       `json:"backendEnv"`         // BackendEnv 表示后端启动时的环境变量。
 	AgentSkills        []AgentSkillOption    `json:"agentSkills"`        // AgentSkills 表示可在输入框中选择的 skills。
 	LastAgentSelection LastAgentSelection    `json:"lastAgentSelection"` // LastAgentSelection 表示新聊天页默认 agent 配置。
 }
@@ -372,9 +375,6 @@ func (s *Store) AddAgentModel(provider string, modelID string, label string) ([]
 	normalizedProvider := strings.TrimSpace(provider)
 	normalizedModelID := strings.TrimSpace(modelID)
 	normalizedLabel := strings.TrimSpace(label)
-	if normalizedProvider != AgentProviderClaudeCode {
-		return nil, fmt.Errorf("%w: 只允许更新 Claude Code 模型列表", ErrInvalidInput)
-	}
 	if normalizedModelID == "" {
 		return nil, fmt.Errorf("%w: 模型标识不能为空", ErrInvalidInput)
 	}
@@ -384,21 +384,27 @@ func (s *Store) AddAgentModel(provider string, modelID string, label string) ([]
 
 	var options []AgentProviderOption
 	if err := s.commit(func(state *storeState) error {
-		for providerIndex := range state.agentProviders {
-			option := &state.agentProviders[providerIndex]
-			if option.ID != normalizedProvider {
+		for profileIndex := range state.agentProfiles {
+			profile := &state.agentProfiles[profileIndex]
+			if profile.ID != normalizedProvider {
 				continue
 			}
-			for _, model := range option.Models {
+			for _, model := range profile.Models {
 				if model.ID == normalizedModelID {
 					return fmt.Errorf("%w: 模型已存在", ErrInvalidInput)
 				}
 			}
-			option.Models = append(option.Models, AgentModelOption{
+			profile.Models = append(profile.Models, AgentModelOption{
 				ID:    normalizedModelID,
 				Label: normalizedLabel,
 			})
-			options = cloneAgentProviderOptions(state.agentProviders)
+			normalizedProfile, err := normalizeAgentProfile(*profile)
+			if err != nil {
+				return err
+			}
+			state.agentProfiles[profileIndex] = normalizedProfile
+			applyProfileToChats(state, normalizedProfile)
+			options = AgentProviderOptionsFromProfiles(state.agentProfiles)
 			return nil
 		}
 		return fmt.Errorf("%w: 不支持的 agent: %s", ErrInvalidInput, provider)
@@ -408,23 +414,242 @@ func (s *Store) AddAgentModel(provider string, modelID string, label string) ([]
 	return options, nil
 }
 
+// CreateAgentProfile 使用 profile 参数新增 Profile。
+func (s *Store) CreateAgentProfile(profile AgentProfile) ([]AgentProfile, error) {
+	normalized, err := normalizeAgentProfile(profile)
+	if err != nil {
+		return nil, err
+	}
+	var profiles []AgentProfile
+	if err := s.commit(func(state *storeState) error {
+		if _, ok := AgentProfileByID(state.agentProfiles, normalized.ID); ok {
+			return fmt.Errorf("%w: Profile 已存在: %s", ErrInvalidInput, normalized.ID)
+		}
+		state.agentProfiles = append(state.agentProfiles, normalized)
+		profiles = cloneAgentProfiles(state.agentProfiles)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return profiles, nil
+}
+
+// UpdateAgentProfile 使用 profile 参数更新 Profile。
+func (s *Store) UpdateAgentProfile(profile AgentProfile) ([]AgentProfile, error) {
+	normalized, err := normalizeAgentProfile(profile)
+	if err != nil {
+		return nil, err
+	}
+	var profiles []AgentProfile
+	if err := s.commit(func(state *storeState) error {
+		for index := range state.agentProfiles {
+			if state.agentProfiles[index].ID != normalized.ID {
+				continue
+			}
+			state.agentProfiles[index] = normalized
+			applyProfileToChats(state, normalized)
+			profiles = cloneAgentProfiles(state.agentProfiles)
+			return nil
+		}
+		return ErrNotFound
+	}); err != nil {
+		return nil, err
+	}
+	return profiles, nil
+}
+
+// DeleteAgentProfile 使用 profileID 参数删除 Profile。
+func (s *Store) DeleteAgentProfile(profileID string) ([]AgentProfile, error) {
+	normalizedID := strings.TrimSpace(profileID)
+	if normalizedID == "" {
+		return nil, fmt.Errorf("%w: Profile ID 不能为空", ErrInvalidInput)
+	}
+	var profiles []AgentProfile
+	if err := s.commit(func(state *storeState) error {
+		index := -1
+		for itemIndex, profile := range state.agentProfiles {
+			if profile.ID == normalizedID {
+				index = itemIndex
+				break
+			}
+		}
+		if index < 0 {
+			return ErrNotFound
+		}
+		state.agentProfiles = append(state.agentProfiles[:index], state.agentProfiles[index+1:]...)
+		for chatID, chat := range state.chats {
+			if chat.AgentLocked || chat.AgentProvider != normalizedID {
+				continue
+			}
+			defaultAgent := defaultLastAgentSelection(AgentProviderOptionsFromProfiles(state.agentProfiles))
+			chat.AgentProvider = defaultAgent.Provider
+			chat.AgentModel = defaultAgent.Model
+			chat.AgentReasoning = defaultAgent.Reasoning
+			chat.AgentProfile = AgentProfile{}
+			chat.ContextWindow = estimateChatContextWindowUsage(chat)
+			chat.UpdatedAt = time.Now()
+			state.chats[chatID] = chat
+		}
+		profiles = cloneAgentProfiles(state.agentProfiles)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return profiles, nil
+}
+
+// AddAgentProfileModel 使用 profileID、modelID 和 label 参数新增模型。
+func (s *Store) AddAgentProfileModel(profileID string, modelID string, label string) ([]AgentProfile, error) {
+	normalizedModelID := strings.TrimSpace(modelID)
+	normalizedLabel := strings.TrimSpace(label)
+	if normalizedModelID == "" {
+		return nil, fmt.Errorf("%w: 模型标识不能为空", ErrInvalidInput)
+	}
+	if normalizedLabel == "" {
+		normalizedLabel = normalizedModelID
+	}
+	var profiles []AgentProfile
+	if err := s.commit(func(state *storeState) error {
+		profile, index, ok := profileByIDInState(state, profileID)
+		if !ok {
+			return ErrNotFound
+		}
+		for _, model := range profile.Models {
+			if model.ID == normalizedModelID {
+				return fmt.Errorf("%w: 模型已存在", ErrInvalidInput)
+			}
+		}
+		profile.Models = append(profile.Models, AgentModelOption{ID: normalizedModelID, Label: normalizedLabel})
+		normalized, err := normalizeAgentProfile(profile)
+		if err != nil {
+			return err
+		}
+		state.agentProfiles[index] = normalized
+		applyProfileToChats(state, normalized)
+		profiles = cloneAgentProfiles(state.agentProfiles)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return profiles, nil
+}
+
+// UpdateAgentProfileModel 使用 profileID、modelID、label 和 defaultModel 参数更新模型。
+func (s *Store) UpdateAgentProfileModel(profileID string, modelID string, label string, defaultModel bool) ([]AgentProfile, error) {
+	normalizedModelID := strings.TrimSpace(modelID)
+	normalizedLabel := strings.TrimSpace(label)
+	if normalizedModelID == "" {
+		return nil, fmt.Errorf("%w: 模型标识不能为空", ErrInvalidInput)
+	}
+	var profiles []AgentProfile
+	if err := s.commit(func(state *storeState) error {
+		profile, index, ok := profileByIDInState(state, profileID)
+		if !ok {
+			return ErrNotFound
+		}
+		modelIndex := -1
+		for itemIndex := range profile.Models {
+			if profile.Models[itemIndex].ID == normalizedModelID {
+				modelIndex = itemIndex
+				break
+			}
+		}
+		if modelIndex < 0 {
+			return ErrNotFound
+		}
+		if normalizedLabel != "" {
+			profile.Models[modelIndex].Label = normalizedLabel
+		}
+		if defaultModel {
+			for itemIndex := range profile.Models {
+				profile.Models[itemIndex].Default = itemIndex == modelIndex
+			}
+		}
+		normalized, err := normalizeAgentProfile(profile)
+		if err != nil {
+			return err
+		}
+		state.agentProfiles[index] = normalized
+		applyProfileToChats(state, normalized)
+		profiles = cloneAgentProfiles(state.agentProfiles)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return profiles, nil
+}
+
+// DeleteAgentProfileModel 使用 profileID 和 modelID 参数删除模型。
+func (s *Store) DeleteAgentProfileModel(profileID string, modelID string) ([]AgentProfile, error) {
+	normalizedModelID := strings.TrimSpace(modelID)
+	if normalizedModelID == "" {
+		return nil, fmt.Errorf("%w: 模型标识不能为空", ErrInvalidInput)
+	}
+	var profiles []AgentProfile
+	if err := s.commit(func(state *storeState) error {
+		profile, index, ok := profileByIDInState(state, profileID)
+		if !ok {
+			return ErrNotFound
+		}
+		modelIndex := -1
+		for itemIndex, model := range profile.Models {
+			if model.ID == normalizedModelID {
+				modelIndex = itemIndex
+				break
+			}
+		}
+		if modelIndex < 0 {
+			return ErrNotFound
+		}
+		if len(profile.Models) == 1 {
+			return fmt.Errorf("%w: Profile 至少需要一个模型", ErrInvalidInput)
+		}
+		profile.Models = append(profile.Models[:modelIndex], profile.Models[modelIndex+1:]...)
+		if !hasDefaultAgentModel(profile.Models) {
+			profile.Models[0].Default = true
+		}
+		normalized, err := normalizeAgentProfile(profile)
+		if err != nil {
+			return err
+		}
+		state.agentProfiles[index] = normalized
+		applyProfileToChats(state, normalized)
+		profiles = cloneAgentProfiles(state.agentProfiles)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return profiles, nil
+}
+
 // UpdateChatAgent 使用 chatID、provider、model 和 reasoning 参数更新聊天页 agent 配置。
 func (s *Store) UpdateChatAgent(chatID string, provider string, model string, reasoning string) (Chat, error) {
 	var chat Chat
 	if err := s.commit(func(state *storeState) error {
-		normalizedProvider, normalizedModel, normalizedReasoning, err := NormalizeAgentSelection(provider, model, reasoning, state.agentProviders)
-		if err != nil {
-			return err
-		}
 		var ok bool
 		chat, ok = state.chats[chatID]
 		if !ok {
 			return ErrNotFound
 		}
+		profiles := state.agentProfiles
+		if chat.AgentLocked && chat.AgentProfile.ID != "" {
+			profiles = []AgentProfile{chat.AgentProfile}
+			if currentProfile, ok := AgentProfileByID(state.agentProfiles, chat.AgentProvider); ok {
+				profiles = []AgentProfile{currentProfile}
+				chat.AgentProfile = currentProfile
+			}
+		}
+		options := AgentProviderOptionsFromProfiles(profiles)
+		normalizedProvider, normalizedModel, normalizedReasoning, err := NormalizeAgentSelection(provider, model, reasoning, options)
+		if err != nil {
+			return err
+		}
 		if chat.AgentLocked {
 			if chat.AgentProvider != normalizedProvider {
 				return fmt.Errorf("%w: agent 已锁定，不能切换 provider", ErrInvalidInput)
 			}
+		} else if profile, ok := AgentProfileByID(state.agentProfiles, normalizedProvider); ok {
+			chat.AgentProfile = profile
 		}
 		chat.AgentProvider = normalizedProvider
 		chat.AgentModel = normalizedModel
@@ -504,6 +729,15 @@ func (s *Store) AddRunMessages(chatID string, prompt string, images []MessageIma
 		chat, ok = state.chats[chatID]
 		if !ok {
 			return ErrNotFound
+		}
+		if !chat.AgentLocked {
+			profile, ok := AgentProfileByID(state.agentProfiles, chat.AgentProvider)
+			if !ok {
+				return fmt.Errorf("%w: Profile 不存在: %s", ErrInvalidInput, chat.AgentProvider)
+			}
+			chat.AgentProfile = profile
+		} else if currentProfile, ok := AgentProfileByID(state.agentProfiles, chat.AgentProvider); ok {
+			chat.AgentProfile = currentProfile
 		}
 		chat.Messages = append(chat.Messages, userMessage, assistantMessage)
 		if len(chat.Messages) == 2 {
@@ -893,7 +1127,8 @@ func (s *Store) Snapshot() Snapshot {
 	for _, chat := range s.chats {
 		chats = append(chats, cloneChat(chat))
 	}
-	agentProviders := cloneAgentProviderOptions(s.agentProviders)
+	agentProfiles := cloneAgentProfiles(s.agentProfiles)
+	agentProviders := AgentProviderOptionsFromProfiles(agentProfiles)
 	lastAgent := s.lastAgent
 	s.mu.RUnlock()
 
@@ -912,6 +1147,8 @@ func (s *Store) Snapshot() Snapshot {
 		Projects:           projects,
 		Chats:              chats,
 		AgentProviders:     agentProviders,
+		AgentProfiles:      agentProfiles,
+		BackendEnv:         BackendEnvSnapshot(),
 		AgentSkills:        LoadAgentSkillOptions(projectPaths),
 		LastAgentSelection: lastAgent,
 	}

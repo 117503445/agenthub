@@ -23,6 +23,10 @@ import { chatVisualStatus, mergeProjectVisualStatus, sortByCreatedAt, upsertById
 import { parseHashRoute, updateHashRoute, updateSettingsHashRoute } from './lib/routes'
 import type {
   AgentProvider,
+  AgentProfile,
+  AgentProfilesChangedPayload,
+  BackendEnvVar,
+  AgentBuiltinProfileKind,
   AgentProvidersChangedPayload,
   AgentSkillsChangedPayload,
   AgentSkillOption,
@@ -62,6 +66,8 @@ function App() {
   const [projects, setProjects] = useState<Project[]>([])
   const [chats, setChats] = useState<Chat[]>([])
   const [agentProviders, setAgentProviders] = useState(fallbackAgentProviders)
+  const [agentProfiles, setAgentProfiles] = useState<AgentProfile[]>([])
+  const [backendEnv, setBackendEnv] = useState<BackendEnvVar[]>([])
   const [agentSkills, setAgentSkills] = useState<AgentSkillOption[]>([])
   const [chatIndicators, setChatIndicators] = useState<Record<string, ChatTerminalIndicator>>({})
   const [routeView, setRouteView] = useState<'chat' | 'settings'>(() => parseHashRoute().view)
@@ -70,6 +76,7 @@ function App() {
   const [projectFormId, setProjectFormId] = useState('')
   const [projectPath, setProjectPath] = useState('')
   const [projectDialogOpen, setProjectDialogOpen] = useState(false)
+  const [selectedSettingsProfileId, setSelectedSettingsProfileId] = useState('')
   const [newClaudeModelID, setNewClaudeModelID] = useState('')
   const [newClaudeModelLabel, setNewClaudeModelLabel] = useState('')
   const [composerValues, setComposerValues] = useState<Record<string, string>>({})
@@ -97,15 +104,22 @@ function App() {
   const selectedPlanMode = selectedChat ? (planModes[selectedChat.id] ?? false) : false
   const isRunning = selectedChat?.status === 'running'
   const selectedAgentProvider = selectedChat?.agentProvider ?? 'claude-code'
-  const selectedAgentModels = agentProviders.find((provider) => provider.id === selectedAgentProvider)?.models ?? []
-  const selectedAgentModel = selectedChat?.agentModel ?? defaultModelForProvider(agentProviders, selectedAgentProvider)
+  const chatBoundAgentProvider = selectedChat?.agentProfile
+    ? { id: selectedChat.agentProfile.id, label: selectedChat.agentProfile.label, models: selectedChat.agentProfile.models }
+    : null
+  const visibleAgentProviders =
+    chatBoundAgentProvider && !agentProviders.some((provider) => provider.id === chatBoundAgentProvider.id)
+      ? [...agentProviders, chatBoundAgentProvider]
+      : agentProviders
+  const selectedAgentModels = visibleAgentProviders.find((provider) => provider.id === selectedAgentProvider)?.models ?? []
+  const selectedAgentModel = selectedChat?.agentModel ?? defaultModelForProvider(visibleAgentProviders, selectedAgentProvider)
   const selectedAgentModelOption = selectedAgentModels.find((model) => model.id === selectedAgentModel) ?? null
   const selectedAgentReasoning =
-    selectedChat?.agentReasoning || defaultReasoningForModel(agentProviders, selectedAgentProvider, selectedAgentModel)
+    selectedChat?.agentReasoning || defaultReasoningForModel(visibleAgentProviders, selectedAgentProvider, selectedAgentModel)
   const providerLocked = chatHasStarted(selectedChat) || isRunning
   const agentControlsDisabled = !selectedChat || connectionState !== 'open'
   const modelControlsDisabled = agentControlsDisabled || isRunning
-  const claudeCodeModels = agentProviders.find((provider) => provider.id === 'claude-code')?.models ?? []
+  const selectedSettingsProfile = agentProfiles.find((profile) => profile.id === selectedSettingsProfileId) ?? agentProfiles[0] ?? null
   const projectVisualStatuses = useMemo(() => {
     const statuses = new Map<string, ChatVisualStatus>()
     for (const chat of chats) {
@@ -121,6 +135,16 @@ function App() {
   useEffect(() => {
     chatsRef.current = chats
   }, [chats])
+
+  useEffect(() => {
+    if (!agentProfiles.length) {
+      setSelectedSettingsProfileId('')
+      return
+    }
+    if (!selectedSettingsProfileId || !agentProfiles.some((profile) => profile.id === selectedSettingsProfileId)) {
+      setSelectedSettingsProfileId(agentProfiles[0].id)
+    }
+  }, [agentProfiles, selectedSettingsProfileId])
 
   useEffect(() => {
     let stopped = false
@@ -424,7 +448,9 @@ function App() {
         const nextProjects = sortByCreatedAt(payload.projects ?? [])
         const nextChats = sortByCreatedAt((payload.chats ?? []).map(normalizeChat))
         const nextChatIds = new Set(nextChats.map((chat) => chat.id))
-        setAgentProviders(payload.agentProviders?.length ? payload.agentProviders : fallbackAgentProviders)
+        setAgentProviders(payload.agentProviders ?? fallbackAgentProviders)
+        setAgentProfiles(payload.agentProfiles ?? [])
+        setBackendEnv(payload.backendEnv ?? [])
         setAgentSkills(payload.agentSkills ?? [])
         setProjects(nextProjects)
         setChats(nextChats)
@@ -563,7 +589,15 @@ function App() {
       }
       if (message.type === 'agent.providers.changed') {
         const payload = message.payload as AgentProvidersChangedPayload
-        setAgentProviders(payload.agentProviders?.length ? payload.agentProviders : fallbackAgentProviders)
+        setAgentProviders(payload.agentProviders ?? fallbackAgentProviders)
+        setNewClaudeModelID('')
+        setNewClaudeModelLabel('')
+        return
+      }
+      if (message.type === 'agent.profiles.changed') {
+        const payload = message.payload as AgentProfilesChangedPayload
+        setAgentProfiles(payload.agentProfiles ?? [])
+        setAgentProviders(payload.agentProviders ?? [])
         setNewClaudeModelID('')
         setNewClaudeModelLabel('')
         return
@@ -736,14 +770,14 @@ function App() {
 
   // changeAgentProvider 使用 provider 参数切换当前聊天页 agent。
   const changeAgentProvider = (provider: AgentProvider) => {
-    const model = defaultModelForProvider(agentProviders, provider)
-    const reasoning = defaultReasoningForModel(agentProviders, provider, model)
+    const model = defaultModelForProvider(visibleAgentProviders, provider)
+    const reasoning = defaultReasoningForModel(visibleAgentProviders, provider, model)
     updateChatAgent(provider, model, reasoning)
   }
 
   // changeAgentModel 使用 model 参数切换当前聊天页模型。
   const changeAgentModel = (model: string) => {
-    const reasoning = defaultReasoningForModel(agentProviders, selectedAgentProvider, model)
+    const reasoning = defaultReasoningForModel(visibleAgentProviders, selectedAgentProvider, model)
     updateChatAgent(selectedAgentProvider, model, reasoning)
   }
 
@@ -764,11 +798,43 @@ function App() {
     updateHashRoute(selectedProject?.id ?? '', selectedChat?.id ?? '', 'push')
   }
 
-  // addClaudeModel 处理 event 参数对应的 Claude Code 模型新增提交。
-  const addClaudeModel = (event: FormEvent<HTMLFormElement>) => {
+  // createAgentProfile 新增一个自定义 Codex Profile。
+  const createAgentProfile = () => {
+    const suffix = Date.now().toString(36)
+    sendClientMessage(wsRef.current, 'agent.profile.create', {
+      id: `profile-${suffix}`,
+      label: '新 Profile',
+      type: 'codex',
+      command: 'codex',
+      args: [],
+      env: [],
+      models: [{ id: 'gpt-5.5', label: 'GPT-5.5', default: true }],
+    })
+  }
+
+  // saveAgentProfile 使用 profile 参数保存 Profile。
+  const saveAgentProfile = (profile: AgentProfile) => {
+    sendClientMessage(wsRef.current, 'agent.profile.update', profile)
+  }
+
+  // deleteAgentProfile 使用 profileId 参数删除 Profile。
+  const deleteAgentProfile = (profileId: string) => {
+    sendClientMessage(wsRef.current, 'agent.profile.delete', { id: profileId })
+  }
+
+  // addBuiltinProfile 使用 kind 参数新增内置 Profile。
+  const addBuiltinProfile = (kind: AgentBuiltinProfileKind) => {
+    sendClientMessage(wsRef.current, 'agent.profile.add_builtin', { kind })
+  }
+
+  // addProfileModel 处理 event 参数对应的 Profile 模型新增提交。
+  const addProfileModel = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    sendClientMessage(wsRef.current, 'agent.model.add', {
-      provider: 'claude-code',
+    if (!selectedSettingsProfile) {
+      return
+    }
+    sendClientMessage(wsRef.current, 'agent.profile.model.add', {
+      profileId: selectedSettingsProfile.id,
       id: newClaudeModelID.trim(),
       label: newClaudeModelLabel.trim(),
     })
@@ -930,13 +996,20 @@ function App() {
             connectionState={connectionState}
             backendVersion={backendVersion}
             hostname={hostname}
-            claudeCodeModels={claudeCodeModels}
+            agentProfiles={agentProfiles}
+            backendEnv={backendEnv}
+            selectedProfileId={selectedSettingsProfile?.id ?? ''}
             newClaudeModelID={newClaudeModelID}
             newClaudeModelLabel={newClaudeModelLabel}
             onBackToChat={backToChat}
+            onProfileSelect={setSelectedSettingsProfileId}
+            onProfileCreate={createAgentProfile}
+            onProfileSave={saveAgentProfile}
+            onProfileDelete={deleteAgentProfile}
+            onBuiltinAdd={addBuiltinProfile}
             onModelIDChange={setNewClaudeModelID}
             onModelLabelChange={setNewClaudeModelLabel}
-            onAddClaudeModel={addClaudeModel}
+            onAddProfileModel={addProfileModel}
           />
         ) : (
           <ChatWorkspace
@@ -951,7 +1024,7 @@ function App() {
             planMode={selectedPlanMode}
             copiedMessageId={copiedMessageId}
             isRunning={isRunning}
-            agentProviders={agentProviders}
+            agentProviders={visibleAgentProviders}
             agentSkills={agentSkills}
             selectedAgentProvider={selectedAgentProvider}
             selectedAgentModels={selectedAgentModels}

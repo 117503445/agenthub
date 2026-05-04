@@ -1,4 +1,4 @@
-import type { AgentProvider, AgentProviderOption, Chat } from '../types'
+import type { AgentEnvVar, AgentProvider, AgentProviderOption, BackendEnvVar, Chat } from '../types'
 
 export const fallbackAgentProviders: AgentProviderOption[] = [
   {
@@ -58,8 +58,33 @@ export function normalizeChat(chat: Chat) {
     agentModel: chat.agentModel ?? 'sonnet',
     agentReasoning: chat.agentReasoning ?? '',
     agentLocked: chat.agentLocked ?? (chat.messages?.length ?? 0) > 0,
+    agentProfile: chat.agentProfile,
     contextWindow: chat.contextWindow,
     plan: chat.plan,
     messages: chat.messages ?? [],
   }
+}
+
+// effectiveEnvForProfile 使用 backendEnv 和 profileEnv 参数计算 Profile 实际环境变量。
+export function effectiveEnvForProfile(backendEnv: BackendEnvVar[], profileEnv: AgentEnvVar[]) {
+  const env = new Map<string, string>()
+  for (const item of backendEnv) {
+    if (item.name.trim()) {
+      env.set(item.name, item.value)
+    }
+  }
+  for (const item of profileEnv) {
+    const name = item.name.trim()
+    if (!name) {
+      continue
+    }
+    if (item.unset) {
+      env.delete(name)
+      continue
+    }
+    env.set(name, item.value ?? '')
+  }
+  return Array.from(env.entries())
+    .map(([name, value]) => ({ name, value }))
+    .sort((left, right) => left.name.localeCompare(right.name))
 }

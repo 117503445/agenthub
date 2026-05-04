@@ -156,16 +156,30 @@ func TestMockAgentEnvUsesBackendMockService(t *testing.T) {
 	t.Setenv("OPENAI_BASE_URL", "https://real-openai.example/v1")
 	t.Setenv("OPENAI_API_KEY", "real-openai-key")
 
-	manager := NewAgentManager(context.Background(), AgentConfig{
+	profiles := AgentProfiles(AgentOptionsConfig{
+		EnableMockAgent:      true,
 		MockAnthropicBaseURL: "http://127.0.0.1:6767/mock/anthropic",
 		MockAnthropicAPIKey:  "mock-anthropic-key",
 		MockOpenAIBaseURL:    "http://127.0.0.1:6767/mock/openai/v1",
 		MockOpenAIAPIKey:     "mock-openai-key",
 	})
+	claudeProfile, ok := AgentProfileByID(profiles, AgentProviderMockClaudeCode)
+	if !ok {
+		t.Fatal("测试缺少 Mock Claude Profile")
+	}
+	codexProfile, ok := AgentProfileByID(profiles, AgentProviderMockCodex)
+	if !ok {
+		t.Fatal("测试缺少 Mock Codex Profile")
+	}
+	manager := NewAgentManager(context.Background(), AgentConfig{
+		AgentProfiles: profiles,
+		BackendEnv:    BackendEnvSnapshot(),
+	})
 
 	claudeRuntime := &AgentRuntime{
 		manager:  manager,
 		provider: AgentProviderMockClaudeCode,
+		profile:  claudeProfile,
 		model:    "mock-claude-sonnet",
 	}
 	claudeEnv := envListMap(claudeRuntime.childEnv())
@@ -179,6 +193,7 @@ func TestMockAgentEnvUsesBackendMockService(t *testing.T) {
 	codexRuntime := &AgentRuntime{
 		manager:  manager,
 		provider: AgentProviderMockCodex,
+		profile:  codexProfile,
 		model:    "mock-codex-gpt-5.5",
 	}
 	codexEnv := envListMap(codexRuntime.codexEnv())

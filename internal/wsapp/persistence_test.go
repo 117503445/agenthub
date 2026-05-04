@@ -19,7 +19,7 @@ func (f failingStorePersister) Save(state PersistedStoreState) error {
 // TestPersistentStoreSaveLoad 验证 Store 状态可保存并从 JSON 恢复。
 func TestPersistentStoreSaveLoad(t *testing.T) {
 	dataDir := t.TempDir()
-	store, err := NewPersistentStore(dataDir, DefaultAgentProviderOptions())
+	store, err := NewPersistentStore(dataDir, AgentProfiles(AgentOptionsConfig{}))
 	if err != nil {
 		t.Fatalf("创建持久化 Store 失败: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestPersistentStoreSaveLoad(t *testing.T) {
 		t.Fatalf("状态文件未写入: %v", err)
 	}
 
-	loaded, err := NewPersistentStore(dataDir, DefaultAgentProviderOptions())
+	loaded, err := NewPersistentStore(dataDir, AgentProfiles(AgentOptionsConfig{}))
 	if err != nil {
 		t.Fatalf("加载持久化 Store 失败: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestPersistentStoreSaveFailureKeepsMemory(t *testing.T) {
 		projects:        make(map[string]Project),
 		chats:           make(map[string]Chat),
 		nextChatOrdinal: make(map[string]int),
-		agentProviders:  DefaultAgentProviderOptions(),
+		agentProfiles:   AgentProfiles(AgentOptionsConfig{}),
 		lastAgent:       defaultLastAgentSelection(DefaultAgentProviderOptions()),
 	}, failingStorePersister{})
 
@@ -124,14 +124,14 @@ func TestPersistentStoreNormalizesRunningState(t *testing.T) {
 	if err := persister.Save(PersistedStoreState{
 		Projects:           []Project{project},
 		Chats:              []Chat{chat},
-		AgentProviders:     DefaultAgentProviderOptions(),
+		AgentProfiles:      AgentProfiles(AgentOptionsConfig{EnableMockAgent: true}),
 		LastAgentSelection: defaultLastAgentSelection(DefaultAgentProviderOptions()),
 		NextChatOrdinal:    map[string]int{project.ID: 1},
 	}); err != nil {
 		t.Fatalf("写入测试状态失败: %v", err)
 	}
 
-	store, err := NewPersistentStore(dataDir, DefaultAgentProviderOptions())
+	store, err := NewPersistentStore(dataDir, AgentProfiles(AgentOptionsConfig{EnableMockAgent: true}))
 	if err != nil {
 		t.Fatalf("加载持久化 Store 失败: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestPersistentStoreInvalidJSON(t *testing.T) {
 	if err := os.WriteFile(statePath, []byte("{invalid json"), 0600); err != nil {
 		t.Fatalf("写入非法 JSON 失败: %v", err)
 	}
-	if _, err := NewPersistentStore(dataDir, DefaultAgentProviderOptions()); err == nil {
+	if _, err := NewPersistentStore(dataDir, AgentProfiles(AgentOptionsConfig{})); err == nil {
 		t.Fatalf("非法 JSON 应导致加载失败")
 	}
 	data, err := os.ReadFile(statePath)

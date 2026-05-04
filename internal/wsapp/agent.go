@@ -36,6 +36,8 @@ type AgentConfig struct {
 	MockOpenAIBaseURL    string                // MockOpenAIBaseURL 表示 Mock Codex 固定使用的后端 OpenAI 兼容接口地址。
 	MockOpenAIAPIKey     string                // MockOpenAIAPIKey 表示 Mock Codex 使用的 API Key。
 	AgentProviders       []AgentProviderOption // AgentProviders 表示可用 agent 和模型选项。
+	AgentProfiles        []AgentProfile        // AgentProfiles 表示可用 Profile 配置。
+	BackendEnv           []BackendEnvVar       // BackendEnv 表示后端启动时捕获的环境变量。
 }
 
 // AgentRunCallbacks 表示一次 agent 运行中的回调。
@@ -53,6 +55,7 @@ type AgentRunInput struct {
 	ChatID             string            // ChatID 表示聊天页标识。
 	ProjectPath        string            // ProjectPath 表示 agent 子进程工作目录。
 	Provider           string            // Provider 表示 agent provider。
+	Profile            AgentProfile      // Profile 表示本次运行绑定的 Profile 配置。
 	Model              string            // Model 表示 agent 模型。
 	Reasoning          string            // Reasoning 表示 agent 推理级别。
 	Prompt             string            // Prompt 表示用户输入。
@@ -78,6 +81,7 @@ type AgentRuntime struct {
 	cancel               context.CancelFunc
 	chatID               string
 	provider             string
+	profile              AgentProfile
 	model                string
 	reasoning            string
 	planMode             bool
@@ -113,11 +117,19 @@ func NewAgentManager(ctx context.Context, config AgentConfig) *AgentManager {
 	if strings.TrimSpace(config.AnthropicModel) == "" {
 		config.AnthropicModel = DefaultAgentModel(AgentProviderClaudeCode, DefaultAgentProviderOptions())
 	}
-	if len(config.AgentProviders) == 0 {
-		config.AgentProviders = AgentProviderOptions(AgentOptionsConfig{
+	if len(config.AgentProfiles) == 0 && len(config.AgentProviders) > 0 {
+		config.AgentProfiles = AgentProfilesFromProviderOptions(config.AgentProviders)
+	}
+	if len(config.AgentProfiles) == 0 {
+		config.AgentProfiles = AgentProfiles(AgentOptionsConfig{
 			ClaudeDefaultModel: config.AnthropicModel,
 			CodexDefaultEffort: "xhigh",
 		})
+	}
+	config.AgentProfiles = normalizeAgentProfiles(config.AgentProfiles)
+	config.AgentProviders = AgentProviderOptionsFromProfiles(config.AgentProfiles)
+	if len(config.BackendEnv) == 0 {
+		config.BackendEnv = BackendEnvSnapshot()
 	}
 	return &AgentManager{
 		ctx:      ctx,
@@ -128,34 +140,45 @@ func NewAgentManager(ctx context.Context, config AgentConfig) *AgentManager {
 
 // Send 使用 input 参数把 prompt 发送到聊天页对应的 agent runtime。
 func (m *AgentManager) Send(ctx context.Context, input AgentRunInput) error {
-	provider, model, reasoning, err := NormalizeAgentSelection(input.Provider, input.Model, input.Reasoning, m.agentProviders())
+	profile, ok := input.Profile, strings.TrimSpace(input.Profile.ID) != ""
+	if !ok {
+		var found bool
+		profile, found = AgentProfileByID(m.agentProfiles(), input.Provider)
+		if !found {
+			return fmt.Errorf("%w: Profile 不存在: %s", ErrInvalidInput, input.Provider)
+		}
+	}
+	options := AgentProviderOptionsFromProfiles([]AgentProfile{profile})
+	provider, model, reasoning, err := NormalizeAgentSelection(input.Provider, input.Model, input.Reasoning, options)
 	if err != nil {
 		return err
 	}
 	input.Provider = provider
+	input.Profile = profile
 	input.Model = model
 	input.Reasoning = reasoning
 
-	switch provider {
-	case AgentProviderCodex, AgentProviderMockCodex:
+	switch profile.Type {
+	case AgentProfileTypeCodex:
 		return m.sendCodex(ctx, input)
 	default:
 		return m.sendClaude(ctx, input)
 	}
 }
 
-// SetAgentProviders 使用 options 参数更新 agent 可选项。
-func (m *AgentManager) SetAgentProviders(options []AgentProviderOption) {
+// SetAgentProfiles 使用 profiles 参数更新 agent 可用 Profile。
+func (m *AgentManager) SetAgentProfiles(profiles []AgentProfile) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.config.AgentProviders = cloneAgentProviderOptions(options)
+	m.config.AgentProfiles = cloneAgentProfiles(profiles)
+	m.config.AgentProviders = AgentProviderOptionsFromProfiles(profiles)
 }
 
-// agentProviders 返回当前 agent 可选项副本。
-func (m *AgentManager) agentProviders() []AgentProviderOption {
+// agentProfiles 返回当前 agent 可用 Profile 副本。
+func (m *AgentManager) agentProfiles() []AgentProfile {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return cloneAgentProviderOptions(m.config.AgentProviders)
+	return cloneAgentProfiles(m.config.AgentProfiles)
 }
 
 // sendClaude 使用 input 参数把 prompt 发送到聊天页对应的 Claude runtime。
@@ -180,7 +203,7 @@ func (m *AgentManager) sendClaude(ctx context.Context, input AgentRunInput) erro
 	runtime.mu.Unlock()
 
 	prompt := agentPrompt(input.Prompt, input.Images)
-	if runtime.provider == AgentProviderMockClaudeCode && input.PlanMode {
+	if runtime.profile.Mock && input.PlanMode {
 		prompt = planModePrompt(prompt)
 	}
 	line, err := buildClaudeUserMessage(prompt, input.Images, sessionID)
@@ -238,6 +261,7 @@ func (m *AgentManager) registerEphemeralRuntime(input AgentRunInput) (*AgentRunt
 		cancel:               cancel,
 		chatID:               input.ChatID,
 		provider:             input.Provider,
+		profile:              input.Profile,
 		model:                input.Model,
 		reasoning:            input.Reasoning,
 		planMode:             input.PlanMode,
@@ -266,6 +290,7 @@ func (m *AgentManager) ensureRuntime(ctx context.Context, input AgentRunInput) (
 	existing := m.runtimes[input.ChatID]
 	if existing != nil &&
 		existing.provider == input.Provider &&
+		existing.profileSignature() == agentProfileSignature(input.Profile) &&
 		existing.model == input.Model &&
 		existing.reasoning == input.Reasoning &&
 		existing.planMode == input.PlanMode &&
@@ -286,6 +311,7 @@ func (m *AgentManager) ensureRuntime(ctx context.Context, input AgentRunInput) (
 		cancel:      cancel,
 		chatID:      input.ChatID,
 		provider:    input.Provider,
+		profile:     input.Profile,
 		model:       input.Model,
 		reasoning:   input.Reasoning,
 		planMode:    input.PlanMode,
@@ -319,10 +345,26 @@ func (m *AgentManager) removeRuntime(chatID string, runtime *AgentRuntime) {
 func (r *AgentRuntime) isAlive() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.provider == AgentProviderCodex || r.provider == AgentProviderMockCodex {
+	if r.profile.Type == AgentProfileTypeCodex {
 		return r.running
 	}
 	return r.cmd != nil && r.cmd.Process != nil && r.cmd.ProcessState == nil && r.stdin != nil
+}
+
+// profileSignature 返回当前 runtime 绑定 Profile 的稳定签名。
+func (r *AgentRuntime) profileSignature() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return agentProfileSignature(r.profile)
+}
+
+// agentProfileSignature 使用 profile 参数生成用于判断 runtime 是否需要重启的签名。
+func agentProfileSignature(profile AgentProfile) string {
+	data, err := json.Marshal(profile)
+	if err != nil {
+		return profile.ID
+	}
+	return string(data)
 }
 
 // start 使用 ctx 参数启动 Claude 子进程。
@@ -332,10 +374,7 @@ func (r *AgentRuntime) start(ctx context.Context) error {
 		args = append(args, "--resume", r.sessionID)
 	}
 
-	command := r.manager.config.Command
-	if r.provider == AgentProviderMockClaudeCode {
-		command = r.manager.config.MockClaudeCommand
-	}
+	command := r.profile.Command
 	cmd := exec.CommandContext(r.ctx, command, args...)
 	cmd.Dir = r.projectPath
 	cmd.Env = r.childEnv()
@@ -383,7 +422,8 @@ func (r *AgentRuntime) start(ctx context.Context) error {
 
 // claudeArgs 返回当前 Claude runtime 的启动参数。
 func (r *AgentRuntime) claudeArgs() []string {
-	args := []string{
+	args := append([]string{}, r.profile.Args...)
+	args = append(args,
 		"--print",
 		"--input-format", "stream-json",
 		"--output-format", "stream-json",
@@ -391,23 +431,20 @@ func (r *AgentRuntime) claudeArgs() []string {
 		"--replay-user-messages",
 		"--verbose",
 		"--model", r.model,
-	}
+	)
 	if r.planMode {
 		args = append(args, "--permission-mode", "plan")
 	}
-	if r.provider == AgentProviderMockClaudeCode {
-		return append([]string{"--bare", "--setting-sources", "local"}, args...)
+	if r.profile.Mock {
+		return args
 	}
 	return append([]string{"--dangerously-skip-permissions"}, args...)
 }
 
 // startCodex 使用 ctx 参数启动 Codex CLI 单轮运行。
 func (r *AgentRuntime) startCodex(ctx context.Context, prompt string, images []MessageImage) error {
-	args := []string{"exec"}
+	args := append([]string{"exec"}, r.profile.Args...)
 	resumeSessionID := strings.TrimSpace(r.sessionID)
-	if r.provider == AgentProviderMockCodex {
-		args = append(args, r.mockCodexConfigArgs()...)
-	}
 	if strings.TrimSpace(r.reasoning) != "" {
 		args = append(args, "-c", fmt.Sprintf("model_reasoning_effort=%q", r.reasoning))
 	}
@@ -432,10 +469,7 @@ func (r *AgentRuntime) startCodex(ctx context.Context, prompt string, images []M
 	}
 	args = append(args, prompt)
 
-	command := r.manager.config.CodexCommand
-	if r.provider == AgentProviderMockCodex {
-		command = r.manager.config.MockCodexCommand
-	}
+	command := r.profile.Command
 	cmd := exec.CommandContext(r.ctx, command, args...)
 	cmd.Dir = r.projectPath
 	cmd.Env = r.codexEnv()
@@ -548,72 +582,12 @@ func splitMockAgentResponse(text string) []string {
 
 // childEnv 返回当前 runtime 子进程使用的环境变量。
 func (r *AgentRuntime) childEnv() []string {
-	env := map[string]string{}
-	for _, pair := range os.Environ() {
-		key, value, ok := strings.Cut(pair, "=")
-		if ok {
-			env[key] = value
-		}
-	}
-	for _, key := range []string{
-		"CLAUDECODE",
-		"CLAUDE_CODE_ENTRYPOINT",
-		"CLAUDE_CODE_SSE_PORT",
-		"CLAUDE_AGENT_SDK_VERSION",
-		"CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING",
-	} {
-		delete(env, key)
-	}
-	env["IS_SANDBOX"] = "1"
-	env["ANTHROPIC_MODEL"] = r.model
-	if baseURL := r.anthropicBaseURL(); baseURL != "" {
-		env["ANTHROPIC_BASE_URL"] = baseURL
-		env["CLAUDE_CODE_API_BASE_URL"] = baseURL
-	}
-	if apiKey := r.anthropicAPIKey(); apiKey != "" {
-		env["ANTHROPIC_API_KEY"] = apiKey
-	}
-	if r.provider == AgentProviderMockClaudeCode {
-		env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
-	}
-	env["DISABLE_AUTOUPDATER"] = "1"
-
-	result := make([]string, 0, len(env))
-	for key, value := range env {
-		result = append(result, key+"="+value)
-	}
-	return result
+	return EffectiveAgentEnvList(r.manager.config.BackendEnv, r.profile)
 }
 
 // codexEnv 返回当前 Codex runtime 子进程使用的环境变量。
 func (r *AgentRuntime) codexEnv() []string {
-	env := map[string]string{}
-	for _, pair := range os.Environ() {
-		key, value, ok := strings.Cut(pair, "=")
-		if ok {
-			env[key] = value
-		}
-	}
-	if r.provider == AgentProviderMockCodex {
-		if baseURL := r.codexBaseURL(); baseURL != "" {
-			env["OPENAI_BASE_URL"] = baseURL
-		}
-		if apiKey := r.codexAPIKey(); apiKey != "" {
-			env["OPENAI_API_KEY"] = apiKey
-		}
-		if baseURL := r.mockAnthropicBaseURL(); baseURL != "" {
-			env["ANTHROPIC_BASE_URL"] = baseURL
-		}
-		if apiKey := r.mockAnthropicAPIKey(); apiKey != "" {
-			env["ANTHROPIC_API_KEY"] = apiKey
-		}
-	}
-
-	result := make([]string, 0, len(env))
-	for key, value := range env {
-		result = append(result, key+"="+value)
-	}
-	return result
+	return EffectiveAgentEnvList(r.manager.config.BackendEnv, r.profile)
 }
 
 // mockCodexConfigArgs 返回 mock Codex 使用的真实 CLI 配置参数。
@@ -635,59 +609,52 @@ func (r *AgentRuntime) mockCodexConfigArgs() []string {
 
 // codexBaseURL 返回 mock Codex 使用的 OpenAI 兼容接口地址。
 func (r *AgentRuntime) codexBaseURL() string {
-	baseURL := strings.TrimRight(strings.TrimSpace(r.manager.config.OpenAIBaseURL), "/")
-	if r.provider == AgentProviderMockCodex {
-		baseURL = strings.TrimRight(strings.TrimSpace(r.manager.config.MockOpenAIBaseURL), "/")
+	if value := r.effectiveEnvValue("OPENAI_BASE_URL"); value != "" {
+		return strings.TrimRight(value, "/")
 	}
-	if baseURL != "" {
-		return baseURL
-	}
-	anthropicBaseURL := strings.TrimRight(strings.TrimSpace(r.manager.config.AnthropicBaseURL), "/")
-	if r.provider == AgentProviderMockCodex {
-		anthropicBaseURL = r.mockAnthropicBaseURL()
-	}
-	if strings.HasSuffix(anthropicBaseURL, "/mock/anthropic") {
-		return strings.TrimSuffix(anthropicBaseURL, "/mock/anthropic") + "/mock/openai/v1"
+	if value := r.effectiveEnvValue("ANTHROPIC_BASE_URL"); strings.HasSuffix(value, "/mock/anthropic") {
+		return strings.TrimSuffix(value, "/mock/anthropic") + "/mock/openai/v1"
 	}
 	return ""
 }
 
 // anthropicBaseURL 返回当前 Claude runtime 使用的 Anthropic 兼容接口地址。
 func (r *AgentRuntime) anthropicBaseURL() string {
-	if r.provider == AgentProviderMockClaudeCode {
-		return r.mockAnthropicBaseURL()
-	}
-	return strings.TrimRight(strings.TrimSpace(r.manager.config.AnthropicBaseURL), "/")
+	return strings.TrimRight(r.effectiveEnvValue("ANTHROPIC_BASE_URL"), "/")
 }
 
 // anthropicAPIKey 返回当前 Claude runtime 使用的 API Key。
 func (r *AgentRuntime) anthropicAPIKey() string {
-	if r.provider == AgentProviderMockClaudeCode {
-		return r.mockAnthropicAPIKey()
-	}
-	return strings.TrimSpace(r.manager.config.AnthropicAPIKey)
+	return strings.TrimSpace(r.effectiveEnvValue("ANTHROPIC_API_KEY"))
 }
 
 // mockAnthropicBaseURL 返回 Mock Claude 使用的后端 mock 地址。
 func (r *AgentRuntime) mockAnthropicBaseURL() string {
-	return strings.TrimRight(strings.TrimSpace(r.manager.config.MockAnthropicBaseURL), "/")
+	return strings.TrimRight(r.effectiveEnvValue("ANTHROPIC_BASE_URL"), "/")
 }
 
 // mockAnthropicAPIKey 返回 Mock Claude 使用的 API Key。
 func (r *AgentRuntime) mockAnthropicAPIKey() string {
-	return strings.TrimSpace(r.manager.config.MockAnthropicAPIKey)
+	return strings.TrimSpace(r.effectiveEnvValue("ANTHROPIC_API_KEY"))
 }
 
 // codexAPIKey 返回 Mock Codex 使用的 API Key。
 func (r *AgentRuntime) codexAPIKey() string {
-	apiKey := strings.TrimSpace(r.manager.config.OpenAIAPIKey)
-	if r.provider == AgentProviderMockCodex {
-		apiKey = strings.TrimSpace(r.manager.config.MockOpenAIAPIKey)
-	}
+	apiKey := strings.TrimSpace(r.effectiveEnvValue("OPENAI_API_KEY"))
 	if apiKey == "" {
 		apiKey = r.mockAnthropicAPIKey()
 	}
 	return apiKey
+}
+
+// effectiveEnvValue 使用 name 参数读取当前 Profile 叠加后的环境变量值。
+func (r *AgentRuntime) effectiveEnvValue(name string) string {
+	for _, item := range EffectiveAgentEnv(r.manager.config.BackendEnv, r.profile) {
+		if item.Name == name {
+			return item.Value
+		}
+	}
+	return ""
 }
 
 // scanStdout 使用 stdout 参数读取并解析 Claude JSON 行输出。

@@ -12,7 +12,7 @@ import (
 
 const (
 	// persistedStoreSchemaVersion 表示当前 state.json 格式版本。
-	persistedStoreSchemaVersion = 1
+	persistedStoreSchemaVersion = 2
 	// persistedStateFileName 表示状态文件名。
 	persistedStateFileName = "state.json"
 )
@@ -23,6 +23,7 @@ type PersistedStoreState struct {
 	Projects           []Project             `json:"projects"`           // Projects 表示 project 列表。
 	Chats              []Chat                `json:"chats"`              // Chats 表示聊天页列表。
 	AgentProviders     []AgentProviderOption `json:"agentProviders"`     // AgentProviders 表示可选 agent 和模型。
+	AgentProfiles      []AgentProfile        `json:"agentProfiles"`      // AgentProfiles 表示可编辑 Profile 列表。
 	LastAgentSelection LastAgentSelection    `json:"lastAgentSelection"` // LastAgentSelection 表示新聊天页默认 agent 配置。
 	NextChatOrdinal    map[string]int        `json:"nextChatOrdinal"`    // NextChatOrdinal 表示每个 project 的聊天页序号。
 }
@@ -32,13 +33,13 @@ type JSONStorePersister struct {
 	statePath string // statePath 表示 state.json 文件路径。
 }
 
-// NewPersistentStore 使用 dataDir 和 agentProviders 参数创建带 JSON 持久化的 Store。
-func NewPersistentStore(dataDir string, agentProviders []AgentProviderOption) (*Store, error) {
-	if len(agentProviders) == 0 {
-		agentProviders = DefaultAgentProviderOptions()
+// NewPersistentStore 使用 dataDir 和 agentProfiles 参数创建带 JSON 持久化的 Store。
+func NewPersistentStore(dataDir string, agentProfiles []AgentProfile) (*Store, error) {
+	if len(agentProfiles) == 0 {
+		agentProfiles = AgentProfiles(AgentOptionsConfig{})
 	}
 	persister := NewJSONStorePersister(dataDir)
-	state, existed, err := persister.Load(agentProviders)
+	state, existed, err := persister.Load(agentProfiles)
 	if err != nil {
 		return nil, err
 	}
@@ -61,8 +62,8 @@ func (p *JSONStorePersister) StatePath() string {
 	return p.statePath
 }
 
-// Load 使用 agentProviders 参数从 state.json 读取 Store 状态。
-func (p *JSONStorePersister) Load(agentProviders []AgentProviderOption) (storeState, bool, error) {
+// Load 使用 agentProfiles 参数从 state.json 读取 Store 状态。
+func (p *JSONStorePersister) Load(agentProfiles []AgentProfile) (storeState, bool, error) {
 	data, err := os.ReadFile(p.statePath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -70,8 +71,8 @@ func (p *JSONStorePersister) Load(agentProviders []AgentProviderOption) (storeSt
 				projects:        make(map[string]Project),
 				chats:           make(map[string]Chat),
 				nextChatOrdinal: make(map[string]int),
-				agentProviders:  cloneAgentProviderOptions(agentProviders),
-				lastAgent:       defaultLastAgentSelection(agentProviders),
+				agentProfiles:   cloneAgentProfiles(agentProfiles),
+				lastAgent:       defaultLastAgentSelection(AgentProviderOptionsFromProfiles(agentProfiles)),
 			}, false, nil
 		}
 		return storeState{}, false, fmt.Errorf("读取状态文件失败: %w", err)
@@ -80,10 +81,10 @@ func (p *JSONStorePersister) Load(agentProviders []AgentProviderOption) (storeSt
 	if err := json.Unmarshal(data, &persisted); err != nil {
 		return storeState{}, true, fmt.Errorf("解析状态文件失败: %w", err)
 	}
-	if persisted.SchemaVersion != 0 && persisted.SchemaVersion != persistedStoreSchemaVersion {
+	if persisted.SchemaVersion != 0 && persisted.SchemaVersion != 1 && persisted.SchemaVersion != persistedStoreSchemaVersion {
 		return storeState{}, true, fmt.Errorf("不支持的状态文件版本: %d", persisted.SchemaVersion)
 	}
-	state := storeStateFromPersistedState(persisted, agentProviders)
+	state := storeStateFromPersistedState(persisted, agentProfiles)
 	normalizeStoreState(&state)
 	return state, true, nil
 }
@@ -164,14 +165,15 @@ func persistedStateFromStoreState(state storeState) PersistedStoreState {
 		SchemaVersion:      persistedStoreSchemaVersion,
 		Projects:           projects,
 		Chats:              chats,
-		AgentProviders:     cloneAgentProviderOptions(state.agentProviders),
+		AgentProviders:     AgentProviderOptionsFromProfiles(state.agentProfiles),
+		AgentProfiles:      cloneAgentProfiles(state.agentProfiles),
 		LastAgentSelection: state.lastAgent,
 		NextChatOrdinal:    nextChatOrdinal,
 	}
 }
 
-// storeStateFromPersistedState 使用 persisted 和 defaultAgentProviders 参数构造内存状态。
-func storeStateFromPersistedState(persisted PersistedStoreState, defaultAgentProviders []AgentProviderOption) storeState {
+// storeStateFromPersistedState 使用 persisted 和 defaultAgentProfiles 参数构造内存状态。
+func storeStateFromPersistedState(persisted PersistedStoreState, defaultAgentProfiles []AgentProfile) storeState {
 	projects := make(map[string]Project, len(persisted.Projects))
 	for _, project := range persisted.Projects {
 		projects[project.ID] = project
@@ -180,9 +182,12 @@ func storeStateFromPersistedState(persisted PersistedStoreState, defaultAgentPro
 	for _, chat := range persisted.Chats {
 		chats[chat.ID] = cloneChat(chat)
 	}
-	agentProviders := persisted.AgentProviders
-	if len(agentProviders) == 0 {
-		agentProviders = defaultAgentProviders
+	agentProfiles := persisted.AgentProfiles
+	if persisted.SchemaVersion < 2 && len(agentProfiles) == 0 && len(persisted.AgentProviders) > 0 {
+		agentProfiles = AgentProfilesFromProviderOptions(persisted.AgentProviders)
+	}
+	if persisted.SchemaVersion < 2 && len(agentProfiles) == 0 {
+		agentProfiles = defaultAgentProfiles
 	}
 	nextChatOrdinal := make(map[string]int, len(persisted.NextChatOrdinal))
 	for projectID, ordinal := range persisted.NextChatOrdinal {
@@ -192,7 +197,7 @@ func storeStateFromPersistedState(persisted PersistedStoreState, defaultAgentPro
 		projects:        projects,
 		chats:           chats,
 		nextChatOrdinal: nextChatOrdinal,
-		agentProviders:  cloneAgentProviderOptions(agentProviders),
+		agentProfiles:   cloneAgentProfiles(agentProfiles),
 		lastAgent:       persisted.LastAgentSelection,
 	}
 }

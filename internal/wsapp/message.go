@@ -74,3 +74,16 @@ type AgentModelAddPayload struct {
 	ID       string `json:"id"`       // ID 表示模型标识。
 	Label    string `json:"label"`    // Label 表示模型展示名称。
 }
+
+// AgentBuiltinProfilePayload 表示新增内置 Profile 的请求参数。
+type AgentBuiltinProfilePayload struct {
+	Kind string `json:"kind"` // Kind 表示内置 Profile 类型。
+}
+
+// AgentProfileModelPayload 表示 Profile 模型增删改请求参数。
+type AgentProfileModelPayload struct {
+	ProfileID string `json:"profileId"` // ProfileID 表示目标 Profile 标识。
+	ID        string `json:"id"`        // ID 表示模型标识。
+	Label     string `json:"label"`     // Label 表示模型展示名称。
+	Default   bool   `json:"default"`   // Default 表示是否设为默认模型。
+}

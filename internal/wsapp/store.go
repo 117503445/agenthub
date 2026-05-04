@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Store 维护 project、聊天页和消息的内存状态。
@@ -12,7 +13,7 @@ type Store struct {
 	projects        map[string]Project
 	chats           map[string]Chat
 	nextChatOrdinal map[string]int
-	agentProviders  []AgentProviderOption
+	agentProfiles   []AgentProfile
 	lastAgent       LastAgentSelection
 	persister       StorePersister
 }
@@ -27,26 +28,31 @@ type storeState struct {
 	projects        map[string]Project
 	chats           map[string]Chat
 	nextChatOrdinal map[string]int
-	agentProviders  []AgentProviderOption
+	agentProfiles   []AgentProfile
 	lastAgent       LastAgentSelection
 }
 
 // NewStore 创建使用默认 agent 选项的内存状态存储。
 func NewStore() *Store {
-	return NewStoreWithAgentProviders(DefaultAgentProviderOptions())
+	return NewStoreWithAgentProfiles(AgentProfiles(AgentOptionsConfig{}))
 }
 
 // NewStoreWithAgentProviders 使用 agentProviders 参数创建内存状态存储。
 func NewStoreWithAgentProviders(agentProviders []AgentProviderOption) *Store {
-	if len(agentProviders) == 0 {
-		agentProviders = DefaultAgentProviderOptions()
+	return NewStoreWithAgentProfiles(AgentProfilesFromProviderOptions(agentProviders))
+}
+
+// NewStoreWithAgentProfiles 使用 agentProfiles 参数创建内存状态存储。
+func NewStoreWithAgentProfiles(agentProfiles []AgentProfile) *Store {
+	if len(agentProfiles) == 0 {
+		agentProfiles = AgentProfiles(AgentOptionsConfig{})
 	}
 	return newStoreFromState(storeState{
 		projects:        make(map[string]Project),
 		chats:           make(map[string]Chat),
 		nextChatOrdinal: make(map[string]int),
-		agentProviders:  cloneAgentProviderOptions(agentProviders),
-		lastAgent:       defaultLastAgentSelection(agentProviders),
+		agentProfiles:   cloneAgentProfiles(agentProfiles),
+		lastAgent:       defaultLastAgentSelection(AgentProviderOptionsFromProfiles(agentProfiles)),
 	}, nil)
 }
 
@@ -57,7 +63,7 @@ func newStoreFromState(state storeState, persister StorePersister) *Store {
 		projects:        state.projects,
 		chats:           state.chats,
 		nextChatOrdinal: state.nextChatOrdinal,
-		agentProviders:  state.agentProviders,
+		agentProfiles:   state.agentProfiles,
 		lastAgent:       state.lastAgent,
 		persister:       persister,
 	}
@@ -67,7 +73,14 @@ func newStoreFromState(state storeState, persister StorePersister) *Store {
 func (s *Store) AgentProviders() []AgentProviderOption {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return cloneAgentProviderOptions(s.agentProviders)
+	return AgentProviderOptionsFromProfiles(s.agentProfiles)
+}
+
+// AgentProfiles 返回当前 Store 中可用的 Profile 配置。
+func (s *Store) AgentProfiles() []AgentProfile {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return cloneAgentProfiles(s.agentProfiles)
 }
 
 // commit 使用 mutate 参数生成新状态，先持久化成功后再替换内存状态。
@@ -110,7 +123,7 @@ func (s *Store) cloneStateLocked() storeState {
 		projects:        projects,
 		chats:           chats,
 		nextChatOrdinal: nextChatOrdinal,
-		agentProviders:  cloneAgentProviderOptions(s.agentProviders),
+		agentProfiles:   cloneAgentProfiles(s.agentProfiles),
 		lastAgent:       s.lastAgent,
 	}
 }
@@ -120,7 +133,7 @@ func (s *Store) applyStateLocked(state storeState) {
 	s.projects = state.projects
 	s.chats = state.chats
 	s.nextChatOrdinal = state.nextChatOrdinal
-	s.agentProviders = state.agentProviders
+	s.agentProfiles = state.agentProfiles
 	s.lastAgent = state.lastAgent
 }
 
@@ -135,29 +148,37 @@ func normalizeStoreState(state *storeState) {
 	if state.nextChatOrdinal == nil {
 		state.nextChatOrdinal = make(map[string]int)
 	}
-	if len(state.agentProviders) == 0 {
-		state.agentProviders = DefaultAgentProviderOptions()
+	if state.agentProfiles == nil {
+		state.agentProfiles = AgentProfiles(AgentOptionsConfig{})
 	} else {
-		state.agentProviders = cloneAgentProviderOptions(state.agentProviders)
+		state.agentProfiles = normalizeAgentProfiles(state.agentProfiles)
 	}
+	agentProviders := AgentProviderOptionsFromProfiles(state.agentProfiles)
 	if strings.TrimSpace(state.lastAgent.Provider) == "" ||
 		strings.TrimSpace(state.lastAgent.Model) == "" ||
-		!agentSelectionExists(state.lastAgent.Provider, state.lastAgent.Model, state.agentProviders) {
-		state.lastAgent = defaultLastAgentSelection(state.agentProviders)
+		!agentSelectionExists(state.lastAgent.Provider, state.lastAgent.Model, agentProviders) {
+		state.lastAgent = defaultLastAgentSelection(agentProviders)
 	}
 	for chatID, chat := range state.chats {
-		if chat.AgentLocked && strings.TrimSpace(chat.AgentProvider) != "" && strings.TrimSpace(chat.AgentModel) != "" {
+		if chat.AgentLocked {
+			if chat.AgentProfile.ID == "" {
+				if profile, ok := AgentProfileByID(state.agentProfiles, chat.AgentProvider); ok {
+					chat.AgentProfile = profile
+					state.chats[chatID] = chat
+				}
+			}
 			continue
 		}
 		if strings.TrimSpace(chat.AgentProvider) != "" &&
 			strings.TrimSpace(chat.AgentModel) != "" &&
-			agentSelectionExists(chat.AgentProvider, chat.AgentModel, state.agentProviders) {
+			agentSelectionExists(chat.AgentProvider, chat.AgentModel, agentProviders) {
 			continue
 		}
-		defaultAgent := defaultLastAgentSelection(state.agentProviders)
+		defaultAgent := defaultLastAgentSelection(agentProviders)
 		chat.AgentProvider = defaultAgent.Provider
 		chat.AgentModel = defaultAgent.Model
 		chat.AgentReasoning = defaultAgent.Reasoning
+		chat.AgentProfile = AgentProfile{}
 		state.chats[chatID] = chat
 	}
 	for projectID := range state.projects {
@@ -188,6 +209,55 @@ func agentSelectionExists(provider string, model string, options []AgentProvider
 			if item.ID == strings.TrimSpace(model) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// profileByIDInState 使用 state 和 profileID 参数查找 Profile 及其索引。
+func profileByIDInState(state *storeState, profileID string) (AgentProfile, int, bool) {
+	normalizedID := strings.TrimSpace(profileID)
+	for index, profile := range state.agentProfiles {
+		if profile.ID == normalizedID {
+			return cloneAgentProfile(profile), index, true
+		}
+	}
+	return AgentProfile{}, -1, false
+}
+
+// applyProfileToChats 使用 state 和 profile 参数同步已选择该 Profile 的聊天页。
+func applyProfileToChats(state *storeState, profile AgentProfile) {
+	options := AgentProviderOptionsFromProfiles([]AgentProfile{profile})
+	for chatID, chat := range state.chats {
+		if chat.AgentProvider != profile.ID {
+			continue
+		}
+		if !agentSelectionExists(chat.AgentProvider, chat.AgentModel, options) {
+			chat.AgentModel = DefaultAgentModel(profile.ID, options)
+			chat.AgentReasoning = DefaultAgentReasoning(profile.ID, chat.AgentModel, options)
+		} else {
+			_, _, reasoning, err := NormalizeAgentSelection(chat.AgentProvider, chat.AgentModel, chat.AgentReasoning, options)
+			if err == nil {
+				chat.AgentReasoning = reasoning
+			}
+		}
+		if chat.AgentLocked {
+			chat.AgentProfile = profile
+		}
+		chat.ContextWindow = estimateChatContextWindowUsage(chat)
+		chat.UpdatedAt = time.Now()
+		state.chats[chatID] = chat
+	}
+	if state.lastAgent.Provider == profile.ID && !agentSelectionExists(state.lastAgent.Provider, state.lastAgent.Model, options) {
+		state.lastAgent = defaultLastAgentSelection(options)
+	}
+}
+
+// hasDefaultAgentModel 使用 models 参数判断是否已有默认模型。
+func hasDefaultAgentModel(models []AgentModelOption) bool {
+	for _, model := range models {
+		if model.Default {
+			return true
 		}
 	}
 	return false

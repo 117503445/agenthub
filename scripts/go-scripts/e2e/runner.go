@@ -113,8 +113,13 @@ func registeredCases() map[string]E2ECase {
 		"case_agent_chat": {Name: "case_agent_chat", Run: runAgentChatCase, Env: map[string]string{
 			"MOCK_AGENT": "1",
 		}},
-		"case_mock_agent_gate":          {Name: "case_mock_agent_gate", Run: runMockAgentGateCase},
-		"case_persistence":              {Name: "case_persistence", Run: runPersistenceCase},
+		"case_mock_agent_gate": {Name: "case_mock_agent_gate", Run: runMockAgentGateCase},
+		"case_persistence":     {Name: "case_persistence", Run: runPersistenceCase},
+		"case_agent_profile": {Name: "case_agent_profile", Run: runAgentProfileCase, Env: map[string]string{
+			"AGENTHUB_PROFILE_E2E_SECRET": "backend-secret-value",
+			"AGENTHUB_PROFILE_E2E_UNSET":  "backend-unset-value",
+			"MOCK_AGENT":                  "1",
+		}},
 		"case_project_icon":             {Name: "case_project_icon", Run: runProjectIconCase},
 		"case_settings_backend_version": {Name: "case_settings_backend_version", Run: runSettingsBackendVersionCase},
 		"case_token_auth": {Name: "case_token_auth", Run: runTokenAuthCase, Env: map[string]string{

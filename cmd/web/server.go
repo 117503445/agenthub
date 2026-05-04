@@ -79,11 +79,6 @@ func subpathHandler(wsServer *wsapp.Server, auth tokenAuth, static http.Handler)
 // resolveAgentConfig 使用 config 参数生成 agent runtime 配置。
 func resolveAgentConfig(config webConfig) wsapp.AgentConfig {
 	model := "sonnet"
-	agentProviders := wsapp.AgentProviderOptions(wsapp.AgentOptionsConfig{
-		ClaudeDefaultModel: model,
-		CodexDefaultEffort: "xhigh",
-		EnableMockAgent:    config.MockAgent,
-	})
 	mockBaseURL := backendMockBaseURL(config.Port)
 	mockClaudeCommand := "claude"
 	if strings.TrimSpace(config.MockClaudeCommand) != "" {
@@ -93,6 +88,20 @@ func resolveAgentConfig(config webConfig) wsapp.AgentConfig {
 	if strings.TrimSpace(config.MockCodexCommand) != "" {
 		mockCodexCommand = strings.TrimSpace(config.MockCodexCommand)
 	}
+	agentOptionsConfig := wsapp.AgentOptionsConfig{
+		ClaudeDefaultModel:   model,
+		CodexDefaultEffort:   "xhigh",
+		EnableMockAgent:      config.MockAgent,
+		ClaudeCommand:        "claude",
+		CodexCommand:         "codex",
+		MockClaudeCommand:    mockClaudeCommand,
+		MockCodexCommand:     mockCodexCommand,
+		MockAnthropicBaseURL: mockBaseURL + "/mock/anthropic",
+		MockAnthropicAPIKey:  "mock-key",
+		MockOpenAIBaseURL:    mockBaseURL + "/mock/openai/v1",
+		MockOpenAIAPIKey:     "mock-key",
+	}
+	agentProfiles := wsapp.AgentProfiles(agentOptionsConfig)
 	return wsapp.AgentConfig{
 		Command:              "claude",
 		CodexCommand:         "codex",
@@ -103,7 +112,9 @@ func resolveAgentConfig(config webConfig) wsapp.AgentConfig {
 		MockAnthropicAPIKey:  "mock-key",
 		MockOpenAIBaseURL:    mockBaseURL + "/mock/openai/v1",
 		MockOpenAIAPIKey:     "mock-key",
-		AgentProviders:       agentProviders,
+		AgentProviders:       wsapp.AgentProviderOptionsFromProfiles(agentProfiles),
+		AgentProfiles:        agentProfiles,
+		BackendEnv:           wsapp.BackendEnvSnapshot(),
 	}
 }
 
