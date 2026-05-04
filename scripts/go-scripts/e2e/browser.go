@@ -199,6 +199,59 @@ func expectImageAddButtonUsesPictureLogo(page playwright.Page, timeout time.Dura
 	return fmt.Errorf("等待添加图片按钮展示图片 logo 超时，最后状态: %s", lastState)
 }
 
+// expectAgentHubIcon 使用 page 和 timeout 参数等待页面声明并加载 Tabler chart-bubble 图标。
+func expectAgentHubIcon(page playwright.Page, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastState string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := page.Evaluate(`async () => {
+			const iconLink = document.querySelector('link[rel~="icon"]');
+			if (!iconLink) {
+				return 'missing icon link';
+			}
+			const iconType = iconLink.getAttribute('type') ?? '';
+			if (iconType !== 'image/svg+xml') {
+				return 'type=' + iconType;
+			}
+			const href = iconLink.getAttribute('href') ?? '';
+			if (!href) {
+				return 'missing href';
+			}
+			const response = await fetch(new URL(href, window.location.href).toString());
+			if (!response.ok) {
+				return 'status=' + response.status;
+			}
+			const text = await response.text();
+			if (!text.includes('data-agenthub-icon="true"')) {
+				return 'missing agenthub icon marker';
+			}
+			if (!text.includes('data-tabler-icon="chart-bubble"')) {
+				return 'missing tabler chart-bubble marker';
+			}
+			if (!text.includes('M10 7.5a4.5 4.5')) {
+				return 'missing chart-bubble path';
+			}
+			return '';
+		}`, nil)
+		if err == nil {
+			if text, ok := value.(string); ok {
+				lastState = text
+				if text == "" {
+					return nil
+				}
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待 Tabler chart-bubble 图标加载超时，最后错误: %w", lastErr)
+	}
+	return fmt.Errorf("等待 Tabler chart-bubble 图标加载超时，最后状态: %s", lastState)
+}
+
 // clickFirstTestID 使用 page 和 id 参数点击首个 data-testid 对应元素。
 func clickFirstTestID(page playwright.Page, id string) error {
 	return getByTestID(page, id).First().Click()
