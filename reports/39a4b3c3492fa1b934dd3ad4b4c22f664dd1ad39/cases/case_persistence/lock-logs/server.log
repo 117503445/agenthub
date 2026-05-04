@@ -1,0 +1,13 @@
+2026-05-04 06:33:09.036 INF cmd/web/main.go:53 > 构建信息 BuildDir=/src BuildTime=2026-05-04T06:32:01Z GitBranch=master GitCommit=4848068c256f82581d5be5581319635b235da300 GitDirty=true GitTag= GitVersion=4848068
+2026-05-04 06:33:09.036 PNC cmd/web/main.go:57 > 服务启动失败 error="AGENTHUB_DATA 已被其他进程使用: /src/data/e2e/case_persistence/agenthub-data"
+panic: 服务启动失败
+
+goroutine 1 [running]:
+github.com/rs/zerolog/log.Panic.(*Logger).Panic.func1({0x9601ca?, 0x0?})
+	/root/go/pkg/mod/github.com/rs/zerolog@v1.34.0/log.go:405 +0x27
+github.com/rs/zerolog.(*Event).msg(0x37297a1b70a0, {0x9601ca, 0x12})
+	/root/go/pkg/mod/github.com/rs/zerolog@v1.34.0/event.go:158 +0x2a6
+github.com/rs/zerolog.(*Event).Msg(...)
+	/root/go/pkg/mod/github.com/rs/zerolog@v1.34.0/event.go:110
+main.main()
+	/src/cmd/web/main.go:57 +0x450
