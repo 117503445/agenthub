@@ -20,6 +20,6 @@ RUN go build -o /out/web ./cmd/web
 FROM alpine:3.23
 WORKDIR /app
 COPY --from=go-build /out/web /app/web
-ENV AGENTHUB_PORT=8080
-EXPOSE 8080
+ENV AGENTHUB_PORT=17375
+EXPOSE 17375
 ENTRYPOINT ["/app/web"]

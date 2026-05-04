@@ -109,8 +109,9 @@ func Run(args []string) int {
 // registeredCases 返回当前仓库内置 E2E 用例。
 func registeredCases() map[string]E2ECase {
 	return map[string]E2ECase{
-		"case_agent_chat":  {Name: "case_agent_chat", Run: runAgentChatCase},
-		"case_persistence": {Name: "case_persistence", Run: runPersistenceCase},
+		"case_agent_chat":   {Name: "case_agent_chat", Run: runAgentChatCase},
+		"case_default_port": {Name: "case_default_port", Run: runDefaultPortCase},
+		"case_persistence":  {Name: "case_persistence", Run: runPersistenceCase},
 		"case_token_auth": {Name: "case_token_auth", Run: runTokenAuthCase, Env: map[string]string{
 			"AGENTHUB_TOKEN": e2eAgentHubToken,
 		}},
@@ -364,8 +365,13 @@ func withEnvOverride(env []string, override map[string]string) []string {
 
 // waitUntilReady 使用 baseURL 参数等待健康检查通过。
 func waitUntilReady(baseURL string) error {
+	return waitUntilReadyWithin(baseURL, 20*time.Second)
+}
+
+// waitUntilReadyWithin 使用 baseURL 和 timeout 参数在限定时间内等待健康检查通过。
+func waitUntilReadyWithin(baseURL string, timeout time.Duration) error {
 	client := &http.Client{Timeout: time.Second}
-	deadline := time.Now().Add(20 * time.Second)
+	deadline := time.Now().Add(timeout)
 	var lastErr error
 	for time.Now().Before(deadline) {
 		response, err := client.Get(baseURL + "/healthz")

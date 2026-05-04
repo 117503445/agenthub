@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	defaultPort     = "8080"
+	defaultPort     = "17375"
 	stopWaitTimeout = 3 * time.Second
 	killWaitTimeout = 2 * time.Second
 )

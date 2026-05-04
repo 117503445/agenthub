@@ -3,10 +3,27 @@ package main
 import (
 	"bytes"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// unsetEnv 使用 t 和 key 参数临时移除环境变量。
+func unsetEnv(t *testing.T, key string) {
+	t.Helper()
+	value, ok := os.LookupEnv(key)
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatalf("移除环境变量失败: %v", err)
+	}
+	t.Cleanup(func() {
+		if !ok {
+			_ = os.Unsetenv(key)
+			return
+		}
+		_ = os.Setenv(key, value)
+	})
+}
 
 // TestParseWebConfigUsesOnlyAgentHubEnv 验证 Web 配置只读取 AGENTHUB 前缀环境变量。
 func TestParseWebConfigUsesOnlyAgentHubEnv(t *testing.T) {
@@ -55,6 +72,20 @@ func TestParseWebConfigFlagOverridesEnv(t *testing.T) {
 	}
 	if config.Port != "7070" {
 		t.Fatalf("CLI 端口应覆盖环境变量，当前值: %q", config.Port)
+	}
+}
+
+// TestParseWebConfigUsesDefaultPort 验证未配置端口时使用默认端口。
+func TestParseWebConfigUsesDefaultPort(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	unsetEnv(t, "AGENTHUB_PORT")
+
+	config, err := parseWebConfig(nil, io.Discard, io.Discard)
+	if err != nil {
+		t.Fatalf("解析配置失败: %v", err)
+	}
+	if config.Port != defaultWebPort {
+		t.Fatalf("默认端口应为 %s，当前值: %q", defaultWebPort, config.Port)
 	}
 }
 

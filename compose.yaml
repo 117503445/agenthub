@@ -4,6 +4,6 @@ services:
       context: .
       dockerfile: scripts/docker/web.Dockerfile
     environment:
-      AGENTHUB_PORT: "8080"
+      AGENTHUB_PORT: "17375"
     ports:
-      - "8080:8080"
+      - "17375:17375"

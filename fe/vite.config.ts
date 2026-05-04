@@ -14,16 +14,16 @@ export default defineConfig({
   server: {
     proxy: {
       '/ws': {
-        target: 'http://localhost:8080',
+        target: 'http://localhost:17375',
         ws: true,
         changeOrigin: true,
       },
       '/healthz': {
-        target: 'http://localhost:8080',
+        target: 'http://localhost:17375',
         changeOrigin: true,
       },
       '/auth': {
-        target: 'http://localhost:8080',
+        target: 'http://localhost:17375',
         changeOrigin: true,
       },
     },

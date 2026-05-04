@@ -11,7 +11,7 @@ import (
 	"github.com/alecthomas/kong"
 )
 
-const defaultWebPort = "8080"
+const defaultWebPort = "17375"
 
 // webConfig 表示 Web 服务启动配置。
 type webConfig struct {
@@ -25,7 +25,7 @@ type webConfig struct {
 
 // webCLI 表示 Kong 解析的命令行参数。
 type webCLI struct {
-	Port       string `name:"port" env:"AGENTHUB_PORT" default:"8080" help:"Web 服务监听端口。"`
+	Port       string `name:"port" env:"AGENTHUB_PORT" default:"17375" help:"Web 服务监听端口。"`
 	LogNoColor bool   `name:"log-no-color" env:"AGENTHUB_LOG_NO_COLOR" hidden:"" help:"禁用日志颜色。"`
 }
 
