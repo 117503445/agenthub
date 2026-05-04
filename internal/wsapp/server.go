@@ -262,7 +262,7 @@ func (s *Server) handle(ctx context.Context, outbound chan ServerMessage, msg Cl
 		if err := decodePayload(msg, &payload); err != nil {
 			return err
 		}
-		options, err := s.store.AddAgentModel(payload.Provider, payload.ID, payload.Label)
+		options, err := s.store.AddAgentModel(payload.Provider, payload.ID)
 		if err != nil {
 			return err
 		}
@@ -319,7 +319,7 @@ func (s *Server) handle(ctx context.Context, outbound chan ServerMessage, msg Cl
 		if err := decodePayload(msg, &payload); err != nil {
 			return err
 		}
-		if _, err := s.store.AddAgentProfileModel(payload.ProfileID, payload.ID, payload.Label); err != nil {
+		if _, err := s.store.AddAgentProfileModel(payload.ProfileID, payload.ID); err != nil {
 			return err
 		}
 		s.broadcastAgentProfilesChanged()
@@ -329,7 +329,7 @@ func (s *Server) handle(ctx context.Context, outbound chan ServerMessage, msg Cl
 		if err := decodePayload(msg, &payload); err != nil {
 			return err
 		}
-		if _, err := s.store.UpdateAgentProfileModel(payload.ProfileID, payload.ID, payload.Label, payload.Default); err != nil {
+		if _, err := s.store.UpdateAgentProfileModel(payload.ProfileID, payload.ID, payload.Default); err != nil {
 			return err
 		}
 		s.broadcastAgentProfilesChanged()
@@ -534,7 +534,7 @@ func (s *Server) agentOptionsConfig() AgentOptionsConfig {
 		MockAnthropicAPIKey:  s.agentConfig.MockAnthropicAPIKey,
 		MockOpenAIBaseURL:    s.agentConfig.MockOpenAIBaseURL,
 		MockOpenAIAPIKey:     s.agentConfig.MockOpenAIAPIKey,
-		EnableMockAgent:      hasMockProfile(s.agentConfig.AgentProfiles),
+		EnableMockAgent:      s.agentConfig.EnableMockAgent,
 	}
 }
 

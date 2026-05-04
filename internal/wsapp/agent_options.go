@@ -31,7 +31,7 @@ type AgentReasoningOption struct {
 // AgentModelOption 表示一个可选 agent 模型。
 type AgentModelOption struct {
 	ID              string                 `json:"id"`                        // ID 表示传递给 agent CLI 的模型标识。
-	Label           string                 `json:"label"`                     // Label 表示界面展示名称。
+	Label           string                 `json:"label"`                     // Label 表示界面展示值，与 ID 保持一致。
 	Default         bool                   `json:"default"`                   // Default 表示是否为该 provider 默认模型。
 	ReasoningLevels []AgentReasoningOption `json:"reasoningLevels,omitempty"` // ReasoningLevels 表示模型支持的推理级别。
 }
@@ -60,7 +60,6 @@ type AgentProfile struct {
 	Env     []AgentEnvVar      `json:"env"`     // Env 表示 Profile 环境变量配置。
 	Models  []AgentModelOption `json:"models"`  // Models 表示聊天中可动态切换的模型列表。
 	Builtin bool               `json:"builtin"` // Builtin 表示是否由系统生成的内置 Profile。
-	Mock    bool               `json:"mock"`    // Mock 表示是否为 Mock Agent Profile。
 }
 
 // BackendEnvVar 表示后端启动时捕获的一项环境变量。
@@ -80,9 +79,9 @@ func AgentProfiles(config AgentOptionsConfig) []AgentProfile {
 		codexDefaultEffort = "xhigh"
 	}
 	claudeModels := withDefaultModel([]AgentModelOption{
-		{ID: "sonnet", Label: "Sonnet"},
-		{ID: "opus", Label: "Opus"},
-		{ID: "haiku", Label: "Haiku"},
+		{ID: "sonnet", Label: "sonnet"},
+		{ID: "opus", Label: "opus"},
+		{ID: "haiku", Label: "haiku"},
 	}, claudeDefaultModel)
 	codexReasoningLevels := withDefaultReasoning([]AgentReasoningOption{
 		{ID: "low", Label: "Low", Description: "快速响应，使用较轻推理。"},
@@ -122,10 +121,10 @@ func AgentProfiles(config AgentOptionsConfig) []AgentProfile {
 			Type:    AgentProfileTypeCodex,
 			Command: codexCommand,
 			Models: []AgentModelOption{
-				{ID: "gpt-5.5", Label: "GPT-5.5", Default: true, ReasoningLevels: codexReasoningLevels},
-				{ID: "gpt-5.4-mini", Label: "GPT-5.4 Mini"},
-				{ID: "gpt-5.4", Label: "GPT-5.4"},
-				{ID: "gpt-5.3-codex", Label: "GPT-5.3 Codex"},
+				{ID: "gpt-5.5", Label: "gpt-5.5", Default: true, ReasoningLevels: codexReasoningLevels},
+				{ID: "gpt-5.4-mini", Label: "gpt-5.4-mini"},
+				{ID: "gpt-5.4", Label: "gpt-5.4"},
+				{ID: "gpt-5.3-codex", Label: "gpt-5.3-codex"},
 			},
 			Builtin: true,
 		},
@@ -139,28 +138,24 @@ func AgentProfiles(config AgentOptionsConfig) []AgentProfile {
 			Label:   "Mock Claude Code",
 			Type:    AgentProfileTypeClaudeCode,
 			Command: mockClaudeCommand,
-			Args:    []string{"--bare", "--setting-sources", "local"},
 			Env:     mockClaudeEnv(config),
 			Models: []AgentModelOption{
-				{ID: "mock-claude-sonnet", Label: "Mock Claude Sonnet", Default: true},
-				{ID: "mock-claude-opus", Label: "Mock Claude Opus"},
+				{ID: "mock-claude-sonnet", Label: "mock-claude-sonnet", Default: true},
+				{ID: "mock-claude-opus", Label: "mock-claude-opus"},
 			},
 			Builtin: true,
-			Mock:    true,
 		},
 		AgentProfile{
 			ID:      AgentProviderMockCodex,
 			Label:   "Mock Codex",
 			Type:    AgentProfileTypeCodex,
 			Command: mockCodexCommand,
-			Args:    mockCodexConfigArgs(config.MockOpenAIBaseURL),
 			Env:     mockCodexEnv(config),
 			Models: []AgentModelOption{
-				{ID: "mock-codex-gpt-5.5", Label: "Mock Codex GPT-5.5", Default: true, ReasoningLevels: codexReasoningLevels},
-				{ID: "mock-codex-fast", Label: "Mock Codex Fast"},
+				{ID: "mock-codex-gpt-5.5", Label: "mock-codex-gpt-5.5", Default: true, ReasoningLevels: codexReasoningLevels},
+				{ID: "mock-codex-fast", Label: "mock-codex-fast"},
 			},
 			Builtin: true,
-			Mock:    true,
 		},
 	)
 }

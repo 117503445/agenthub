@@ -24,10 +24,8 @@ interface AgentSettingsPageProps {
   backendEnv: BackendEnvVar[]
   /** selectedProfileId 表示当前选中的 Profile 标识。 */
   selectedProfileId: string
-  /** newClaudeModelID 表示新增模型标识。 */
+  /** newClaudeModelID 表示新增模型值。 */
   newClaudeModelID: string
-  /** newClaudeModelLabel 表示新增模型展示名称。 */
-  newClaudeModelLabel: string
   /** onBackToChat 返回聊天页。 */
   onBackToChat: () => void
   /** onProfileSelect 使用 profileId 参数选中 Profile。 */
@@ -40,12 +38,12 @@ interface AgentSettingsPageProps {
   onProfileDelete: (profileId: string) => void
   /** onBuiltinAdd 使用 kind 参数添加内置 Profile。 */
   onBuiltinAdd: (kind: AgentBuiltinProfileKind) => void
-  /** onModelIDChange 使用 value 参数更新新增模型标识。 */
+  /** onModelIDChange 使用 value 参数更新新增模型值。 */
   onModelIDChange: (value: string) => void
-  /** onModelLabelChange 使用 value 参数更新新增模型展示名称。 */
-  onModelLabelChange: (value: string) => void
   /** onAddProfileModel 使用 event 参数提交新增模型。 */
   onAddProfileModel: (event: FormEvent<HTMLFormElement>) => void
+  /** onDeleteProfileModel 使用 profileId 和 modelId 参数删除模型。 */
+  onDeleteProfileModel: (profileId: string, modelId: string) => void
 }
 
 // AgentSettingsPage 使用 props 参数渲染 agent Profile 设置页。
@@ -57,7 +55,6 @@ export function AgentSettingsPage({
   backendEnv,
   selectedProfileId,
   newClaudeModelID,
-  newClaudeModelLabel,
   onBackToChat,
   onProfileSelect,
   onProfileCreate,
@@ -65,8 +62,8 @@ export function AgentSettingsPage({
   onProfileDelete,
   onBuiltinAdd,
   onModelIDChange,
-  onModelLabelChange,
   onAddProfileModel,
+  onDeleteProfileModel,
 }: AgentSettingsPageProps) {
   const selectedProfile = agentProfiles.find((profile) => profile.id === selectedProfileId) ?? agentProfiles[0] ?? null
   const [labelDraft, setLabelDraft] = useState('')
@@ -143,7 +140,6 @@ export function AgentSettingsPage({
                   <span className="block truncate text-sm font-medium text-slate-900">{profile.label}</span>
                   <span className="mt-1 block truncate font-mono text-xs text-slate-500">{profile.id}</span>
                   <span className="mt-2 inline-flex items-center rounded-sm bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600">
-                    {profile.mock ? 'mock ' : ''}
                     {profile.type}
                   </span>
                 </button>
@@ -270,16 +266,29 @@ export function AgentSettingsPage({
                 {models.map((model) => (
                   <div key={model.id} className="flex items-center justify-between gap-3 border-b border-slate-100 px-3 py-3 last:border-b-0">
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-slate-900">{model.label}</div>
-                      <div className="truncate font-mono text-xs text-slate-500">{model.id}</div>
+                      <div className="truncate font-mono text-sm font-medium text-slate-900">{model.id}</div>
                     </div>
-                    {model.default ? <span className="shrink-0 text-xs font-medium text-teal-700">默认</span> : null}
+                    <div className="flex shrink-0 items-center gap-2">
+                      {model.default ? <span className="text-xs font-medium text-teal-700">默认</span> : null}
+                      <button
+                        type="button"
+                        data-testid="agent-model-delete-button"
+                        data-model-id={model.id}
+                        onClick={() => selectedProfile && onDeleteProfileModel(selectedProfile.id, model.id)}
+                        disabled={connectionState !== 'open' || !selectedProfile || models.length <= 1}
+                        className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-slate-400 transition hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:text-slate-200"
+                        aria-label={`删除模型 ${model.id}`}
+                        title="删除模型"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
-              <form className="mt-3 grid gap-3 rounded-md border border-slate-200 bg-white p-4 md:grid-cols-[1fr_1fr_auto]" onSubmit={onAddProfileModel}>
+              <form className="mt-3 grid gap-3 rounded-md border border-slate-200 bg-white p-4 md:grid-cols-[minmax(0,1fr)_auto]" onSubmit={onAddProfileModel}>
                 <label htmlFor="agent-model-id-input" className="block text-xs font-medium text-slate-500">
-                  模型标识
+                  模型
                   <Input
                     id="agent-model-id-input"
                     data-testid="agent-model-id-input"
@@ -287,17 +296,6 @@ export function AgentSettingsPage({
                     onChange={(event) => onModelIDChange(event.target.value)}
                     className="mt-1 h-9 w-full rounded-md border border-slate-300 px-3 font-mono text-sm"
                     placeholder="claude-sonnet-4-6"
-                  />
-                </label>
-                <label htmlFor="agent-model-label-input" className="block text-xs font-medium text-slate-500">
-                  展示名称
-                  <Input
-                    id="agent-model-label-input"
-                    data-testid="agent-model-label-input"
-                    value={newClaudeModelLabel}
-                    onChange={(event) => onModelLabelChange(event.target.value)}
-                    className="mt-1 h-9 w-full rounded-md border border-slate-300 px-3 text-sm"
-                    placeholder="Claude Sonnet 4.6"
                   />
                 </label>
                 <button

@@ -61,7 +61,7 @@ export interface PlanApproval {
 export interface AgentModelOption {
   /** id 表示传递给 agent CLI 的模型标识。 */
   id: string
-  /** label 表示界面展示名称。 */
+  /** label 表示模型展示值，与 id 保持一致。 */
   label: string
   /** default 表示是否为 provider 默认模型。 */
   default?: boolean
@@ -122,8 +122,6 @@ export interface AgentProfile {
   models: AgentModelOption[]
   /** builtin 表示是否内置 Profile。 */
   builtin?: boolean
-  /** mock 表示是否 Mock Profile。 */
-  mock?: boolean
 }
 
 export interface AgentSkillOption {

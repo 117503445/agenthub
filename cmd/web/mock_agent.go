@@ -177,6 +177,7 @@ func requestMockCodexText(model string, prompt string) (string, error) {
 // runMockClaudeCLI 使用 args、stdin、stdout 和 stderr 参数运行 Claude stream-json mock。
 func runMockClaudeCLI(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
 	model := mockCLIModelFromArgs(args)
+	planMode := mockCLIPlanMode(args)
 	scanner := bufio.NewScanner(stdin)
 	writer := bufio.NewWriter(stdout)
 	for scanner.Scan() {
@@ -191,6 +192,9 @@ func runMockClaudeCLI(args []string, stdin io.Reader, stdout io.Writer, stderr i
 			writeMockJSONLine(writer, map[string]any{"type": "result", "session_id": sessionID, "subtype": "error", "error": "mock claude error: forced failure"})
 			_ = writer.Flush()
 			continue
+		}
+		if planMode {
+			prompt = mockPlanModePrompt(prompt)
 		}
 		text, err := requestMockAgentText(model, prompt)
 		if err != nil {
@@ -220,6 +224,27 @@ func runMockClaudeCLI(args []string, stdin io.Reader, stdout io.Writer, stderr i
 		return 1
 	}
 	return 0
+}
+
+// mockPlanModePrompt 使用 prompt 参数生成 mock CLI 的 plan 模式提示。
+func mockPlanModePrompt(prompt string) string {
+	return strings.Join([]string{
+		"你现在处于 plan 模式。只阅读、分析并生成可执行计划，不要修改文件或执行实现。",
+		"如果计划需要用户确认，请把待确认意见写清楚。",
+		"用户批准后才可以开始执行。",
+		"",
+		prompt,
+	}, "\n")
+}
+
+// mockCLIPlanMode 使用 args 参数判断 mock Claude CLI 是否运行在 plan 模式。
+func mockCLIPlanMode(args []string) bool {
+	for index := 0; index < len(args)-1; index++ {
+		if args[index] == "--permission-mode" && args[index+1] == "plan" {
+			return true
+		}
+	}
+	return false
 }
 
 // requestMockAgentText 使用 model 和 prompt 参数请求服务端 mock 模型服务。

@@ -31,7 +31,7 @@ func TestPersistentStoreSaveLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("创建聊天页失败: %v", err)
 	}
-	if _, err := store.AddAgentModel(AgentProviderClaudeCode, "claude-custom-test", "Claude Custom Test"); err != nil {
+	if _, err := store.AddAgentModel(AgentProviderClaudeCode, "claude-custom-test"); err != nil {
 		t.Fatalf("新增模型失败: %v", err)
 	}
 	chat, err = store.UpdateChatAgent(chat.ID, AgentProviderCodex, "gpt-5.5", "xhigh")

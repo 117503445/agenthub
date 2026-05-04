@@ -115,6 +115,7 @@ func resolveAgentConfig(config webConfig) wsapp.AgentConfig {
 		AgentProviders:       wsapp.AgentProviderOptionsFromProfiles(agentProfiles),
 		AgentProfiles:        agentProfiles,
 		BackendEnv:           wsapp.BackendEnvSnapshot(),
+		EnableMockAgent:      config.MockAgent,
 	}
 }
 

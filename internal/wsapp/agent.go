@@ -38,6 +38,7 @@ type AgentConfig struct {
 	AgentProviders       []AgentProviderOption // AgentProviders 表示可用 agent 和模型选项。
 	AgentProfiles        []AgentProfile        // AgentProfiles 表示可用 Profile 配置。
 	BackendEnv           []BackendEnvVar       // BackendEnv 表示后端启动时捕获的环境变量。
+	EnableMockAgent      bool                  // EnableMockAgent 表示本次启动是否允许添加内置 Mock Profile。
 }
 
 // AgentRunCallbacks 表示一次 agent 运行中的回调。
@@ -203,9 +204,6 @@ func (m *AgentManager) sendClaude(ctx context.Context, input AgentRunInput) erro
 	runtime.mu.Unlock()
 
 	prompt := agentPrompt(input.Prompt, input.Images)
-	if runtime.profile.Mock && input.PlanMode {
-		prompt = planModePrompt(prompt)
-	}
 	line, err := buildClaudeUserMessage(prompt, input.Images, sessionID)
 	if err != nil {
 		runtime.failCurrentRun(err.Error())
@@ -435,9 +433,6 @@ func (r *AgentRuntime) claudeArgs() []string {
 	if r.planMode {
 		args = append(args, "--permission-mode", "plan")
 	}
-	if r.profile.Mock {
-		return args
-	}
 	return append([]string{"--dangerously-skip-permissions"}, args...)
 }
 
@@ -590,24 +585,7 @@ func (r *AgentRuntime) codexEnv() []string {
 	return EffectiveAgentEnvList(r.manager.config.BackendEnv, r.profile)
 }
 
-// mockCodexConfigArgs 返回 mock Codex 使用的真实 CLI 配置参数。
-func (r *AgentRuntime) mockCodexConfigArgs() []string {
-	baseURL := r.codexBaseURL()
-	if baseURL == "" {
-		return nil
-	}
-	providerConfig := fmt.Sprintf(
-		`{name="AgentHub Mock OpenAI", base_url=%q, env_key="OPENAI_API_KEY", wire_api="responses"}`,
-		baseURL,
-	)
-	return []string{
-		"--ignore-user-config",
-		"-c", `model_provider="agenthub_mock"`,
-		"-c", "model_providers.agenthub_mock=" + providerConfig,
-	}
-}
-
-// codexBaseURL 返回 mock Codex 使用的 OpenAI 兼容接口地址。
+// codexBaseURL 返回当前 Codex runtime 使用的 OpenAI 兼容接口地址。
 func (r *AgentRuntime) codexBaseURL() string {
 	if value := r.effectiveEnvValue("OPENAI_BASE_URL"); value != "" {
 		return strings.TrimRight(value, "/")
@@ -628,12 +606,12 @@ func (r *AgentRuntime) anthropicAPIKey() string {
 	return strings.TrimSpace(r.effectiveEnvValue("ANTHROPIC_API_KEY"))
 }
 
-// mockAnthropicBaseURL 返回 Mock Claude 使用的后端 mock 地址。
+// mockAnthropicBaseURL 返回当前 Profile 中配置的 Anthropic 兼容接口地址。
 func (r *AgentRuntime) mockAnthropicBaseURL() string {
 	return strings.TrimRight(r.effectiveEnvValue("ANTHROPIC_BASE_URL"), "/")
 }
 
-// mockAnthropicAPIKey 返回 Mock Claude 使用的 API Key。
+// mockAnthropicAPIKey 返回当前 Profile 中配置的 Anthropic API Key。
 func (r *AgentRuntime) mockAnthropicAPIKey() string {
 	return strings.TrimSpace(r.effectiveEnvValue("ANTHROPIC_API_KEY"))
 }

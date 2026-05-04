@@ -370,16 +370,12 @@ func createChatInState(state *storeState, projectID string, now time.Time) Chat 
 	return chat
 }
 
-// AddAgentModel 使用 provider、modelID 和 label 参数新增 agent 模型选项。
-func (s *Store) AddAgentModel(provider string, modelID string, label string) ([]AgentProviderOption, error) {
+// AddAgentModel 使用 provider 和 modelID 参数新增 agent 模型选项。
+func (s *Store) AddAgentModel(provider string, modelID string) ([]AgentProviderOption, error) {
 	normalizedProvider := strings.TrimSpace(provider)
 	normalizedModelID := strings.TrimSpace(modelID)
-	normalizedLabel := strings.TrimSpace(label)
 	if normalizedModelID == "" {
 		return nil, fmt.Errorf("%w: 模型标识不能为空", ErrInvalidInput)
-	}
-	if normalizedLabel == "" {
-		normalizedLabel = normalizedModelID
 	}
 
 	var options []AgentProviderOption
@@ -396,7 +392,7 @@ func (s *Store) AddAgentModel(provider string, modelID string, label string) ([]
 			}
 			profile.Models = append(profile.Models, AgentModelOption{
 				ID:    normalizedModelID,
-				Label: normalizedLabel,
+				Label: normalizedModelID,
 			})
 			normalizedProfile, err := normalizeAgentProfile(*profile)
 			if err != nil {
@@ -498,15 +494,11 @@ func (s *Store) DeleteAgentProfile(profileID string) ([]AgentProfile, error) {
 	return profiles, nil
 }
 
-// AddAgentProfileModel 使用 profileID、modelID 和 label 参数新增模型。
-func (s *Store) AddAgentProfileModel(profileID string, modelID string, label string) ([]AgentProfile, error) {
+// AddAgentProfileModel 使用 profileID 和 modelID 参数新增模型。
+func (s *Store) AddAgentProfileModel(profileID string, modelID string) ([]AgentProfile, error) {
 	normalizedModelID := strings.TrimSpace(modelID)
-	normalizedLabel := strings.TrimSpace(label)
 	if normalizedModelID == "" {
 		return nil, fmt.Errorf("%w: 模型标识不能为空", ErrInvalidInput)
-	}
-	if normalizedLabel == "" {
-		normalizedLabel = normalizedModelID
 	}
 	var profiles []AgentProfile
 	if err := s.commit(func(state *storeState) error {
@@ -519,7 +511,7 @@ func (s *Store) AddAgentProfileModel(profileID string, modelID string, label str
 				return fmt.Errorf("%w: 模型已存在", ErrInvalidInput)
 			}
 		}
-		profile.Models = append(profile.Models, AgentModelOption{ID: normalizedModelID, Label: normalizedLabel})
+		profile.Models = append(profile.Models, AgentModelOption{ID: normalizedModelID, Label: normalizedModelID})
 		normalized, err := normalizeAgentProfile(profile)
 		if err != nil {
 			return err
@@ -534,10 +526,9 @@ func (s *Store) AddAgentProfileModel(profileID string, modelID string, label str
 	return profiles, nil
 }
 
-// UpdateAgentProfileModel 使用 profileID、modelID、label 和 defaultModel 参数更新模型。
-func (s *Store) UpdateAgentProfileModel(profileID string, modelID string, label string, defaultModel bool) ([]AgentProfile, error) {
+// UpdateAgentProfileModel 使用 profileID、modelID 和 defaultModel 参数更新模型。
+func (s *Store) UpdateAgentProfileModel(profileID string, modelID string, defaultModel bool) ([]AgentProfile, error) {
 	normalizedModelID := strings.TrimSpace(modelID)
-	normalizedLabel := strings.TrimSpace(label)
 	if normalizedModelID == "" {
 		return nil, fmt.Errorf("%w: 模型标识不能为空", ErrInvalidInput)
 	}
@@ -556,9 +547,6 @@ func (s *Store) UpdateAgentProfileModel(profileID string, modelID string, label 
 		}
 		if modelIndex < 0 {
 			return ErrNotFound
-		}
-		if normalizedLabel != "" {
-			profile.Models[modelIndex].Label = normalizedLabel
 		}
 		if defaultModel {
 			for itemIndex := range profile.Models {

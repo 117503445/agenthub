@@ -121,7 +121,7 @@ export function Composer({
   const skillMenuVisible = filteredSkills.length > 0
   const hasComposerPayload = composerValue.trim() || composerImages.length > 0
   const selectedProviderLabel = agentProviders.find((provider) => provider.id === selectedAgentProvider)?.label ?? selectedAgentProvider
-  const selectedModelLabel = selectedAgentModels.find((model) => model.id === selectedAgentModel)?.label ?? selectedAgentModel
+  const selectedModelValue = selectedAgentModels.find((model) => model.id === selectedAgentModel)?.id ?? selectedAgentModel
   const selectedReasoningLabel =
     selectedAgentModelOption?.reasoningLevels?.find((level) => level.id === selectedAgentReasoning)?.label ?? selectedAgentReasoning
 
@@ -366,12 +366,12 @@ export function Composer({
               value={selectedAgentModel}
               onChange={(event) => onChangeAgentModel(event.target.value)}
               disabled={modelControlsDisabled}
-              style={composerSelectWidthStyle(selectedModelLabel, 4, 42)}
+              style={composerSelectWidthStyle(selectedModelValue, 4, 42)}
               className="composer-select h-8 appearance-none rounded-full border-transparent bg-slate-50 pl-8 pr-8 text-xs"
             >
               {selectedAgentModels.map((model) => (
                 <option key={model.id} value={model.id}>
-                  {model.label}
+                  {model.id}
                 </option>
               ))}
             </Select>

@@ -138,7 +138,7 @@ func TestStoreProjectChatLifecycle(t *testing.T) {
 	if len(snapshot.Projects) != 1 || len(snapshot.Chats) != 1 {
 		t.Fatalf("快照数量不正确: %#v", snapshot)
 	}
-	options, err := store.AddAgentModel(AgentProviderClaudeCode, "claude-custom-test", "Claude Custom Test")
+	options, err := store.AddAgentModel(AgentProviderClaudeCode, "claude-custom-test")
 	if err != nil {
 		t.Fatalf("新增 Claude Code 模型失败: %v", err)
 	}

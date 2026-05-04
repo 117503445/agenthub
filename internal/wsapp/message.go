@@ -72,7 +72,7 @@ type ChatAgentUpdatePayload struct {
 type AgentModelAddPayload struct {
 	Provider string `json:"provider"` // Provider 表示目标 agent provider。
 	ID       string `json:"id"`       // ID 表示模型标识。
-	Label    string `json:"label"`    // Label 表示模型展示名称。
+	Label    string `json:"label"`    // Label 为旧请求兼容字段，服务端忽略并使用 ID。
 }
 
 // AgentBuiltinProfilePayload 表示新增内置 Profile 的请求参数。
@@ -84,6 +84,6 @@ type AgentBuiltinProfilePayload struct {
 type AgentProfileModelPayload struct {
 	ProfileID string `json:"profileId"` // ProfileID 表示目标 Profile 标识。
 	ID        string `json:"id"`        // ID 表示模型标识。
-	Label     string `json:"label"`     // Label 表示模型展示名称。
+	Label     string `json:"label"`     // Label 为旧请求兼容字段，服务端忽略并使用 ID。
 	Default   bool   `json:"default"`   // Default 表示是否设为默认模型。
 }

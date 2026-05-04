@@ -78,7 +78,6 @@ function App() {
   const [projectDialogOpen, setProjectDialogOpen] = useState(false)
   const [selectedSettingsProfileId, setSelectedSettingsProfileId] = useState('')
   const [newClaudeModelID, setNewClaudeModelID] = useState('')
-  const [newClaudeModelLabel, setNewClaudeModelLabel] = useState('')
   const [composerValues, setComposerValues] = useState<Record<string, string>>({})
   const [composerImages, setComposerImages] = useState<Record<string, ComposerImageAttachment[]>>({})
   const [planModes, setPlanModes] = useState<Record<string, boolean>>({})
@@ -591,7 +590,6 @@ function App() {
         const payload = message.payload as AgentProvidersChangedPayload
         setAgentProviders(payload.agentProviders ?? fallbackAgentProviders)
         setNewClaudeModelID('')
-        setNewClaudeModelLabel('')
         return
       }
       if (message.type === 'agent.profiles.changed') {
@@ -599,7 +597,6 @@ function App() {
         setAgentProfiles(payload.agentProfiles ?? [])
         setAgentProviders(payload.agentProviders ?? [])
         setNewClaudeModelID('')
-        setNewClaudeModelLabel('')
         return
       }
       if (message.type === 'agent.skills.changed') {
@@ -808,7 +805,7 @@ function App() {
       command: 'codex',
       args: [],
       env: [],
-      models: [{ id: 'gpt-5.5', label: 'GPT-5.5', default: true }],
+      models: [{ id: 'gpt-5.5', label: 'gpt-5.5', default: true }],
     })
   }
 
@@ -836,7 +833,14 @@ function App() {
     sendClientMessage(wsRef.current, 'agent.profile.model.add', {
       profileId: selectedSettingsProfile.id,
       id: newClaudeModelID.trim(),
-      label: newClaudeModelLabel.trim(),
+    })
+  }
+
+  // deleteProfileModel 使用 profileId 和 modelId 参数删除 Profile 模型。
+  const deleteProfileModel = (profileId: string, modelId: string) => {
+    sendClientMessage(wsRef.current, 'agent.profile.model.delete', {
+      profileId,
+      id: modelId,
     })
   }
 
@@ -1000,7 +1004,6 @@ function App() {
             backendEnv={backendEnv}
             selectedProfileId={selectedSettingsProfile?.id ?? ''}
             newClaudeModelID={newClaudeModelID}
-            newClaudeModelLabel={newClaudeModelLabel}
             onBackToChat={backToChat}
             onProfileSelect={setSelectedSettingsProfileId}
             onProfileCreate={createAgentProfile}
@@ -1008,8 +1011,8 @@ function App() {
             onProfileDelete={deleteAgentProfile}
             onBuiltinAdd={addBuiltinProfile}
             onModelIDChange={setNewClaudeModelID}
-            onModelLabelChange={setNewClaudeModelLabel}
             onAddProfileModel={addProfileModel}
+            onDeleteProfileModel={deleteProfileModel}
           />
         ) : (
           <ChatWorkspace

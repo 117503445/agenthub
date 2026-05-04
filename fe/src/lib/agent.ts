@@ -5,9 +5,9 @@ export const fallbackAgentProviders: AgentProviderOption[] = [
     id: 'claude-code',
     label: 'Claude Code',
     models: [
-      { id: 'sonnet', label: 'Sonnet', default: true },
-      { id: 'opus', label: 'Opus' },
-      { id: 'haiku', label: 'Haiku' },
+      { id: 'sonnet', label: 'sonnet', default: true },
+      { id: 'opus', label: 'opus' },
+      { id: 'haiku', label: 'haiku' },
     ],
   },
   {
@@ -16,7 +16,7 @@ export const fallbackAgentProviders: AgentProviderOption[] = [
     models: [
       {
         id: 'gpt-5.5',
-        label: 'GPT-5.5',
+        label: 'gpt-5.5',
         default: true,
         reasoningLevels: [
           { id: 'low', label: 'Low', description: '快速响应，使用较轻推理。' },
@@ -25,9 +25,9 @@ export const fallbackAgentProviders: AgentProviderOption[] = [
           { id: 'xhigh', label: 'Extra high', description: '最深推理，适合复杂实现和排障。', default: true },
         ],
       },
-      { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
-      { id: 'gpt-5.4', label: 'GPT-5.4' },
-      { id: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' },
+      { id: 'gpt-5.4-mini', label: 'gpt-5.4-mini' },
+      { id: 'gpt-5.4', label: 'gpt-5.4' },
+      { id: 'gpt-5.3-codex', label: 'gpt-5.3-codex' },
     ],
   },
 ]

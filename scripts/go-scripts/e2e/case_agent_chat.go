@@ -176,16 +176,16 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDText(page, "agent-settings-page", "Claude Code", 10*time.Second); err != nil {
 		return fail(err)
 	}
-	if err := fillTestID(page, "agent-model-id-input", "claude-custom-test"); err != nil {
+	if err := expectTestIDCount(page, "agent-model-label-input", 0, 2*time.Second); err != nil {
 		return fail(err)
 	}
-	if err := fillTestID(page, "agent-model-label-input", "Claude Custom Test"); err != nil {
+	if err := fillTestID(page, "agent-model-id-input", "claude-custom-test"); err != nil {
 		return fail(err)
 	}
 	if err := clickTestID(page, "agent-model-add-button"); err != nil {
 		return fail(err)
 	}
-	if err := expectTestIDText(page, "agent-settings-model-list", "Claude Custom Test", 10*time.Second); err != nil {
+	if err := expectTestIDText(page, "agent-settings-model-list", "claude-custom-test", 10*time.Second); err != nil {
 		return fail(err)
 	}
 	if err := clickTestID(page, "back-to-chat-button"); err != nil {

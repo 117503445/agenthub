@@ -22,7 +22,7 @@ type agentProfileEnvEntry struct {
 // agentProfileModel 表示 E2E 断言使用的 profile 模型项。
 type agentProfileModel struct {
 	ID      string `json:"id"`      // ID 表示模型标识。
-	Label   string `json:"label"`   // Label 表示模型展示名称。
+	Label   string `json:"label"`   // Label 表示模型展示值，与 ID 保持一致。
 	Default bool   `json:"default"` // Default 表示是否默认模型。
 }
 
@@ -36,7 +36,6 @@ type agentProfileSnapshotItem struct {
 	Env     []agentProfileEnvEntry `json:"env"`     // Env 表示 profile 环境变量配置。
 	Models  []agentProfileModel    `json:"models"`  // Models 表示可切换模型。
 	Builtin bool                   `json:"builtin"` // Builtin 表示是否内置 profile。
-	Mock    bool                   `json:"mock"`    // Mock 表示是否 mock profile。
 }
 
 // agentProfileSnapshotPayload 表示 E2E 读取的状态快照。
@@ -140,7 +139,7 @@ func runAgentProfileCase(ctx E2EContext) (success bool) {
 		Command: "codex",
 		Args:    []string{"--skip-git-repo-check"},
 		Env:     []agentProfileEnvEntry{{Name: "CUSTOM_PROFILE_ENV", Value: "custom-value"}},
-		Models:  []agentProfileModel{{ID: "custom-model", Label: "Custom Model", Default: true}},
+		Models:  []agentProfileModel{{ID: "custom-model", Label: "custom-model", Default: true}},
 	}
 	if err := sendAgentProfileMessage(conn, "agent.profile.create", customProfile); err != nil {
 		return fail(err)
@@ -148,16 +147,16 @@ func runAgentProfileCase(ctx E2EContext) (success bool) {
 	if _, err := readPersistenceMessage(conn, "agent.profiles.changed", 5*time.Second); err != nil {
 		return fail(err)
 	}
-	if err := sendAgentProfileMessage(conn, "agent.profile.model.add", map[string]string{"profileId": "custom-codex-e2e", "id": "custom-model-2", "label": "Custom Model 2"}); err != nil {
+	if err := sendAgentProfileMessage(conn, "agent.profile.model.add", map[string]string{"profileId": "custom-codex-e2e", "id": "custom-model-2"}); err != nil {
 		return fail(err)
 	}
 	if err := assertProfileChangedContainsModel(conn, "custom-codex-e2e", "custom-model-2"); err != nil {
 		return fail(err)
 	}
-	if err := sendAgentProfileMessage(conn, "agent.profile.model.update", map[string]string{"profileId": "custom-codex-e2e", "id": "custom-model-2", "label": "Custom Model Two"}); err != nil {
+	if err := sendAgentProfileMessage(conn, "agent.profile.model.update", map[string]any{"profileId": "custom-codex-e2e", "id": "custom-model-2", "default": true}); err != nil {
 		return fail(err)
 	}
-	if err := assertProfileChangedContainsModelLabel(conn, "custom-codex-e2e", "custom-model-2", "Custom Model Two"); err != nil {
+	if err := assertProfileChangedDefaultModel(conn, "custom-codex-e2e", "custom-model-2"); err != nil {
 		return fail(err)
 	}
 	if err := sendAgentProfileMessage(conn, "agent.profile.model.delete", map[string]string{"profileId": "custom-codex-e2e", "id": "custom-model-2"}); err != nil {
@@ -231,30 +230,32 @@ func assertEffectiveEnv(data json.RawMessage) error {
 	return nil
 }
 
-// assertProfileChangedContainsModel 使用 conn、profileID 和 modelID 参数断言模型存在。
+// assertProfileChangedContainsModel 使用 conn、profileID 和 modelID 参数断言模型存在且展示值等于标识。
 func assertProfileChangedContainsModel(conn *websocket.Conn, profileID string, modelID string) error {
 	profiles, err := readAgentProfilesChanged(conn)
 	if err != nil {
 		return err
 	}
-	if !agentProfileModelExists(agentProfileByID(profiles, profileID).Models, modelID) {
-		return fmt.Errorf("profile %s 缺少模型 %s: %#v", profileID, modelID, profiles)
+	for _, model := range agentProfileByID(profiles, profileID).Models {
+		if model.ID == modelID && model.Label == modelID {
+			return nil
+		}
 	}
-	return nil
+	return fmt.Errorf("profile %s 缺少模型 %s 或展示值不等于标识: %#v", profileID, modelID, profiles)
 }
 
-// assertProfileChangedContainsModelLabel 使用 conn、profileID、modelID 和 label 参数断言模型名称。
-func assertProfileChangedContainsModelLabel(conn *websocket.Conn, profileID string, modelID string, label string) error {
+// assertProfileChangedDefaultModel 使用 conn、profileID 和 modelID 参数断言默认模型。
+func assertProfileChangedDefaultModel(conn *websocket.Conn, profileID string, modelID string) error {
 	profiles, err := readAgentProfilesChanged(conn)
 	if err != nil {
 		return err
 	}
 	for _, model := range agentProfileByID(profiles, profileID).Models {
-		if model.ID == modelID && model.Label == label {
+		if model.ID == modelID && model.Default {
 			return nil
 		}
 	}
-	return fmt.Errorf("profile %s 模型 %s 名称未更新为 %s: %#v", profileID, modelID, label, profiles)
+	return fmt.Errorf("profile %s 默认模型未更新为 %s: %#v", profileID, modelID, profiles)
 }
 
 // assertProfileChangedMissingModel 使用 conn、profileID 和 modelID 参数断言模型已删除。
@@ -295,6 +296,9 @@ func assertAgentProfileSettingsUI(ctx E2EContext) error {
 	if err := clickTestID(page, "agent-settings-button"); err != nil {
 		return err
 	}
+	if err := expectTestIDCount(page, "agent-model-label-input", 0, 2*time.Second); err != nil {
+		return err
+	}
 	if err := expectTestIDText(page, "agent-profile-list", "Custom Codex E2E", 10*time.Second); err != nil {
 		return err
 	}
@@ -308,6 +312,12 @@ func assertAgentProfileSettingsUI(ctx E2EContext) error {
 		return err
 	}
 	if err := expectTestIDText(page, "agent-profile-effective-env", "profile-secret-value", 10*time.Second); err != nil {
+		return err
+	}
+	if err := page.Locator(`[data-testid="agent-model-delete-button"][data-model-id="mock-codex-fast"]`).Click(); err != nil {
+		return err
+	}
+	if err := expectTestIDNotText(page, "agent-settings-model-list", "mock-codex-fast", 5*time.Second); err != nil {
 		return err
 	}
 	screenshot(page, filepath.Join(ctx.ScreenshotsDir, "01-agent-profile-settings.png"), true)

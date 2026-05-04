@@ -58,7 +58,6 @@ func AgentProfilesFromProviderOptions(options []AgentProviderOption) []AgentProf
 			Command: command,
 			Models:  cloneAgentModels(option.Models),
 			Builtin: option.ID == AgentProviderClaudeCode || option.ID == AgentProviderCodex || option.ID == AgentProviderMockClaudeCode || option.ID == AgentProviderMockCodex,
-			Mock:    option.ID == AgentProviderMockClaudeCode || option.ID == AgentProviderMockCodex,
 		}
 		if profile.Type == AgentProfileTypeClaudeCode {
 			profile.Env = claudeCodeBaseEnv()
@@ -95,16 +94,6 @@ func BuiltinAgentProfile(kind string, config AgentOptionsConfig, existing []Agen
 		return normalizeAgentProfile(profile)
 	}
 	return AgentProfile{}, fmt.Errorf("%w: 当前启动配置未启用该内置 Profile: %s", ErrInvalidInput, kind)
-}
-
-// hasMockProfile 使用 profiles 参数判断当前启动配置是否包含 Mock Profile。
-func hasMockProfile(profiles []AgentProfile) bool {
-	for _, profile := range profiles {
-		if profile.Mock {
-			return true
-		}
-	}
-	return false
 }
 
 // EffectiveAgentEnv 使用 backendEnv 和 profile 参数生成实际启动 agent 的环境变量。
@@ -242,16 +231,13 @@ func normalizeAgentProfileModels(models []AgentModelOption) ([]AgentModelOption,
 	defaultIndex := -1
 	for _, model := range models {
 		model.ID = strings.TrimSpace(model.ID)
-		model.Label = strings.TrimSpace(model.Label)
 		if model.ID == "" {
 			return nil, fmt.Errorf("%w: 模型标识不能为空", ErrInvalidInput)
 		}
 		if seen[model.ID] {
 			return nil, fmt.Errorf("%w: 模型已存在: %s", ErrInvalidInput, model.ID)
 		}
-		if model.Label == "" {
-			model.Label = model.ID
-		}
+		model.Label = model.ID
 		model.ReasoningLevels = normalizeReasoningLevels(model.ReasoningLevels)
 		if model.Default && defaultIndex == -1 {
 			defaultIndex = len(result)
@@ -341,23 +327,6 @@ func mockCodexEnv(config AgentOptionsConfig) []AgentEnvVar {
 		env = append(env, AgentEnvVar{Name: "ANTHROPIC_API_KEY", Value: apiKey})
 	}
 	return env
-}
-
-// mockCodexConfigArgs 使用 baseURL 参数返回 Mock Codex 固定配置参数。
-func mockCodexConfigArgs(baseURL string) []string {
-	trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if trimmed == "" {
-		return nil
-	}
-	providerConfig := fmt.Sprintf(
-		`{name="AgentHub Mock OpenAI", base_url=%q, env_key="OPENAI_API_KEY", wire_api="responses"}`,
-		trimmed,
-	)
-	return []string{
-		"--ignore-user-config",
-		"-c", `model_provider="agenthub_mock"`,
-		"-c", "model_providers.agenthub_mock=" + providerConfig,
-	}
 }
 
 // uniqueProfileID 使用 baseID 和 existing 参数生成不冲突的 Profile ID。
