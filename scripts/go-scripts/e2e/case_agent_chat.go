@@ -402,6 +402,18 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := fillTestID(page, "message-input", firstDraft); err != nil {
 		return fail(err)
 	}
+	if err := page.SetViewportSize(1440, 520); err != nil {
+		return fail(err)
+	}
+	if err := expectMessageLogScrollable(page, 24, 5*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := setMessageLogScrollTop(page, 0); err != nil {
+		return fail(err)
+	}
+	if err := expectMessageLogScrollTop(page, 0, 2, 5*time.Second); err != nil {
+		return fail(err)
+	}
 	if err := clickTestID(page, "chat-tab-add-button"); err != nil {
 		return fail(err)
 	}
@@ -420,7 +432,35 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDValue(page, "message-input", firstDraft, 5*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := expectMessageLogScrollTop(page, 0, 8, 5*time.Second); err != nil {
+		return fail(err)
+	}
+	inactivePrompt := "离开期间输出滚动测试"
+	if err := fillTestID(page, "message-input", inactivePrompt); err != nil {
+		return fail(err)
+	}
+	if err := page.Keyboard().Press("Enter"); err != nil {
+		return fail(err)
+	}
 	if err := page.Locator(`[data-testid="chat-tab"]`, playwright.PageLocatorOptions{HasText: "聊天 2"}).Click(); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDAttributeValue(page, "chat-status-dot", "data-status", "success", 30*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := page.Locator(`[data-testid="chat-tab"]`, playwright.PageLocatorOptions{HasText: firstPrompt}).Click(); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDText(page, "message-log", inactivePrompt, 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectMessageLogScrolledToBottom(page, 8, 5*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := page.Locator(`[data-testid="chat-tab"]`, playwright.PageLocatorOptions{HasText: "聊天 2"}).Click(); err != nil {
+		return fail(err)
+	}
+	if err := page.SetViewportSize(1440, 920); err != nil {
 		return fail(err)
 	}
 	if err := expectTestIDValue(page, "message-input", secondDraft, 5*time.Second); err != nil {
@@ -441,7 +481,7 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDValue(page, "agent-model-select", "mock-claude-sonnet", 10*time.Second); err != nil {
 		return fail(err)
 	}
-	events = append(events, reportStep("新聊天默认继承上一次选择的 agent、模型和推理级别；每个聊天 Tab 保留独立输入草稿；E2E 使用 Mock Claude Code 命令连接服务端 mock 模型服务。"))
+	events = append(events, reportStep("新聊天默认继承上一次选择的 agent、模型和推理级别；每个聊天 Tab 保留独立输入草稿和滚动位置，离开期间有新输出时切回会滚动到底部；E2E 使用 Mock Claude Code 命令连接服务端 mock 模型服务。"))
 
 	secondPrompt := "第二条长流式测试"
 	if err := fillTestID(page, "message-input", secondPrompt); err != nil {

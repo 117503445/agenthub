@@ -33,6 +33,7 @@ import type {
   ChatMessage,
   ChatMessageDeltaPayload,
   ChatMessageDonePayload,
+  ChatScrollMemory,
   ChatTerminalIndicator,
   ChatVisualStatus,
   ComposerImageAttachment,
@@ -49,6 +50,7 @@ function App() {
   const wsRef = useRef<WebSocket | null>(null)
   const pendingCreatedChatProjectIdRef = useRef('')
   const chatsRef = useRef<Chat[]>([])
+  const chatScrollMemoryRef = useRef<Record<string, ChatScrollMemory>>({})
   const [authChecked, setAuthChecked] = useState(false)
   const [authRequired, setAuthRequired] = useState(false)
   const [authToken, setAuthToken] = useState(() => readStoredAgentHubToken())
@@ -56,6 +58,7 @@ function App() {
   const [authErrorText, setAuthErrorText] = useState('')
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting')
   const [hostname, setHostname] = useState('')
+  const [backendVersion, setBackendVersion] = useState('')
   const [projects, setProjects] = useState<Project[]>([])
   const [chats, setChats] = useState<Chat[]>([])
   const [agentProviders, setAgentProviders] = useState(fallbackAgentProviders)
@@ -254,6 +257,32 @@ function App() {
     })
   }, [])
 
+  // pruneChatScrollMemory 使用 chatIds 参数清理已不存在聊天页的滚动位置。
+  const pruneChatScrollMemory = useCallback((chatIds: Set<string>) => {
+    const next: Record<string, ChatScrollMemory> = {}
+    for (const [chatId, memory] of Object.entries(chatScrollMemoryRef.current)) {
+      if (chatIds.has(chatId)) {
+        next[chatId] = memory
+      }
+    }
+    chatScrollMemoryRef.current = next
+  }, [])
+
+  // removeChatScrollMemory 使用 chatIds 参数移除指定聊天页的滚动位置。
+  const removeChatScrollMemory = useCallback((chatIds: string[]) => {
+    for (const chatId of chatIds) {
+      delete chatScrollMemoryRef.current[chatId]
+    }
+  }, [])
+
+  // readChatScrollMemory 使用 chatId 参数读取聊天页滚动位置。
+  const readChatScrollMemory = useCallback((chatId: string) => chatScrollMemoryRef.current[chatId], [])
+
+  // saveChatScrollMemory 使用 chatId 和 memory 参数保存聊天页滚动位置。
+  const saveChatScrollMemory = useCallback((chatId: string, memory: ChatScrollMemory) => {
+    chatScrollMemoryRef.current[chatId] = memory
+  }, [])
+
   // updateSelectedComposerValue 使用 value 参数更新当前聊天页草稿。
   const updateSelectedComposerValue = useCallback((value: string) => {
     const chatId = selectedChat?.id
@@ -389,6 +418,7 @@ function App() {
   const handleServerMessage = useCallback(
     (message: ServerMessage) => {
       setHostname(message.hostname || window.location.hostname || 'unknown')
+      setBackendVersion(message.version || '')
       if (message.type === 'state.snapshot') {
         const payload = message.payload as SnapshotPayload
         const nextProjects = sortByCreatedAt(payload.projects ?? [])
@@ -399,6 +429,7 @@ function App() {
         setProjects(nextProjects)
         setChats(nextChats)
         pruneComposerValues(nextChatIds)
+        pruneChatScrollMemory(nextChatIds)
         setChatIndicators((current) => {
           const next: Record<string, ChatTerminalIndicator> = {}
           for (const [chatId, status] of Object.entries(current)) {
@@ -445,6 +476,7 @@ function App() {
         setSelectedProjectId((current) => (current === payload.id ? '' : current))
         setSelectedChatId((current) => (payload.chatIds.includes(current) ? '' : current))
         removeComposerValues(payload.chatIds)
+        removeChatScrollMemory(payload.chatIds)
         resetProjectForm(null)
         setProjectDialogOpen(false)
         return
@@ -476,6 +508,7 @@ function App() {
         })
         setSelectedChatId((current) => (current === payload.id ? '' : current))
         removeComposerValues([payload.id])
+        removeChatScrollMemory([payload.id])
         return
       }
       if (message.type === 'chat.message.delta') {
@@ -545,7 +578,16 @@ function App() {
         setErrorText(payload.message ?? '服务端错误')
       }
     },
-    [clearChatIndicator, markChatIndicator, notifyAgentCompletion, pruneComposerValues, removeComposerValues, resetProjectForm],
+    [
+      clearChatIndicator,
+      markChatIndicator,
+      notifyAgentCompletion,
+      pruneChatScrollMemory,
+      pruneComposerValues,
+      removeChatScrollMemory,
+      removeComposerValues,
+      resetProjectForm,
+    ],
   )
 
   useEffect(() => {
@@ -886,6 +928,8 @@ function App() {
         {routeView === 'settings' ? (
           <AgentSettingsPage
             connectionState={connectionState}
+            backendVersion={backendVersion}
+            hostname={hostname}
             claudeCodeModels={claudeCodeModels}
             newClaudeModelID={newClaudeModelID}
             newClaudeModelLabel={newClaudeModelLabel}
@@ -923,6 +967,8 @@ function App() {
             onClearChatIndicator={clearChatIndicator}
             onCopyMessage={(message) => void copyMessageText(message)}
             onExecutePlan={executePlan}
+            onReadChatScrollMemory={readChatScrollMemory}
+            onSaveChatScrollMemory={saveChatScrollMemory}
             onComposerValueChange={updateSelectedComposerValue}
             onComposerImagesChange={updateSelectedComposerImages}
             onPlanModeChange={updateSelectedPlanMode}

@@ -485,6 +485,125 @@ func expectTestIDAttributeValue(page playwright.Page, id string, name string, ex
 	return fmt.Errorf("等待元素 %q 属性 %q 为 %q 超时，实际值: %s", id, name, expected, lastValues)
 }
 
+// setMessageLogScrollTop 使用 page 和 top 参数设置消息列表滚动位置。
+func setMessageLogScrollTop(page playwright.Page, top float64) error {
+	_, err := page.Evaluate(`(top) => {
+		const element = document.querySelector('[data-testid="message-log"]');
+		if (!element) {
+			throw new Error('missing message-log');
+		}
+		element.scrollTop = top;
+		element.dispatchEvent(new Event('scroll', { bubbles: true }));
+	}`, top)
+	return err
+}
+
+// expectMessageLogScrollable 使用 page、minimumGap 和 timeout 参数等待消息列表可滚动。
+func expectMessageLogScrollable(page playwright.Page, minimumGap float64, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastState string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := page.Evaluate(`(minimumGap) => {
+			const element = document.querySelector('[data-testid="message-log"]');
+			if (!element) {
+				return 'missing message-log';
+			}
+			const gap = element.scrollHeight - element.clientHeight;
+			if (gap > minimumGap) {
+				return '';
+			}
+			return 'gap=' + gap.toFixed(2) + ', scrollHeight=' + element.scrollHeight + ', clientHeight=' + element.clientHeight;
+		}`, minimumGap)
+		if err == nil {
+			if text, ok := value.(string); ok {
+				lastState = text
+				if text == "" {
+					return nil
+				}
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待消息列表可滚动超时，最后错误: %w", lastErr)
+	}
+	return fmt.Errorf("等待消息列表可滚动超时，最后状态: %s", lastState)
+}
+
+// expectMessageLogScrollTop 使用 page、expected、tolerance 和 timeout 参数等待消息列表滚动位置接近预期。
+func expectMessageLogScrollTop(page playwright.Page, expected float64, tolerance float64, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastState string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := page.Evaluate(`([expected, tolerance]) => {
+			const element = document.querySelector('[data-testid="message-log"]');
+			if (!element) {
+				return 'missing message-log';
+			}
+			const actual = element.scrollTop;
+			const diff = Math.abs(actual - expected);
+			if (diff <= tolerance) {
+				return '';
+			}
+			return 'actual=' + actual.toFixed(2) + ', expected=' + expected.toFixed(2) + ', diff=' + diff.toFixed(2);
+		}`, []any{expected, tolerance})
+		if err == nil {
+			if text, ok := value.(string); ok {
+				lastState = text
+				if text == "" {
+					return nil
+				}
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待消息列表滚动位置为 %.2f 超时，最后错误: %w", expected, lastErr)
+	}
+	return fmt.Errorf("等待消息列表滚动位置为 %.2f 超时，最后状态: %s", expected, lastState)
+}
+
+// expectMessageLogScrolledToBottom 使用 page、tolerance 和 timeout 参数等待消息列表滚动到底部。
+func expectMessageLogScrolledToBottom(page playwright.Page, tolerance float64, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastState string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := page.Evaluate(`(tolerance) => {
+			const element = document.querySelector('[data-testid="message-log"]');
+			if (!element) {
+				return 'missing message-log';
+			}
+			const gap = element.scrollHeight - element.clientHeight - element.scrollTop;
+			if (Math.abs(gap) <= tolerance) {
+				return '';
+			}
+			return 'gap=' + gap.toFixed(2) + ', scrollTop=' + element.scrollTop.toFixed(2) + ', scrollHeight=' + element.scrollHeight + ', clientHeight=' + element.clientHeight;
+		}`, tolerance)
+		if err == nil {
+			if text, ok := value.(string); ok {
+				lastState = text
+				if text == "" {
+					return nil
+				}
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待消息列表滚动到底部超时，最后错误: %w", lastErr)
+	}
+	return fmt.Errorf("等待消息列表滚动到底部超时，最后状态: %s", lastState)
+}
+
 // expectTestIDNonEmpty 使用 page、id 和 timeout 参数等待元素文本非空。
 func expectTestIDNonEmpty(page playwright.Page, id string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)

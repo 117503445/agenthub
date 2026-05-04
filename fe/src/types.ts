@@ -217,6 +217,13 @@ export interface Chat {
   updatedAt: string
 }
 
+export interface ChatScrollMemory {
+  /** scrollTop 表示消息列表的垂直滚动位置。 */
+  scrollTop: number
+  /** signature 表示保存滚动位置时的聊天内容签名。 */
+  signature: string
+}
+
 export interface SnapshotPayload {
   /** projects 表示所有 project。 */
   projects: Project[]

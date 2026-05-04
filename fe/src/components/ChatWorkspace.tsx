@@ -12,6 +12,7 @@ import type {
   AgentSkillOption,
   Chat,
   ChatMessage,
+  ChatScrollMemory,
   ChatTerminalIndicator,
   ComposerImageAttachment,
   ConnectionState,
@@ -75,6 +76,10 @@ interface ChatWorkspaceProps {
   onCopyMessage: (message: ChatMessage) => void
   /** onExecutePlan 使用 plan 参数执行已确认 plan。 */
   onExecutePlan: (plan: PlanApproval) => void
+  /** onReadChatScrollMemory 使用 chatId 参数读取聊天页滚动位置。 */
+  onReadChatScrollMemory: (chatId: string) => ChatScrollMemory | undefined
+  /** onSaveChatScrollMemory 使用 chatId 和 memory 参数保存聊天页滚动位置。 */
+  onSaveChatScrollMemory: (chatId: string, memory: ChatScrollMemory) => void
   /** onComposerValueChange 使用 value 参数更新输入框内容。 */
   onComposerValueChange: (value: string) => void
   /** onComposerImagesChange 使用 images 参数更新图片附件草稿。 */
@@ -120,6 +125,8 @@ export function ChatWorkspace({
   onClearChatIndicator,
   onCopyMessage,
   onExecutePlan,
+  onReadChatScrollMemory,
+  onSaveChatScrollMemory,
   onComposerValueChange,
   onComposerImagesChange,
   onPlanModeChange,
@@ -214,7 +221,15 @@ export function ChatWorkspace({
 
         {selectedChat ? (
           <TabsContent value={selectedChat.id} onClickCapture={() => onClearChatIndicator(selectedChat.id)}>
-            <MessageLog chat={selectedChat} copiedMessageId={copiedMessageId} onCopyMessage={onCopyMessage} onExecutePlan={onExecutePlan} />
+            <MessageLog
+              key={selectedChat.id}
+              chat={selectedChat}
+              copiedMessageId={copiedMessageId}
+              onCopyMessage={onCopyMessage}
+              onExecutePlan={onExecutePlan}
+              onReadScrollMemory={onReadChatScrollMemory}
+              onSaveScrollMemory={onSaveChatScrollMemory}
+            />
             <Composer
               selectedChat={selectedChat}
               connectionState={connectionState}

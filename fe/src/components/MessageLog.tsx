@@ -1,8 +1,9 @@
+import { useCallback, useLayoutEffect, useMemo, useRef } from 'react'
 import { Check, Copy, Loader2, Wrench } from 'lucide-react'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { PlanCard } from './PlanCard'
 import { formatTime, messagePartsForRender, toolCommandTitle } from '../lib/chat'
-import type { Chat, ChatMessage, PlanApproval } from '../types'
+import type { Chat, ChatMessage, ChatScrollMemory, PlanApproval } from '../types'
 
 interface MessageLogProps {
   /** chat 表示当前聊天页。 */
@@ -13,12 +14,97 @@ interface MessageLogProps {
   onCopyMessage: (message: ChatMessage) => void
   /** onExecutePlan 使用 plan 参数执行已确认 plan。 */
   onExecutePlan: (plan: PlanApproval) => void
+  /** onReadScrollMemory 使用 chatId 参数读取聊天页滚动位置。 */
+  onReadScrollMemory: (chatId: string) => ChatScrollMemory | undefined
+  /** onSaveScrollMemory 使用 chatId 和 memory 参数保存聊天页滚动位置。 */
+  onSaveScrollMemory: (chatId: string, memory: ChatScrollMemory) => void
+}
+
+// buildChatScrollSignature 使用 chat 参数生成用于判断内容是否变化的签名。
+function buildChatScrollSignature(chat: Chat) {
+  return chat.messages
+    .map((message) => {
+      const toolState =
+        message.toolCalls?.map((tool) => `${tool.id}:${tool.updatedAt}:${tool.status}:${tool.input?.length ?? 0}:${tool.output?.length ?? 0}`).join(',') ?? ''
+      const partState =
+        message.parts
+          ?.map((part) => `${part.id}:${part.updatedAt}:${part.text?.length ?? 0}:${part.toolCall?.status ?? ''}:${part.toolCall?.output?.length ?? 0}`)
+          .join(',') ?? ''
+      return [
+        message.id,
+        message.role,
+        message.status,
+        message.updatedAt,
+        message.text.length,
+        message.images?.length ?? 0,
+        message.toolCalls?.length ?? 0,
+        toolState,
+        partState,
+      ].join(':')
+    })
+    .join('|')
 }
 
 // MessageLog 使用 props 参数渲染聊天消息列表。
-export function MessageLog({ chat, copiedMessageId, onCopyMessage, onExecutePlan }: MessageLogProps) {
+export function MessageLog({
+  chat,
+  copiedMessageId,
+  onCopyMessage,
+  onExecutePlan,
+  onReadScrollMemory,
+  onSaveScrollMemory,
+}: MessageLogProps) {
+  const logRef = useRef<HTMLDivElement | null>(null)
+  const scrollSignature = useMemo(() => buildChatScrollSignature(chat), [chat])
+  const scrollSignatureRef = useRef(scrollSignature)
+
+  useLayoutEffect(() => {
+    scrollSignatureRef.current = scrollSignature
+  }, [scrollSignature])
+
+  // saveCurrentScroll 使用 element 参数保存当前聊天页滚动位置。
+  const saveCurrentScroll = useCallback(
+    (element: HTMLDivElement | null) => {
+      if (!element) {
+        return
+      }
+      onSaveScrollMemory(chat.id, {
+        scrollTop: element.scrollTop,
+        signature: scrollSignatureRef.current,
+      })
+    },
+    [chat.id, onSaveScrollMemory],
+  )
+
+  useLayoutEffect(() => {
+    const element = logRef.current
+    if (!element) {
+      return
+    }
+    const memory = onReadScrollMemory(chat.id)
+    const restoreSavedPosition = memory?.signature === scrollSignatureRef.current
+    const frame = window.requestAnimationFrame(() => {
+      const nextElement = logRef.current
+      if (!nextElement) {
+        return
+      }
+      nextElement.scrollTop = restoreSavedPosition && memory ? memory.scrollTop : nextElement.scrollHeight
+      saveCurrentScroll(nextElement)
+    })
+    return () => {
+      window.cancelAnimationFrame(frame)
+      saveCurrentScroll(logRef.current)
+    }
+  }, [chat.id, onReadScrollMemory, saveCurrentScroll])
+
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5" data-testid="message-log" aria-live="polite">
+    <div
+      ref={logRef}
+      className="min-h-0 flex-1 overflow-y-auto px-4 py-5"
+      data-testid="message-log"
+      aria-live="polite"
+      onScroll={(event) => saveCurrentScroll(event.currentTarget)}
+    >
       {chat.messages.length > 0 ? (
         <div className="mx-auto flex max-w-4xl flex-col gap-3">
           {chat.messages.map((message) => {

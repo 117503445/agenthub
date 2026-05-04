@@ -6,6 +6,10 @@ import type { AgentModelOption, ConnectionState } from '../types'
 interface AgentSettingsPageProps {
   /** connectionState 表示当前 WebSocket 连接状态。 */
   connectionState: ConnectionState
+  /** backendVersion 表示后端构建版本。 */
+  backendVersion: string
+  /** hostname 表示后端机器名。 */
+  hostname: string
   /** claudeCodeModels 表示 Claude Code 模型列表。 */
   claudeCodeModels: AgentModelOption[]
   /** newClaudeModelID 表示新增模型标识。 */
@@ -25,6 +29,8 @@ interface AgentSettingsPageProps {
 // AgentSettingsPage 使用 props 参数渲染 agent 设置页。
 export function AgentSettingsPage({
   connectionState,
+  backendVersion,
+  hostname,
   claudeCodeModels,
   newClaudeModelID,
   newClaudeModelLabel,
@@ -38,7 +44,7 @@ export function AgentSettingsPage({
       <header className="flex min-h-16 items-center justify-between border-b border-slate-200 bg-white px-4">
         <div>
           <h2 className="text-lg font-semibold">Agent 设置</h2>
-          <p className="text-xs text-slate-500">维护 Claude Code 可选模型</p>
+          <p className="text-xs text-slate-500">维护模型选项和服务信息</p>
         </div>
         <button
           data-testid="back-to-chat-button"
@@ -68,40 +74,59 @@ export function AgentSettingsPage({
               ))}
             </div>
           </section>
-          <form className="rounded-md border border-slate-200 bg-white p-4" onSubmit={onAddClaudeModel}>
-            <h3 className="text-base font-semibold text-slate-900">新增模型</h3>
-            <label htmlFor="agent-model-id-input" className="mt-4 block text-xs font-medium text-slate-500">
-              模型标识
-            </label>
-            <Input
-              id="agent-model-id-input"
-              data-testid="agent-model-id-input"
-              value={newClaudeModelID}
-              onChange={(event) => onModelIDChange(event.target.value)}
-              className="mt-1 h-9 w-full rounded-md border border-slate-300 px-3 font-mono text-sm outline-none transition focus:border-teal-600 focus:ring-2 focus:ring-teal-100"
-              placeholder="claude-sonnet-4-6"
-            />
-            <label htmlFor="agent-model-label-input" className="mt-3 block text-xs font-medium text-slate-500">
-              展示名称
-            </label>
-            <Input
-              id="agent-model-label-input"
-              data-testid="agent-model-label-input"
-              value={newClaudeModelLabel}
-              onChange={(event) => onModelLabelChange(event.target.value)}
-              className="mt-1 h-9 w-full rounded-md border border-slate-300 px-3 text-sm outline-none transition focus:border-teal-600 focus:ring-2 focus:ring-teal-100"
-              placeholder="Claude Sonnet 4.6"
-            />
-            <button
-              data-testid="agent-model-add-button"
-              type="submit"
-              disabled={connectionState !== 'open' || !newClaudeModelID.trim()}
-              className="mt-4 inline-flex h-9 w-full cursor-pointer items-center justify-center gap-2 rounded-md bg-teal-600 px-3 text-sm font-medium text-white transition hover:bg-teal-500 disabled:cursor-not-allowed disabled:bg-slate-300"
-            >
-              <Plus className="h-4 w-4" />
-              添加
-            </button>
-          </form>
+          <div className="grid gap-4">
+            <form className="rounded-md border border-slate-200 bg-white p-4" onSubmit={onAddClaudeModel}>
+              <h3 className="text-base font-semibold text-slate-900">新增模型</h3>
+              <label htmlFor="agent-model-id-input" className="mt-4 block text-xs font-medium text-slate-500">
+                模型标识
+              </label>
+              <Input
+                id="agent-model-id-input"
+                data-testid="agent-model-id-input"
+                value={newClaudeModelID}
+                onChange={(event) => onModelIDChange(event.target.value)}
+                className="mt-1 h-9 w-full rounded-md border border-slate-300 px-3 font-mono text-sm outline-none transition focus:border-teal-600 focus:ring-2 focus:ring-teal-100"
+                placeholder="claude-sonnet-4-6"
+              />
+              <label htmlFor="agent-model-label-input" className="mt-3 block text-xs font-medium text-slate-500">
+                展示名称
+              </label>
+              <Input
+                id="agent-model-label-input"
+                data-testid="agent-model-label-input"
+                value={newClaudeModelLabel}
+                onChange={(event) => onModelLabelChange(event.target.value)}
+                className="mt-1 h-9 w-full rounded-md border border-slate-300 px-3 text-sm outline-none transition focus:border-teal-600 focus:ring-2 focus:ring-teal-100"
+                placeholder="Claude Sonnet 4.6"
+              />
+              <button
+                data-testid="agent-model-add-button"
+                type="submit"
+                disabled={connectionState !== 'open' || !newClaudeModelID.trim()}
+                className="mt-4 inline-flex h-9 w-full cursor-pointer items-center justify-center gap-2 rounded-md bg-teal-600 px-3 text-sm font-medium text-white transition hover:bg-teal-500 disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                <Plus className="h-4 w-4" />
+                添加
+              </button>
+            </form>
+            <section className="rounded-md border border-slate-200 bg-white p-4" data-testid="agent-settings-backend-info">
+              <h3 className="text-base font-semibold text-slate-900">后端信息</h3>
+              <dl className="mt-4 grid gap-3 text-sm">
+                <div className="min-w-0">
+                  <dt className="text-xs font-medium text-slate-500">版本</dt>
+                  <dd className="mt-1 truncate font-mono text-slate-900" data-testid="backend-version-text" title={backendVersion || '-'}>
+                    {backendVersion || '-'}
+                  </dd>
+                </div>
+                <div className="min-w-0">
+                  <dt className="text-xs font-medium text-slate-500">机器名</dt>
+                  <dd className="mt-1 truncate font-mono text-slate-900" data-testid="backend-hostname-text" title={hostname || '-'}>
+                    {hostname || '-'}
+                  </dd>
+                </div>
+              </dl>
+            </section>
+          </div>
         </div>
       </div>
     </div>

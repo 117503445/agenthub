@@ -110,10 +110,11 @@ func Run(args []string) int {
 // registeredCases 返回当前仓库内置 E2E 用例。
 func registeredCases() map[string]E2ECase {
 	return map[string]E2ECase{
-		"case_agent_chat":   {Name: "case_agent_chat", Run: runAgentChatCase},
-		"case_default_port": {Name: "case_default_port", Run: runDefaultPortCase},
-		"case_persistence":  {Name: "case_persistence", Run: runPersistenceCase},
-		"case_project_icon": {Name: "case_project_icon", Run: runProjectIconCase},
+		"case_agent_chat":               {Name: "case_agent_chat", Run: runAgentChatCase},
+		"case_default_port":             {Name: "case_default_port", Run: runDefaultPortCase},
+		"case_persistence":              {Name: "case_persistence", Run: runPersistenceCase},
+		"case_project_icon":             {Name: "case_project_icon", Run: runProjectIconCase},
+		"case_settings_backend_version": {Name: "case_settings_backend_version", Run: runSettingsBackendVersionCase},
 		"case_token_auth": {Name: "case_token_auth", Run: runTokenAuthCase, Env: map[string]string{
 			"AGENTHUB_TOKEN": e2eAgentHubToken,
 		}},
