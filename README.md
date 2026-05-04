@@ -1,6 +1,6 @@
-# agenthub
+# AgentHub
 
-这是一个 Go WebSocket 后端 + React 前端项目。
+AgentHub 是一个用于在浏览器中管理本地代码项目和 AI Agent 会话的 Web 工作台。后端运行在本机，前端内嵌在 Go 服务中，通过 WebSocket 同步状态，并可启动 Codex、Claude Code 或已配置的 Agent Profile 来处理项目内的聊天任务。
 
 ## 安装
 
@@ -16,50 +16,42 @@ curl -fsSL https://raw.githubusercontent.com/117503445/agenthub/master/install.s
 curl -fsSL https://raw.githubusercontent.com/117503445/agenthub/master/install.sh | AGENTHUB_INSTALL_DIR="$HOME/.local/bin" sh
 ```
 
-安装后运行：
+## 启动
 
 ```bash
 agenthub
 ```
 
-## 技术栈
+服务默认监听 `17375` 端口。启动后在浏览器打开：
 
-- 后端：Go、`github.com/coder/websocket`、zerolog
-- 前端：React、TypeScript、Vite、Tailwind CSS、Lucide React
-- E2E：Go、playwright-go、Chromium
-- 任务运行：go-task
-
-## 常用命令
-
-```bash
-go-task run:web
+```text
+http://127.0.0.1:17375
 ```
 
-运行后端服务，默认监听 `17375` 端口，可用 `AGENTHUB_PORT` 或 `--port` 修改。
-如果 `.env` 中配置了非空 `AGENTHUB_TOKEN`，或启动时传入 `--token`，前端需要输入相同 token 才能连接 WebSocket；CLI 参数优先于环境变量。
+可以通过环境变量或 CLI 参数修改端口：
 
 ```bash
-go-task fe:dev
+AGENTHUB_PORT=18080 agenthub
+agenthub --port 18080
 ```
 
-运行前端开发服务器，前端会把 `/ws` 和 `/healthz` 代理到 Go 后端。
+如需开启访问 token：
 
 ```bash
-go-task build:web
+AGENTHUB_TOKEN="your-token" agenthub
+agenthub --token "your-token"
 ```
 
-构建前端静态资源，并打包到 Go 后端二进制中。
+如需指定数据目录：
 
 ```bash
-go-task e2e -- --case case_ws
-go-task e2e
+AGENTHUB_DATA="$HOME/.agenthub/data" agenthub
 ```
 
-运行单个或全部 E2E 测试。测试会自动启动构建后的后端服务，并验证 WebSocket 状态恢复、子路径加载和 agent 聊天流程。
-每个 E2E 用例会独立启动一套后端服务，服务日志写入该用例目录，例如 `data/e2e/case_ws/logs/server.log`，用例结束后会关闭服务。
+## 使用
 
-```bash
-go-task test
-```
-
-运行 Go 单元测试、集成测试和全部 E2E 测试。
+1. 打开 Web 页面后，选择或新增 Project。
+2. 在 Project 中新建聊天页，选择 Agent Profile、模型和思考深度。
+3. 输入 Prompt 后，AgentHub 会启动对应 agent 并流式展示返回结果。
+4. Agent 输出中可以继续输入新 Prompt，也可以点击停止按钮中断当前输出。
+5. 在设置页中可以管理 Agent Profile、模型列表和 Profile 环境变量。
