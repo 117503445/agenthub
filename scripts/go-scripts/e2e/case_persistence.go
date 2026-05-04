@@ -36,14 +36,14 @@ type persistenceProjectChangedPayload struct {
 
 // runPersistenceCase 使用 ctx 参数运行后端 JSON 持久化用例。
 func runPersistenceCase(ctx E2EContext) (success bool) {
-	steps := make([]string, 0)
+	events := make([]reportEvent, 0)
 	defer func() {
-		writePersistenceReport(ctx.OutputDir, success, steps)
+		writePersistenceReport(ctx.OutputDir, success, events)
 	}()
 
 	fail := func(err error) bool {
 		ctx.Logger.Errorf("后端持久化 E2E 失败: %v", err)
-		steps = append(steps, fmt.Sprintf("用例失败: %v", err))
+		events = append(events, reportStep(fmt.Sprintf("用例失败: %v", err)))
 		return false
 	}
 
@@ -64,18 +64,18 @@ func runPersistenceCase(ctx E2EContext) (success bool) {
 	if err != nil {
 		return fail(err)
 	}
-	steps = append(steps, "通过 WebSocket 创建 project，服务端返回 project.changed。")
+	events = append(events, reportStep("通过 WebSocket 创建 project，服务端返回 project.changed。"))
 
 	statePath := filepath.Join(ctx.DataDir, "state.json")
 	if err := waitPersistenceState(statePath, project.Path, 5*time.Second); err != nil {
 		return fail(err)
 	}
-	steps = append(steps, "写操作完成后，AGENTHUB_DATA 下立即出现 state.json，并包含新增 project。")
+	events = append(events, reportStep("写操作完成后，AGENTHUB_DATA 下立即出现 state.json，并包含新增 project。"))
 
 	if err := assertSameDataDirSecondProcessExits(ctx); err != nil {
 		return fail(err)
 	}
-	steps = append(steps, "原服务存活时，同一个 AGENTHUB_DATA 的第二个进程会自行退出。")
+	events = append(events, reportStep("原服务存活时，同一个 AGENTHUB_DATA 的第二个进程会自行退出。"))
 
 	conn.CloseNow()
 	ctx.StopServer()
@@ -99,7 +99,7 @@ func runPersistenceCase(ctx E2EContext) (success bool) {
 	if err := assertPersistenceSnapshotHasProject(snapshotMessage.Payload, project.Path); err != nil {
 		return fail(err)
 	}
-	steps = append(steps, "服务重启后从 state.json 恢复 project，并在首个状态快照中返回。")
+	events = append(events, reportStep("服务重启后从 state.json 恢复 project，并在首个状态快照中返回。"))
 	return true
 }
 
@@ -283,20 +283,7 @@ func assertPersistenceSnapshotHasProject(payload json.RawMessage, projectPath st
 	return fmt.Errorf("重启快照未包含 project: %s", projectPath)
 }
 
-// writePersistenceReport 使用 outputDir、success 和 steps 参数写入持久化测试报告。
-func writePersistenceReport(outputDir string, success bool, steps []string) {
-	report := []string{
-		"# 后端 JSON 持久化 E2E 测试报告",
-		"",
-		fmt.Sprintf("- 结果: %s", passText(success)),
-		"- 日志: [test.log](logs/test.log)",
-		"- 服务日志: [server.log](logs/server.log)",
-		"",
-		"## 步骤",
-		"",
-	}
-	for _, step := range steps {
-		report = append(report, "- "+step)
-	}
-	writeFile(filepath.Join(outputDir, "report.md"), strings.Join(report, "\n")+"\n")
+// writePersistenceReport 使用 outputDir、success 和 events 参数写入持久化测试报告。
+func writePersistenceReport(outputDir string, success bool, events []reportEvent) {
+	writeE2EReport(outputDir, "后端 JSON 持久化 E2E 测试报告", success, events)
 }

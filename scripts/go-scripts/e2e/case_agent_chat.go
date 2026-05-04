@@ -12,21 +12,21 @@ import (
 // runAgentChatCase 使用 ctx 参数运行 Agent 聊天 E2E 用例。
 func runAgentChatCase(ctx E2EContext) (success bool) {
 	ctx.Logger.Infof("打开页面: %s", ctx.BaseURL)
-	steps := make([]string, 0)
+	events := make([]reportEvent, 0)
 	defer func() {
-		writeAgentChatReport(ctx.OutputDir, success, steps)
+		writeAgentChatReport(ctx.OutputDir, success, events)
 	}()
 
 	if _, err := osStat(filepath.Join(ctx.LogsDir, "server.log")); err != nil {
 		ctx.Logger.Errorf("未找到当前用例服务日志: %v", err)
-		steps = append(steps, fmt.Sprintf("用例失败: %v", err))
+		events = append(events, reportStep(fmt.Sprintf("用例失败: %v", err)))
 		return false
 	}
 
 	session, err := newBrowserSession(1440, 920)
 	if err != nil {
 		ctx.Logger.Errorf("创建浏览器失败: %v", err)
-		steps = append(steps, fmt.Sprintf("用例失败: %v", err))
+		events = append(events, reportStep(fmt.Sprintf("用例失败: %v", err)))
 		return false
 	}
 	defer session.Close()
@@ -35,7 +35,8 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	fail := func(err error) bool {
 		ctx.Logger.Errorf("Agent 聊天 E2E 失败: %v", err)
 		screenshot(page, filepath.Join(ctx.ScreenshotsDir, "failed.png"), true)
-		steps = append(steps, fmt.Sprintf("用例失败: %v", err))
+		events = append(events, reportStep(fmt.Sprintf("用例失败: %v", err)))
+		events = append(events, reportImage("失败现场", "screenshots/failed.png"))
 		return false
 	}
 
@@ -82,7 +83,7 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectLocatorBackgroundLuminance(page.Locator("aside"), 235, 2*time.Second); err != nil {
 		return fail(err)
 	}
-	steps = append(steps, "前端使用 paseo 浅色工作台风格，侧栏左下角集中展示连接状态、机器名、添加项目和设置入口。")
+	events = append(events, reportStep("前端使用 paseo 浅色工作台风格，侧栏左下角集中展示连接状态、机器名、添加项目和设置入口。"))
 
 	projectPath := ctx.RootDir
 	projectDisplayName := filepath.Base(projectPath)
@@ -166,7 +167,8 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 		return fail(err)
 	}
 	screenshot(page, filepath.Join(ctx.ScreenshotsDir, "01-chat-created.png"), true)
-	steps = append(steps, "服务启动后自动添加 Git 工作目录为 project；顶部同一行展示完整路径和单份 git 信息，侧边栏只显示最后一级目录名，任务栏固定在底部。")
+	events = append(events, reportStep("服务启动后自动添加 Git 工作目录为 project；顶部同一行展示完整路径和单份 git 信息，侧边栏只显示最后一级目录名，任务栏固定在底部。"))
+	events = append(events, reportImage("项目和聊天", "screenshots/01-chat-created.png"))
 
 	if err := clickTestID(page, "agent-settings-button"); err != nil {
 		return fail(err)
@@ -189,12 +191,12 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := clickTestID(page, "back-to-chat-button"); err != nil {
 		return fail(err)
 	}
-	steps = append(steps, "Agent 设置页可以向 Claude Code 模型选项列表添加新模型。")
+	events = append(events, reportStep("Agent 设置页可以向 Claude Code 模型选项列表添加新模型。"))
 
 	if err := expectComposerSelectWidthsFollowOptions(page, 5*time.Second); err != nil {
 		return fail(err)
 	}
-	steps = append(steps, "聊天框中的选择框宽度会根据当前实际选项内容调整。")
+	events = append(events, reportStep("聊天框中的选择框宽度会根据当前实际选项内容调整。"))
 
 	if err := selectTestID(page, "agent-provider-select", "claude-code"); err != nil {
 		return fail(err)
@@ -217,7 +219,7 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDNotText(page, "composer-agent-config", "Agent", 2*time.Second); err != nil {
 		return fail(err)
 	}
-	steps = append(steps, "聊天框下方可以选择 agent、模型和推理级别，未输入时不显示发送按钮和 Agent 标签。")
+	events = append(events, reportStep("聊天框下方可以选择 agent、模型和推理级别，未输入时不显示发送按钮和 Agent 标签。"))
 
 	if err := fillTestID(page, "message-input", "/"); err != nil {
 		return fail(err)
@@ -270,7 +272,7 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := fillTestID(page, "message-input", ""); err != nil {
 		return fail(err)
 	}
-	steps = append(steps, "输入 / 时可以选择后端返回的 skills，支持点击、键盘上下键选择和 Tab 快速确认当前项，并把选中的 skill 插入聊天输入框。")
+	events = append(events, reportStep("输入 / 时可以选择后端返回的 skills，支持点击、键盘上下键选择和 Tab 快速确认当前项，并把选中的 skill 插入聊天输入框。"))
 
 	if err := expectImageAddButtonUsesPictureLogo(page, 5*time.Second); err != nil {
 		return fail(err)
@@ -287,7 +289,7 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDText(page, "composer-attachments", "pasted-image.png", 5*time.Second); err != nil {
 		return fail(err)
 	}
-	steps = append(steps, "聊天框添加图片按钮使用图片 logo，可以选择本地图片，Ctrl+V 可以粘贴剪贴板图片，并在发送前展示附件预览。")
+	events = append(events, reportStep("聊天框添加图片按钮使用图片 logo，可以选择本地图片，Ctrl+V 可以粘贴剪贴板图片，并在发送前展示附件预览。"))
 
 	firstPrompt := "第一条流式测试"
 	if err := fillTestID(page, "message-input", firstPrompt); err != nil {
@@ -357,7 +359,8 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 		return fail(err)
 	}
 	screenshot(page, filepath.Join(ctx.ScreenshotsDir, "02-streaming.png"), true)
-	steps = append(steps, "Mock Codex 通过内置 Codex CLI 请求后端 OpenAI mock 模型服务，工具调用标题直接展示命令并排在输出前。")
+	events = append(events, reportStep("Mock Codex 通过内置 Codex CLI 请求后端 OpenAI mock 模型服务，工具调用标题直接展示命令并排在输出前。"))
+	events = append(events, reportImage("流式输出", "screenshots/02-streaming.png"))
 
 	if err := expectTestIDCount(page, "send-button", 0, 30*time.Second); err != nil {
 		return fail(err)
@@ -392,7 +395,7 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDNotText(page, "composer-agent-config", "已锁定", 2*time.Second); err != nil {
 		return fail(err)
 	}
-	steps = append(steps, "聊天页开始会话后只锁定 agent，模型和推理级别仍然可调整，聊天框不显示已锁定文字。")
+	events = append(events, reportStep("聊天页开始会话后只锁定 agent，模型和推理级别仍然可调整，聊天框不显示已锁定文字。"))
 
 	firstDraft := "第一个聊天页未发送草稿"
 	secondDraft := "第二个聊天页未发送草稿"
@@ -438,7 +441,7 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDValue(page, "agent-model-select", "mock-claude-sonnet", 10*time.Second); err != nil {
 		return fail(err)
 	}
-	steps = append(steps, "新聊天默认继承上一次选择的 agent、模型和推理级别；每个聊天 Tab 保留独立输入草稿；E2E 使用 Mock Claude Code 命令连接服务端 mock 模型服务。")
+	events = append(events, reportStep("新聊天默认继承上一次选择的 agent、模型和推理级别；每个聊天 Tab 保留独立输入草稿；E2E 使用 Mock Claude Code 命令连接服务端 mock 模型服务。"))
 
 	secondPrompt := "第二条长流式测试"
 	if err := fillTestID(page, "message-input", secondPrompt); err != nil {
@@ -463,7 +466,7 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDText(page, "message-log", thirdPrompt, 10*time.Second); err != nil {
 		return fail(err)
 	}
-	steps = append(steps, "聊天页第一次发送 prompt 后，Tab 标题显示本次聊天主题；agent 正在输出时直接输入并回车，会停止上一轮并发送新的 prompt。")
+	events = append(events, reportStep("聊天页第一次发送 prompt 后，Tab 标题显示本次聊天主题；agent 正在输出时直接输入并回车，会停止上一轮并发送新的 prompt。"))
 
 	if err := reloadPage(page); err != nil {
 		return fail(err)
@@ -484,12 +487,13 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 		return fail(err)
 	}
 	screenshot(page, filepath.Join(ctx.ScreenshotsDir, "03-restored.png"), true)
-	steps = append(steps, "刷新页面后仍能从后端恢复 project、聊天和 mock Claude 正在输出的会话。")
+	events = append(events, reportStep("刷新页面后仍能从后端恢复 project、聊天和 mock Claude 正在输出的会话。"))
+	events = append(events, reportImage("刷新恢复", "screenshots/03-restored.png"))
 
 	if err := expectTestIDCount(page, "send-button", 0, 30*time.Second); err != nil {
 		return fail(err)
 	}
-	steps = append(steps, "agent 输出完成后，停止按钮重新变回发送按钮。")
+	events = append(events, reportStep("agent 输出完成后，停止按钮重新变回发送按钮。"))
 
 	if err := clickTestID(page, "chat-tab-add-button"); err != nil {
 		return fail(err)
@@ -503,7 +507,7 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := runMockPlanFlow(page, "mock-claude-code", "Mock Claude Plan", "Mock Claude 执行结果"); err != nil {
 		return fail(err)
 	}
-	steps = append(steps, "Mock Codex 和 Mock Claude Code 都能在 mock 模型服务下生成 plan、按用户意见修订，并点击开始执行。")
+	events = append(events, reportStep("Mock Codex 和 Mock Claude Code 都能在 mock 模型服务下生成 plan、按用户意见修订，并点击开始执行。"))
 
 	if err := clickTestID(page, "chat-tab-add-button"); err != nil {
 		return fail(err)
@@ -529,7 +533,7 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDAttributeValue(page, "project-status-dot", "data-status", "error", 10*time.Second); err != nil {
 		return fail(err)
 	}
-	steps = append(steps, "agent 报错时，错误信息会返回并显示在前端聊天记录中。")
+	events = append(events, reportStep("agent 报错时，错误信息会返回并显示在前端聊天记录中。"))
 	return true
 }
 
@@ -585,33 +589,7 @@ func runMockPlanFlow(page playwright.Page, provider string, planTitle string, ex
 	return nil
 }
 
-// writeAgentChatReport 使用 outputDir、success 和 steps 参数写入 Agent 聊天报告。
-func writeAgentChatReport(outputDir string, success bool, steps []string) {
-	report := []string{
-		"# Agent 聊天 E2E 测试报告",
-		"",
-		fmt.Sprintf("- 结果: %s", passText(success)),
-		"- 日志: [test.log](logs/test.log)",
-		"- 服务日志: [server.log](logs/server.log)",
-		"",
-		"## 步骤",
-		"",
-	}
-	for _, step := range steps {
-		report = append(report, "- "+step)
-	}
-	report = append(report,
-		"",
-		"## 截图",
-		"",
-		"![项目和聊天](screenshots/01-chat-created.png)",
-		"",
-		"![流式输出](screenshots/02-streaming.png)",
-		"",
-		"![刷新恢复](screenshots/03-restored.png)",
-	)
-	if !success {
-		report = append(report, "", "![失败现场](screenshots/failed.png)")
-	}
-	writeFile(filepath.Join(outputDir, "report.md"), strings.Join(report, "\n")+"\n")
+// writeAgentChatReport 使用 outputDir、success 和 events 参数写入 Agent 聊天报告。
+func writeAgentChatReport(outputDir string, success bool, events []reportEvent) {
+	writeE2EReport(outputDir, "Agent 聊天 E2E 测试报告", success, events)
 }
