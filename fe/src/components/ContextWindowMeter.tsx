@@ -24,6 +24,10 @@ export function ContextWindowMeter({ usage }: ContextWindowMeterProps) {
   const percent = maxTokens > 0 ? Math.min(100, Math.round((usedTokens / maxTokens) * 100)) : 0
   const tone = percent >= 90 ? 'var(--agenthub-danger)' : percent >= 70 ? 'var(--agenthub-warning)' : 'var(--agenthub-primary)'
 
+  if (!usage?.reported || maxTokens <= 0 || usedTokens <= 0 || percent < 25) {
+    return null
+  }
+
   return (
     <div
       data-testid="context-window-meter"

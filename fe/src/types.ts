@@ -11,8 +11,10 @@ export type AgentBuiltinProfileKind = 'claude_code' | 'codex' | 'mock_claude_cod
 export interface ContextWindowUsage {
   /** maxTokens 表示当前模型上下文窗口上限。 */
   maxTokens: number
-  /** usedTokens 表示当前聊天估算或后端上报的已用 token 数。 */
+  /** usedTokens 表示 agent 真实上报的已用 token 数。 */
   usedTokens: number
+  /** reported 表示当前数据是否来自 agent 真实上报。 */
+  reported?: boolean
 }
 
 export interface MessageImage {

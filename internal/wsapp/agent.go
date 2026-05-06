@@ -1040,6 +1040,7 @@ func extractContextWindowUsage(value any) (ContextWindowUsage, bool) {
 	if usage == nil {
 		return ContextWindowUsage{}, false
 	}
+	lastUsage := mapValue(firstNonNil(usage["last"], usage["lastTokenUsage"], usage["last_token_usage"]))
 	maxTokens := firstPositiveInt(
 		usage["contextWindowMaxTokens"],
 		usage["context_window_max_tokens"],
@@ -1054,10 +1055,26 @@ func extractContextWindowUsage(value any) (ContextWindowUsage, bool) {
 		usage["totalTokens"],
 		usage["total_tokens"],
 	)
+	if usedTokens <= 0 && lastUsage != nil {
+		usedTokens = firstPositiveInt(
+			lastUsage["contextWindowUsedTokens"],
+			lastUsage["context_window_used_tokens"],
+			lastUsage["usedTokens"],
+			lastUsage["totalTokens"],
+			lastUsage["total_tokens"],
+		)
+	}
+	if usedTokens <= 0 {
+		inputTokens := firstPositiveInt(usage["inputTokens"], usage["input_tokens"])
+		outputTokens := firstPositiveInt(usage["outputTokens"], usage["output_tokens"])
+		if inputTokens > 0 || outputTokens > 0 {
+			usedTokens = inputTokens + outputTokens
+		}
+	}
 	if maxTokens <= 0 && usedTokens <= 0 {
 		return ContextWindowUsage{}, false
 	}
-	return ContextWindowUsage{MaxTokens: maxTokens, UsedTokens: usedTokens}, true
+	return ContextWindowUsage{MaxTokens: maxTokens, UsedTokens: usedTokens, Reported: true}, true
 }
 
 // firstPositiveInt 使用 values 参数返回第一个正整数。

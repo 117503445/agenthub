@@ -117,6 +117,17 @@ func TestParseCodexOutputLine(t *testing.T) {
 	if !event.Done {
 		t.Fatalf("Codex 完成事件不正确: %#v", event)
 	}
+	if event.ContextWindow.UsedTokens != 1 || !event.ContextWindow.Reported {
+		t.Fatalf("Codex usage 未按真实上报解析: %#v", event.ContextWindow)
+	}
+
+	event, err = parseCodexOutputLine([]byte(`{"type":"turn.completed","usage":{"model_context_window":258400,"input_tokens":100,"output_tokens":25}}`))
+	if err != nil {
+		t.Fatalf("解析 Codex 上下文用量失败: %v", err)
+	}
+	if event.ContextWindow.MaxTokens != 258400 || event.ContextWindow.UsedTokens != 125 || !event.ContextWindow.Reported {
+		t.Fatalf("Codex 上下文用量不正确: %#v", event.ContextWindow)
+	}
 
 	event, err = parseCodexOutputLine([]byte(`{"type":"error","message":"mock codex error: forced failure\n"}`))
 	if err != nil {

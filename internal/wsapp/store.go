@@ -244,7 +244,7 @@ func applyProfileToChats(state *storeState, profile AgentProfile) {
 		if chat.AgentLocked {
 			chat.AgentProfile = profile
 		}
-		chat.ContextWindow = estimateChatContextWindowUsage(chat)
+		chat.ContextWindow = ContextWindowUsage{}
 		chat.UpdatedAt = time.Now()
 		state.chats[chatID] = chat
 	}

@@ -147,10 +147,7 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectComposerInitialSizing(page, 5*time.Second); err != nil {
 		return fail(err)
 	}
-	if err := expectTestIDCount(page, "context-window-meter", 1, 2*time.Second); err != nil {
-		return fail(err)
-	}
-	if err := expectContextWindowMeter(page, 5*time.Second); err != nil {
+	if err := expectTestIDCount(page, "context-window-meter", 0, 2*time.Second); err != nil {
 		return fail(err)
 	}
 	longComposerText := strings.Repeat("输入框自适应高度测试\n", 9)

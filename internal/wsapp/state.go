@@ -110,8 +110,9 @@ type ToolCall struct {
 
 // ContextWindowUsage 表示聊天页上下文窗口使用情况。
 type ContextWindowUsage struct {
-	MaxTokens  int `json:"maxTokens"`  // MaxTokens 表示当前模型上下文窗口上限。
-	UsedTokens int `json:"usedTokens"` // UsedTokens 表示当前聊天估算或 agent 上报的已用 token 数。
+	MaxTokens  int  `json:"maxTokens"`          // MaxTokens 表示当前模型上下文窗口上限。
+	UsedTokens int  `json:"usedTokens"`         // UsedTokens 表示 agent 真实上报的已用 token 数。
+	Reported   bool `json:"reported,omitempty"` // Reported 表示当前数据是否来自 agent 真实上报。
 }
 
 // MessageImage 表示用户消息携带的一张图片附件。
@@ -395,7 +396,6 @@ func createChatInState(state *storeState, projectID string, now time.Time) Chat 
 		AgentProvider:  lastAgent.Provider,
 		AgentModel:     lastAgent.Model,
 		AgentReasoning: lastAgent.Reasoning,
-		ContextWindow:  ContextWindowUsage{MaxTokens: contextWindowMaxTokens(lastAgent.Provider, lastAgent.Model)},
 		Messages:       []ChatMessage{},
 		CreatedAt:      now,
 		UpdatedAt:      now,
@@ -516,7 +516,7 @@ func (s *Store) DeleteAgentProfile(profileID string) ([]AgentProfile, error) {
 			chat.AgentModel = defaultAgent.Model
 			chat.AgentReasoning = defaultAgent.Reasoning
 			chat.AgentProfile = AgentProfile{}
-			chat.ContextWindow = estimateChatContextWindowUsage(chat)
+			chat.ContextWindow = ContextWindowUsage{}
 			chat.UpdatedAt = time.Now()
 			state.chats[chatID] = chat
 		}
@@ -676,7 +676,7 @@ func (s *Store) UpdateChatAgent(chatID string, provider string, model string, re
 		chat.AgentProvider = normalizedProvider
 		chat.AgentModel = normalizedModel
 		chat.AgentReasoning = normalizedReasoning
-		chat.ContextWindow = estimateChatContextWindowUsage(chat)
+		chat.ContextWindow = ContextWindowUsage{}
 		chat.UpdatedAt = time.Now()
 		state.chats[chatID] = chat
 		state.lastAgent = LastAgentSelection{
@@ -798,7 +798,6 @@ func (s *Store) AddRunMessages(chatID string, prompt string, images []MessageIma
 			chat.Plan = nil
 		}
 		chat.DraftText = ""
-		chat.ContextWindow = estimateChatContextWindowUsage(chat)
 		chat.UpdatedAt = now
 		state.chats[chatID] = chat
 		return nil
@@ -844,7 +843,6 @@ func (s *Store) AppendAssistantDelta(chatID string, messageID string, delta stri
 				})
 			}
 			item.UpdatedAt = now
-			chat.ContextWindow = estimateChatContextWindowUsage(chat)
 			chat.UpdatedAt = now
 			state.chats[chatID] = chat
 			message = *item
@@ -909,7 +907,6 @@ func (s *Store) UpsertToolCall(chatID string, messageID string, tool ToolCall) (
 			}
 			upsertMessageToolPart(message, mergedTool, now)
 			message.UpdatedAt = now
-			chat.ContextWindow = estimateChatContextWindowUsage(chat)
 			chat.UpdatedAt = now
 			state.chats[chatID] = chat
 			toolMessage = cloneChatMessage(*message)
@@ -1119,6 +1116,7 @@ func (s *Store) UpdateContextWindowUsage(chatID string, usage ContextWindowUsage
 		if usage.UsedTokens > usage.MaxTokens {
 			usage.UsedTokens = usage.MaxTokens
 		}
+		usage.Reported = true
 		if chat.ContextWindow == usage {
 			return errStoreUnchanged
 		}
@@ -1341,33 +1339,6 @@ func normalizeMessageImages(images []MessageImagePayload) ([]MessageImage, error
 		})
 	}
 	return result, nil
-}
-
-// estimateChatContextWindowUsage 使用 chat 参数估算上下文窗口使用量。
-func estimateChatContextWindowUsage(chat Chat) ContextWindowUsage {
-	maxTokens := contextWindowMaxTokens(chat.AgentProvider, chat.AgentModel)
-	usedTokens := 0
-	for _, message := range chat.Messages {
-		usedTokens += estimateTextTokens(message.Text)
-		usedTokens += len(message.Images) * 85
-		for _, tool := range message.ToolCalls {
-			usedTokens += estimateTextTokens(tool.Input)
-			usedTokens += estimateTextTokens(tool.Output)
-		}
-	}
-	if usedTokens > maxTokens {
-		usedTokens = maxTokens
-	}
-	return ContextWindowUsage{MaxTokens: maxTokens, UsedTokens: usedTokens}
-}
-
-// estimateTextTokens 使用 text 参数粗略估算 token 数。
-func estimateTextTokens(text string) int {
-	runeCount := len([]rune(strings.TrimSpace(text)))
-	if runeCount == 0 {
-		return 0
-	}
-	return runeCount/4 + 1
 }
 
 // contextWindowMaxTokens 使用 provider 和 model 参数返回模型上下文窗口上限。
