@@ -133,7 +133,7 @@ export function Composer({
   const skillMenuVisible = filteredSkills.length > 0
   const hasComposerPayload = Boolean(composerValue.trim()) || composerImages.length > 0
   const blockSubmit = isSendAwaiting && !(isRunning && hasComposerPayload)
-  const showSendingState = blockSubmit || (isSending && !hasComposerPayload)
+  const showSendingState = blockSubmit || isSending
   const showStopState = isRunning && !hasComposerPayload && !showSendingState
   const selectedProviderLabel = agentProviders.find((provider) => provider.id === selectedAgentProvider)?.label ?? selectedAgentProvider
   const selectedModelValue = selectedAgentModels.find((model) => model.id === selectedAgentModel)?.id ?? selectedAgentModel

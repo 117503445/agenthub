@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/playwright-community/playwright-go"
 )
 
 // runChatSendFeedbackCase 使用 ctx 参数运行聊天发送反馈 E2E 用例。
@@ -72,6 +74,12 @@ func runChatSendFeedbackCase(ctx E2EContext) (success bool) {
 	if err := clickTestID(page, "chat-tab-add-button"); err != nil {
 		return fail(err)
 	}
+	if err := expectTestIDCount(page, "chat-tab", 2, 5*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := selectChatTabByTitle(page, "聊天 2"); err != nil {
+		return fail(err)
+	}
 	if err := selectTestID(page, "agent-provider-select", "mock-codex"); err != nil {
 		return fail(err)
 	}
@@ -104,4 +112,9 @@ func runChatSendFeedbackCase(ctx E2EContext) (success bool) {
 // writeChatSendFeedbackReport 使用 outputDir、success 和 events 参数写入聊天发送反馈报告。
 func writeChatSendFeedbackReport(outputDir string, success bool, events []reportEvent) {
 	writeE2EReport(outputDir, "聊天发送反馈 E2E 测试报告", success, events)
+}
+
+// selectChatTabByTitle 使用 page 和 title 参数切换到指定标题的聊天页。
+func selectChatTabByTitle(page playwright.Page, title string) error {
+	return page.Locator(`[data-testid="chat-tab"]`, playwright.PageLocatorOptions{HasText: title}).Click()
 }

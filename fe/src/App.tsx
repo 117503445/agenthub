@@ -511,7 +511,7 @@ function App() {
       const pendingChatIds = Object.keys(pendingSendChatIdsRef.current)
       for (const chatId of pendingChatIds) {
         clearChatSendAwaiting(chatId)
-        clearChatSendPending(chatId, true)
+        clearChatSendPending(chatId)
         setChatSubmitError(chatId, message)
       }
     },
