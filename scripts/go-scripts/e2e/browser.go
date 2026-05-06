@@ -257,6 +257,12 @@ func expectAgentHubIcon(page playwright.Page, timeout time.Duration) error {
 			if (!text.includes('M10 7.5a4.5 4.5')) {
 				return 'missing chart-bubble path';
 			}
+			if (!text.includes('fill="#f7f8fc"')) {
+				return 'missing light icon background';
+			}
+			if (!text.includes('stroke="#0b57d0"')) {
+				return 'missing material blue icon stroke';
+			}
 			return '';
 		}`, nil)
 		if err == nil {

@@ -38,7 +38,7 @@ func runProjectIconCase(ctx E2EContext) (success bool) {
 		return fail(err)
 	}
 	screenshot(page, filepath.Join(ctx.ScreenshotsDir, "01-project-icon.png"), true)
-	events = append(events, reportStep("页面声明 Tabler chart-bubble SVG 图标，浏览器可以通过 favicon 链接加载。"))
+	events = append(events, reportStep("页面声明浅色 Tabler chart-bubble SVG 图标，浏览器可以通过 favicon 链接加载。"))
 	events = append(events, reportImage("项目图标已加载", "screenshots/01-project-icon.png"))
 	return true
 }
