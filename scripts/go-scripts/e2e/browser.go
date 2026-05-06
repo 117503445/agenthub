@@ -873,6 +873,42 @@ func expectChatTabCompact(page playwright.Page, timeout time.Duration) error {
 	return fmt.Errorf("等待聊天标签页尺寸变紧凑超时，最后状态: %s", lastState)
 }
 
+// expectActiveChatTabText 使用 page、expected 和 timeout 参数等待当前激活聊天页包含 expected。
+func expectActiveChatTabText(page playwright.Page, expected string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastState string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := page.Evaluate(`(expected) => {
+			const tabs = Array.from(document.querySelectorAll('[data-testid="chat-tab"]'));
+			const active = tabs.find((tab) => tab.getAttribute('aria-selected') === 'true' || tab.getAttribute('data-state') === 'active');
+			if (!active) {
+				return 'missing active tab, count=' + tabs.length;
+			}
+			const text = (active.textContent ?? '').trim();
+			if (text.includes(expected)) {
+				return '';
+			}
+			return 'active=' + text + ', expected=' + expected;
+		}`, expected)
+		if err == nil {
+			if text, ok := value.(string); ok {
+				lastState = text
+				if text == "" {
+					return nil
+				}
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待激活聊天页包含 %q 超时，最后错误: %w", expected, lastErr)
+	}
+	return fmt.Errorf("等待激活聊天页包含 %q 超时，最后状态: %s", expected, lastState)
+}
+
 // expectComposerShellLayout 使用 page 和 timeout 参数等待输入框居中且控件位于输入框内。
 func expectComposerShellLayout(page playwright.Page, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)

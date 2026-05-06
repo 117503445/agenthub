@@ -55,6 +55,7 @@ function App() {
   const pendingCreatedChatProjectIdRef = useRef('')
   const chatsRef = useRef<Chat[]>([])
   const chatScrollMemoryRef = useRef<Record<string, ChatScrollMemory>>({})
+  const projectSelectedChatIdsRef = useRef<Record<string, string>>({})
   const [authChecked, setAuthChecked] = useState(false)
   const [authRequired, setAuthRequired] = useState(false)
   const [authToken, setAuthToken] = useState(() => readStoredAgentHubToken())
@@ -94,9 +95,14 @@ function App() {
     () => sortByCreatedAt(chats.filter((chat) => chat.projectId === activeProjectId)),
     [activeProjectId, chats],
   )
+  const rememberedProjectChatId = activeProjectId ? (projectSelectedChatIdsRef.current[activeProjectId] ?? '') : ''
   const selectedChat = useMemo(
-    () => projectChats.find((chat) => chat.id === selectedChatId) ?? projectChats[0] ?? null,
-    [projectChats, selectedChatId],
+    () =>
+      projectChats.find((chat) => chat.id === selectedChatId) ??
+      projectChats.find((chat) => chat.id === rememberedProjectChatId) ??
+      projectChats[0] ??
+      null,
+    [projectChats, rememberedProjectChatId, selectedChatId],
   )
   const selectedComposerValue = selectedChat ? (composerValues[selectedChat.id] ?? selectedChat.draftText ?? '') : ''
   const selectedComposerImages = selectedChat ? (composerImages[selectedChat.id] ?? []) : []
@@ -288,6 +294,61 @@ function App() {
     }
   }, [])
 
+  // rememberProjectSelectedChat 使用 projectId 和 chatId 参数记录 project 最近选中的聊天页。
+  const rememberProjectSelectedChat = useCallback((projectId: string, chatId: string) => {
+    if (!projectId || !chatId) {
+      return
+    }
+    projectSelectedChatIdsRef.current[projectId] = chatId
+  }, [])
+
+  // findRememberedProjectChatId 使用 projectId 参数查找 project 应恢复的聊天页。
+  const findRememberedProjectChatId = useCallback(
+    (projectId: string) => {
+      if (!projectId) {
+        return ''
+      }
+      const rememberedChatId = projectSelectedChatIdsRef.current[projectId] ?? ''
+      if (rememberedChatId && chats.some((chat) => chat.id === rememberedChatId && chat.projectId === projectId)) {
+        return rememberedChatId
+      }
+      return sortByCreatedAt(chats.filter((chat) => chat.projectId === projectId))[0]?.id ?? ''
+    },
+    [chats],
+  )
+
+  // pruneProjectSelectedChats 使用 nextChats 参数清理已不存在的聊天页记忆。
+  const pruneProjectSelectedChats = useCallback((nextChats: Chat[]) => {
+    const chatProjectIds = new Map<string, string>()
+    for (const chat of nextChats) {
+      chatProjectIds.set(chat.id, chat.projectId)
+    }
+    const next: Record<string, string> = {}
+    for (const [projectId, chatId] of Object.entries(projectSelectedChatIdsRef.current)) {
+      if (chatProjectIds.get(chatId) === projectId) {
+        next[projectId] = chatId
+      }
+    }
+    projectSelectedChatIdsRef.current = next
+  }, [])
+
+  // forgetProjectSelectedChat 使用 projectId 和 chatId 参数移除被删除聊天页的记忆。
+  const forgetProjectSelectedChat = useCallback((projectId: string, chatId: string) => {
+    if (!projectId || !chatId) {
+      return
+    }
+    if (projectSelectedChatIdsRef.current[projectId] === chatId) {
+      delete projectSelectedChatIdsRef.current[projectId]
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!selectedChat) {
+      return
+    }
+    rememberProjectSelectedChat(selectedChat.projectId, selectedChat.id)
+  }, [rememberProjectSelectedChat, selectedChat])
+
   // readChatScrollMemory 使用 chatId 参数读取聊天页滚动位置。
   const readChatScrollMemory = useCallback((chatId: string) => chatScrollMemoryRef.current[chatId], [])
 
@@ -438,6 +499,7 @@ function App() {
         setChats(nextChats)
         pruneComposerValues(nextChatIds)
         pruneChatScrollMemory(nextChatIds)
+        pruneProjectSelectedChats(nextChats)
         setChatIndicators((current) => {
           const next: Record<string, ChatTerminalIndicator> = {}
           for (const [chatId, status] of Object.entries(current)) {
@@ -472,6 +534,7 @@ function App() {
       }
       if (message.type === 'project.deleted') {
         const payload = message.payload as ProjectDeletedPayload
+        delete projectSelectedChatIdsRef.current[payload.id]
         setProjects((current) => current.filter((project) => project.id !== payload.id))
         setChats((current) => current.filter((chat) => !payload.chatIds.includes(chat.id)))
         setChatIndicators((current) => {
@@ -497,6 +560,7 @@ function App() {
         setSelectedChatId((current) => {
           if (pendingCreatedChatProjectIdRef.current === payload.chat.projectId) {
             pendingCreatedChatProjectIdRef.current = ''
+            rememberProjectSelectedChat(payload.chat.projectId, payload.chat.id)
             return payload.chat.id
           }
           return current || payload.chat.id
@@ -505,6 +569,7 @@ function App() {
       }
       if (message.type === 'chat.deleted') {
         const payload = message.payload as ChatDeletedPayload
+        forgetProjectSelectedChat(payload.projectId, payload.id)
         setChats((current) => current.filter((chat) => chat.id !== payload.id))
         setChatIndicators((current) => {
           if (!current[payload.id]) {
@@ -597,7 +662,10 @@ function App() {
       markChatIndicator,
       notifyAgentCompletion,
       pruneChatScrollMemory,
+      pruneProjectSelectedChats,
       pruneComposerValues,
+      rememberProjectSelectedChat,
+      forgetProjectSelectedChat,
       removeChatScrollMemory,
       removeComposerValues,
       resetProjectForm,
@@ -838,10 +906,11 @@ function App() {
 
   // selectProject 使用 project 参数切换当前 project 并写入 hash 路由。
   const selectProject = (project: Project) => {
+    const chatId = findRememberedProjectChatId(project.id)
     setRouteView('chat')
     setSelectedProjectId(project.id)
-    setSelectedChatId('')
-    updateHashRoute(project.id, '', 'push')
+    setSelectedChatId(chatId)
+    updateHashRoute(project.id, chatId, 'push')
   }
 
   // selectChat 使用 chat 参数切换当前聊天页并写入 hash 路由。
@@ -849,6 +918,7 @@ function App() {
     setRouteView('chat')
     setSelectedProjectId(chat.projectId)
     setSelectedChatId(chat.id)
+    rememberProjectSelectedChat(chat.projectId, chat.id)
     clearChatIndicator(chat.id)
     updateHashRoute(chat.projectId, chat.id, 'push')
   }

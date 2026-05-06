@@ -124,6 +124,7 @@ func registeredCases() map[string]E2ECase {
 			"MOCK_AGENT":                  "1",
 		}},
 		"case_material_theme":           {Name: "case_material_theme", Run: runMaterialThemeCase},
+		"case_project_chat_tab_memory":  {Name: "case_project_chat_tab_memory", Run: runProjectChatTabMemoryCase},
 		"case_project_icon":             {Name: "case_project_icon", Run: runProjectIconCase},
 		"case_settings_backend_version": {Name: "case_settings_backend_version", Run: runSettingsBackendVersionCase},
 		"case_token_auth": {Name: "case_token_auth", Run: runTokenAuthCase, Env: map[string]string{
