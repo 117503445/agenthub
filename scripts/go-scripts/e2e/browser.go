@@ -135,15 +135,24 @@ func installClipboardProbe(page playwright.Page) error {
 
 // attachTestImage 使用 page 和 name 参数通过文件选择控件添加测试图片。
 func attachTestImage(page playwright.Page, name string) error {
+	return attachTestImages(page, []string{name})
+}
+
+// attachTestImages 使用 page 和 names 参数通过文件选择控件添加多张测试图片。
+func attachTestImages(page playwright.Page, names []string) error {
 	buffer, err := base64.StdEncoding.DecodeString(testPNGBase64)
 	if err != nil {
 		return err
 	}
-	return getByTestID(page, "image-file-input").SetInputFiles([]playwright.InputFile{{
-		Name:     name,
-		MimeType: "image/png",
-		Buffer:   buffer,
-	}})
+	files := make([]playwright.InputFile, 0, len(names))
+	for _, name := range names {
+		files = append(files, playwright.InputFile{
+			Name:     name,
+			MimeType: "image/png",
+			Buffer:   buffer,
+		})
+	}
+	return getByTestID(page, "image-file-input").SetInputFiles(files)
 }
 
 // pasteTestImage 使用 page 和 name 参数模拟剪贴板粘贴图片。
@@ -499,6 +508,42 @@ func expectTestIDAttributeValue(page playwright.Page, id string, name string, ex
 		return fmt.Errorf("等待元素 %q 属性 %q 为 %q 超时，最后错误: %w", id, name, expected, lastErr)
 	}
 	return fmt.Errorf("等待元素 %q 属性 %q 为 %q 超时，实际值: %s", id, name, expected, lastValues)
+}
+
+// expectSendButtonLoading 使用 page 和 timeout 参数等待发送按钮进入转圈状态。
+func expectSendButtonLoading(page playwright.Page, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastState string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := page.Evaluate(`() => {
+			const button = document.querySelector('[data-testid="send-button"]');
+			if (!button) {
+				return 'missing send-button';
+			}
+			const label = button.getAttribute('aria-label') || '';
+			const icon = button.querySelector('[data-testid="send-loading-icon"]');
+			if (label === '发送中' && icon) {
+				return '';
+			}
+			return 'label=' + label + ', loading=' + Boolean(icon);
+		}`, nil)
+		if err == nil {
+			if text, ok := value.(string); ok {
+				lastState = text
+				if text == "" {
+					return nil
+				}
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("等待发送按钮转圈超时，最后错误: %w", lastErr)
+	}
+	return fmt.Errorf("等待发送按钮转圈超时，最后状态: %s", lastState)
 }
 
 // setMessageLogScrollTop 使用 page 和 top 参数设置消息列表滚动位置。

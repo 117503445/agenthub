@@ -49,10 +49,15 @@ import type {
   SnapshotPayload,
 } from './types'
 
+const minimumSendPendingMs = 800
+
 // App 渲染 project 和 agent 聊天主界面。
 function App() {
   const wsRef = useRef<WebSocket | null>(null)
   const pendingCreatedChatProjectIdRef = useRef('')
+  const pendingSendChatIdsRef = useRef<Record<string, number>>({})
+  const awaitingSendChatIdsRef = useRef<Record<string, true>>({})
+  const sendPendingTimersRef = useRef<Record<string, number>>({})
   const chatsRef = useRef<Chat[]>([])
   const chatScrollMemoryRef = useRef<Record<string, ChatScrollMemory>>({})
   const projectSelectedChatIdsRef = useRef<Record<string, string>>({})
@@ -82,6 +87,10 @@ function App() {
   const [composerValues, setComposerValues] = useState<Record<string, string>>({})
   const [composerImages, setComposerImages] = useState<Record<string, ComposerImageAttachment[]>>({})
   const [planModes, setPlanModes] = useState<Record<string, boolean>>({})
+  const [pendingSendChatIds, setPendingSendChatIds] = useState<Record<string, number>>({})
+  const [awaitingSendChatIds, setAwaitingSendChatIds] = useState<Record<string, true>>({})
+  const [chatSubmitErrors, setChatSubmitErrors] = useState<Record<string, string>>({})
+  const [chatScrollBottomSignals, setChatScrollBottomSignals] = useState<Record<string, number>>({})
   const [errorText, setErrorText] = useState('')
   const [hasSnapshot, setHasSnapshot] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState('')
@@ -107,6 +116,10 @@ function App() {
   const selectedComposerValue = selectedChat ? (composerValues[selectedChat.id] ?? selectedChat.draftText ?? '') : ''
   const selectedComposerImages = selectedChat ? (composerImages[selectedChat.id] ?? []) : []
   const selectedPlanMode = selectedChat ? (planModes[selectedChat.id] ?? false) : false
+  const selectedChatSending = selectedChat ? Boolean(pendingSendChatIds[selectedChat.id]) : false
+  const selectedChatSendAwaiting = selectedChat ? Boolean(awaitingSendChatIds[selectedChat.id]) : false
+  const selectedChatSubmitError = selectedChat ? (chatSubmitErrors[selectedChat.id] ?? '') : ''
+  const selectedChatScrollBottomSignal = selectedChat ? (chatScrollBottomSignals[selectedChat.id] ?? 0) : 0
   const isRunning = selectedChat?.status === 'running'
   const selectedAgentProvider = selectedChat?.agentProvider ?? 'claude-code'
   const chatBoundAgentProvider = selectedChat?.agentProfile
@@ -140,6 +153,15 @@ function App() {
   useEffect(() => {
     chatsRef.current = chats
   }, [chats])
+
+  useEffect(() => {
+    return () => {
+      for (const timer of Object.values(sendPendingTimersRef.current)) {
+        window.clearTimeout(timer)
+      }
+      sendPendingTimersRef.current = {}
+    }
+  }, [])
 
   useEffect(() => {
     let stopped = false
@@ -357,12 +379,151 @@ function App() {
     chatScrollMemoryRef.current[chatId] = memory
   }, [])
 
+  // setChatSubmitError 使用 chatId 和 message 参数更新聊天输入提交错误。
+  const setChatSubmitError = useCallback((chatId: string, message: string) => {
+    if (!chatId) {
+      return
+    }
+    setChatSubmitErrors((current) => {
+      if (!message) {
+        if (!(chatId in current)) {
+          return current
+        }
+        const next = { ...current }
+        delete next[chatId]
+        return next
+      }
+      if (current[chatId] === message) {
+        return current
+      }
+      return { ...current, [chatId]: message }
+    })
+  }, [])
+
+  // setChatSendPending 使用 chatId 参数标记聊天输入正在提交。
+  const setChatSendPending = useCallback((chatId: string) => {
+    if (!chatId) {
+      return
+    }
+    if (sendPendingTimersRef.current[chatId]) {
+      window.clearTimeout(sendPendingTimersRef.current[chatId])
+      delete sendPendingTimersRef.current[chatId]
+    }
+    const startedAt = Date.now()
+    const next = { ...pendingSendChatIdsRef.current, [chatId]: startedAt }
+    pendingSendChatIdsRef.current = next
+    setPendingSendChatIds(next)
+    const nextAwaiting = { ...awaitingSendChatIdsRef.current, [chatId]: true as const }
+    awaitingSendChatIdsRef.current = nextAwaiting
+    setAwaitingSendChatIds(nextAwaiting)
+  }, [])
+
+  // clearChatSendAwaiting 使用 chatId 参数清除等待服务端确认状态。
+  const clearChatSendAwaiting = useCallback((chatId: string) => {
+    if (!awaitingSendChatIdsRef.current[chatId]) {
+      return
+    }
+    const next = { ...awaitingSendChatIdsRef.current }
+    delete next[chatId]
+    awaitingSendChatIdsRef.current = next
+    setAwaitingSendChatIds(next)
+  }, [])
+
+  // clearChatSendPending 使用 chatId 和 immediate 参数清除聊天输入提交中状态。
+  const clearChatSendPending = useCallback((chatId: string, immediate = false) => {
+    const startedAt = pendingSendChatIdsRef.current[chatId]
+    if (!startedAt) {
+      return
+    }
+    if (sendPendingTimersRef.current[chatId]) {
+      window.clearTimeout(sendPendingTimersRef.current[chatId])
+      delete sendPendingTimersRef.current[chatId]
+    }
+    const applyClear = () => {
+      delete sendPendingTimersRef.current[chatId]
+      if (!pendingSendChatIdsRef.current[chatId]) {
+        return
+      }
+      const next = { ...pendingSendChatIdsRef.current }
+      delete next[chatId]
+      pendingSendChatIdsRef.current = next
+      setPendingSendChatIds(next)
+    }
+    const remainingMs = Math.max(0, minimumSendPendingMs - (Date.now() - startedAt))
+    if (!immediate && remainingMs > 0) {
+      sendPendingTimersRef.current[chatId] = window.setTimeout(applyClear, remainingMs)
+      return
+    }
+    applyClear()
+  }, [])
+
+  // requestChatScrollToBottom 使用 chatId 参数请求聊天页滚动到底部。
+  const requestChatScrollToBottom = useCallback((chatId: string) => {
+    if (!chatId) {
+      return
+    }
+    setChatScrollBottomSignals((current) => ({
+      ...current,
+      [chatId]: (current[chatId] ?? 0) + 1,
+    }))
+  }, [])
+
+  // clearChatComposerDraft 使用 chatId 参数清空指定聊天页输入草稿。
+  const clearChatComposerDraft = useCallback((chatId: string) => {
+    if (!chatId) {
+      return
+    }
+    setComposerValues((current) => {
+      if (current[chatId] === '') {
+        return current
+      }
+      return { ...current, [chatId]: '' }
+    })
+    setComposerImages((current) => {
+      if (!(chatId in current)) {
+        return current
+      }
+      const next = { ...current }
+      delete next[chatId]
+      return next
+    })
+  }, [])
+
+  // finishChatSendSuccess 使用 chatId 参数处理聊天输入提交成功。
+  const finishChatSendSuccess = useCallback(
+    (chatId: string) => {
+      if (!pendingSendChatIdsRef.current[chatId]) {
+        return
+      }
+      clearChatSendAwaiting(chatId)
+      clearChatSendPending(chatId)
+      setChatSubmitError(chatId, '')
+      clearChatComposerDraft(chatId)
+      requestChatScrollToBottom(chatId)
+    },
+    [clearChatComposerDraft, clearChatSendAwaiting, clearChatSendPending, requestChatScrollToBottom, setChatSubmitError],
+  )
+
+  // failPendingChatSends 使用 message 参数处理当前等待中的聊天输入提交失败。
+  const failPendingChatSends = useCallback(
+    (message: string) => {
+      const pendingChatIds = Object.keys(pendingSendChatIdsRef.current)
+      for (const chatId of pendingChatIds) {
+        clearChatSendAwaiting(chatId)
+        clearChatSendPending(chatId, true)
+        setChatSubmitError(chatId, message)
+      }
+    },
+    [clearChatSendAwaiting, clearChatSendPending, setChatSubmitError],
+  )
+
   // updateSelectedComposerValue 使用 value 参数更新当前聊天页草稿。
   const updateSelectedComposerValue = useCallback((value: string) => {
     const chatId = selectedChat?.id
     if (!chatId) {
       return
     }
+    setChatSubmitError(chatId, '')
     setComposerValues((current) => {
       if (current[chatId] === value) {
         return current
@@ -370,7 +531,7 @@ function App() {
       return { ...current, [chatId]: value }
     })
     sendClientMessage(wsRef.current, 'chat.draft.update', { chatId, text: value })
-  }, [selectedChat?.id])
+  }, [selectedChat?.id, setChatSubmitError])
 
   // updateSelectedComposerImages 使用 images 参数更新当前聊天页图片附件草稿。
   const updateSelectedComposerImages = useCallback(
@@ -379,6 +540,7 @@ function App() {
       if (!chatId) {
         return
       }
+      setChatSubmitError(chatId, '')
       setComposerImages((current) => {
         if (images.length === 0) {
           if (!(chatId in current)) {
@@ -391,7 +553,7 @@ function App() {
         return { ...current, [chatId]: images }
       })
     },
-    [selectedChat?.id],
+    [selectedChat?.id, setChatSubmitError],
   )
 
   // updateSelectedPlanMode 使用 enabled 参数更新当前聊天页 plan 模式。
@@ -558,6 +720,9 @@ function App() {
       if (message.type === 'chat.changed') {
         const payload = message.payload as ChatChangedPayload
         const chat = normalizeChat(payload.chat)
+        if (chat.status === 'running') {
+          finishChatSendSuccess(chat.id)
+        }
         setChats((current) => sortByCreatedAt(upsertById(current, chat, (item) => item.id)))
         setSelectedProjectId((current) => current || payload.chat.projectId)
         setSelectedChatId((current) => {
@@ -628,6 +793,7 @@ function App() {
       if (message.type === 'agent.status') {
         const payload = message.payload as AgentStatusPayload
         if (payload.status === 'running') {
+          finishChatSendSuccess(payload.chatId)
           clearChatIndicator(payload.chatId)
         } else if (payload.status === 'error') {
           markChatIndicator(payload.chatId, 'error')
@@ -656,12 +822,18 @@ function App() {
         return
       }
       if (message.type === 'error') {
-        const payload = message.payload as { message?: string }
-        setErrorText(payload.message ?? '服务端错误')
+        const payload = message.payload as { message?: string; type?: string }
+        const nextErrorText = payload.message ?? '服务端错误'
+        if (payload.type === 'chat.send') {
+          failPendingChatSends(nextErrorText)
+        }
+        setErrorText(nextErrorText)
       }
     },
     [
       clearChatIndicator,
+      failPendingChatSends,
+      finishChatSendSuccess,
       markChatIndicator,
       notifyAgentCompletion,
       pruneChatScrollMemory,
@@ -979,10 +1151,14 @@ function App() {
     if (!hasPayload) {
       return
     }
+    setChatSubmitError(selectedChat.id, '')
+    setChatSendPending(selectedChat.id)
     requestNotificationPermission()
-    sendClientMessage(wsRef.current, 'chat.send', { chatId: selectedChat.id, prompt, images, planMode: selectedPlanMode })
-    updateSelectedComposerValue('')
-    updateSelectedComposerImages([])
+    if (!sendClientMessage(wsRef.current, 'chat.send', { chatId: selectedChat.id, prompt, images, planMode: selectedPlanMode })) {
+      setChatSubmitError(selectedChat.id, 'WebSocket 未连接')
+      clearChatSendAwaiting(selectedChat.id)
+      clearChatSendPending(selectedChat.id, true)
+    }
   }
 
   const connectionIcon =
@@ -1097,11 +1273,15 @@ function App() {
             connectionState={connectionState}
             chatIndicators={chatIndicators}
             composerValue={selectedComposerValue}
-            composerImages={selectedComposerImages}
-            planMode={selectedPlanMode}
-            copiedMessageId={copiedMessageId}
-            isRunning={isRunning}
-            agentProviders={visibleAgentProviders}
+        composerImages={selectedComposerImages}
+        planMode={selectedPlanMode}
+        copiedMessageId={copiedMessageId}
+        isRunning={isRunning}
+        isSending={selectedChatSending}
+        isSendAwaiting={selectedChatSendAwaiting}
+        submitErrorText={selectedChatSubmitError}
+        scrollToBottomSignal={selectedChatScrollBottomSignal}
+        agentProviders={visibleAgentProviders}
             agentSkills={agentSkills}
             selectedAgentProvider={selectedAgentProvider}
             selectedAgentModels={selectedAgentModels}

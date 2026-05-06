@@ -12,6 +12,8 @@ interface MessageLogProps {
   projectRoot?: string
   /** copiedMessageId 表示刚复制成功的消息标识。 */
   copiedMessageId: string
+  /** scrollToBottomSignal 表示强制滚动到底部的信号。 */
+  scrollToBottomSignal: number
   /** onCopyMessage 使用 message 参数复制消息。 */
   onCopyMessage: (message: ChatMessage) => void
   /** onExecutePlan 使用 plan 参数执行已确认 plan。 */
@@ -52,6 +54,7 @@ export function MessageLog({
   chat,
   projectRoot,
   copiedMessageId,
+  scrollToBottomSignal,
   onCopyMessage,
   onExecutePlan,
   onReadScrollMemory,
@@ -99,6 +102,21 @@ export function MessageLog({
       saveCurrentScroll(element)
     }
   }, [chat.id, onReadScrollMemory, saveCurrentScroll])
+
+  useLayoutEffect(() => {
+    if (scrollToBottomSignal <= 0) {
+      return
+    }
+    const frame = window.requestAnimationFrame(() => {
+      const element = logRef.current
+      if (!element) {
+        return
+      }
+      element.scrollTop = element.scrollHeight
+      saveCurrentScroll(element)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [saveCurrentScroll, scrollToBottomSignal])
 
   return (
     <div

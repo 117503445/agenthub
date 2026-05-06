@@ -11,7 +11,7 @@ import {
   useRef,
   useState,
 } from 'react'
-import { ArrowUp, Bot, Brain, ChevronDown, ClipboardList, MessageSquare, Square, X } from 'lucide-react'
+import { ArrowUp, Bot, Brain, ChevronDown, ClipboardList, Loader2, MessageSquare, Square, X } from 'lucide-react'
 import imagePlusLogo from '../assets/image-plus-logo.svg'
 import { ContextWindowMeter } from './ContextWindowMeter'
 import { Button } from './ui/button'
@@ -40,6 +40,12 @@ interface ComposerProps {
   planMode: boolean
   /** isRunning 表示当前聊天页是否正在输出。 */
   isRunning: boolean
+  /** isSending 表示当前聊天输入是否正在提交。 */
+  isSending: boolean
+  /** isSendAwaiting 表示当前聊天输入仍在等待服务端确认。 */
+  isSendAwaiting: boolean
+  /** submitErrorText 表示当前聊天输入提交失败信息。 */
+  submitErrorText: string
   /** agentProviders 表示可选 agent provider。 */
   agentProviders: AgentProviderOption[]
   /** agentSkills 表示可选 skills。 */
@@ -86,6 +92,9 @@ export function Composer({
   composerImages,
   planMode,
   isRunning,
+  isSending,
+  isSendAwaiting,
+  submitErrorText,
   agentProviders,
   agentSkills,
   selectedAgentProvider,
@@ -122,7 +131,10 @@ export function Composer({
       .slice(0, 8)
   }, [agentSkills, composerValue, skillQuery])
   const skillMenuVisible = filteredSkills.length > 0
-  const hasComposerPayload = composerValue.trim() || composerImages.length > 0
+  const hasComposerPayload = Boolean(composerValue.trim()) || composerImages.length > 0
+  const blockSubmit = isSendAwaiting && !(isRunning && hasComposerPayload)
+  const showSendingState = blockSubmit || (isSending && !hasComposerPayload)
+  const showStopState = isRunning && !hasComposerPayload && !showSendingState
   const selectedProviderLabel = agentProviders.find((provider) => provider.id === selectedAgentProvider)?.label ?? selectedAgentProvider
   const selectedModelValue = selectedAgentModels.find((model) => model.id === selectedAgentModel)?.id ?? selectedAgentModel
   const selectedReasoningLabel =
@@ -415,19 +427,31 @@ export function Composer({
           ) : null}
           <span className="min-w-4 flex-1" />
           <ContextWindowMeter usage={selectedChat?.contextWindow} />
-          {hasComposerPayload || isRunning ? (
+          {hasComposerPayload || isRunning || isSending ? (
             <Button
               data-testid="send-button"
               type="submit"
               size="icon"
-              disabled={!selectedChat || connectionState !== 'open' || (!hasComposerPayload && !isRunning)}
-              className={`h-9 w-9 shrink-0 rounded-full ${isRunning && !hasComposerPayload ? 'bg-[var(--agenthub-warning)] hover:bg-[var(--agenthub-warning)]' : ''}`}
-              aria-label={isRunning && !hasComposerPayload ? '停止' : '发送'}
+              disabled={!selectedChat || connectionState !== 'open' || blockSubmit || (!hasComposerPayload && !isRunning)}
+              className={`h-9 w-9 shrink-0 rounded-full ${showStopState ? 'bg-[var(--agenthub-warning)] hover:bg-[var(--agenthub-warning)]' : ''}`}
+              aria-busy={showSendingState}
+              aria-label={showSendingState ? '发送中' : showStopState ? '停止' : '发送'}
             >
-              {isRunning && !hasComposerPayload ? <Square className="h-4 w-4" fill="currentColor" /> : <ArrowUp className="h-4 w-4" />}
+              {showSendingState ? (
+                <Loader2 data-testid="send-loading-icon" className="h-4 w-4 animate-spin" />
+              ) : showStopState ? (
+                <Square className="h-4 w-4" fill="currentColor" />
+              ) : (
+                <ArrowUp className="h-4 w-4" />
+              )}
             </Button>
           ) : null}
         </div>
+        {submitErrorText ? (
+          <p data-testid="composer-error" role="alert" className="mt-2 text-sm text-[var(--agenthub-danger)]">
+            {submitErrorText}
+          </p>
+        ) : null}
       </div>
     </form>
   )

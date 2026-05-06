@@ -44,6 +44,14 @@ interface ChatWorkspaceProps {
   copiedMessageId: string
   /** isRunning 表示当前聊天页是否正在输出。 */
   isRunning: boolean
+  /** isSending 表示当前聊天输入是否正在提交。 */
+  isSending: boolean
+  /** isSendAwaiting 表示当前聊天输入仍在等待服务端确认。 */
+  isSendAwaiting: boolean
+  /** submitErrorText 表示当前聊天输入提交失败信息。 */
+  submitErrorText: string
+  /** scrollToBottomSignal 表示强制滚动到底部的信号。 */
+  scrollToBottomSignal: number
   /** agentProviders 表示可选 agent provider。 */
   agentProviders: AgentProviderOption[]
   /** agentSkills 表示可选 skills。 */
@@ -111,6 +119,10 @@ export function ChatWorkspace({
   planMode,
   copiedMessageId,
   isRunning,
+  isSending,
+  isSendAwaiting,
+  submitErrorText,
+  scrollToBottomSignal,
   agentProviders,
   agentSkills,
   selectedAgentProvider,
@@ -232,6 +244,7 @@ export function ChatWorkspace({
               chat={selectedChat}
               projectRoot={selectedProject?.path}
               copiedMessageId={copiedMessageId}
+              scrollToBottomSignal={scrollToBottomSignal}
               onCopyMessage={onCopyMessage}
               onExecutePlan={onExecutePlan}
               onReadScrollMemory={onReadChatScrollMemory}
@@ -244,6 +257,9 @@ export function ChatWorkspace({
               composerImages={composerImages}
               planMode={planMode}
               isRunning={isRunning}
+              isSending={isSending}
+              isSendAwaiting={isSendAwaiting}
+              submitErrorText={submitErrorText}
               agentProviders={agentProviders}
               agentSkills={agentSkills}
               selectedAgentProvider={selectedAgentProvider}

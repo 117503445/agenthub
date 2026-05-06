@@ -113,6 +113,9 @@ func registeredCases() map[string]E2ECase {
 		"case_agent_chat": {Name: "case_agent_chat", Run: runAgentChatCase, Env: map[string]string{
 			"MOCK_AGENT": "1",
 		}},
+		"case_chat_send_feedback": {Name: "case_chat_send_feedback", Run: runChatSendFeedbackCase, Env: map[string]string{
+			"MOCK_AGENT": "1",
+		}},
 		"case_manual_stop_notification": {Name: "case_manual_stop_notification", Run: runManualStopNotificationCase, Env: map[string]string{
 			"MOCK_AGENT": "1",
 		}},
