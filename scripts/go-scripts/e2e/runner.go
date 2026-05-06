@@ -118,6 +118,9 @@ func registeredCases() map[string]E2ECase {
 		"case_markdown_filesystem_links": {Name: "case_markdown_filesystem_links", Run: runMarkdownFilesystemLinksCase, Env: map[string]string{
 			"MOCK_AGENT": "1",
 		}},
+		"case_markdown_ordered_list": {Name: "case_markdown_ordered_list", Run: runMarkdownOrderedListCase, Env: map[string]string{
+			"MOCK_AGENT": "1",
+		}},
 		"case_agent_profile": {Name: "case_agent_profile", Run: runAgentProfileCase, Env: map[string]string{
 			"AGENTHUB_PROFILE_E2E_SECRET": "backend-secret-value",
 			"AGENTHUB_PROFILE_E2E_UNSET":  "backend-unset-value",
