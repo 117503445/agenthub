@@ -1,0 +1,5 @@
+2026-05-06 10:56:49.964 INF cmd/web/main.go:53 > 构建信息 BuildDir=/src BuildTime=2026-05-06T10:55:31Z GitBranch=master GitCommit=6f0e16f9d7e1c2fdb778a67faa3850eff32dc1ca GitDirty=true GitTag= GitVersion=6f0e16f
+2026-05-06 10:56:49.965 INF cmd/web/data_lock.go:44 > 已持有数据目录锁 dataDir=/src/data/e2e/case_markdown_filesystem_links/agenthub-data lockPath=/src/data/e2e/case_markdown_filesystem_links/agenthub-data/agenthub.lock
+2026-05-06 10:56:49.973 INF internal/wsapp/server.go:103 > 已自动添加后端工作目录 project chatID=chat_0e6797ec9bff1110 projectID=project_6b68b0c44d8bcaa0 workdir=/src
+2026-05-06 10:56:49.975 INF cmd/web/server.go:167 > Web 服务已启动 addr=[::]:34381 dataDir=/src/data/e2e/case_markdown_filesystem_links/agenthub-data
+2026-05-06 10:56:51.916 WRN internal/wsapp/agent.go:646 > 读取 Claude stdout 失败 error="read |0: file already closed" chatID=chat_0e6797ec9bff1110
