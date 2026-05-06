@@ -505,21 +505,28 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	}
 	events = append(events, reportStep("新聊天默认继承上一次选择的 agent、模型和推理级别；每个聊天 Tab 保留独立输入草稿和滚动位置，文字草稿刷新后从后端恢复，离开期间有新输出时切回会滚动到底部；E2E 使用 Mock Claude Code 命令连接服务端 mock 模型服务。"))
 
-	secondPrompt := "第二条长流式测试"
+	secondPromptTitle := "第二条长流式测试"
+	secondPrompt := secondPromptTitle + "\n" + strings.Repeat("保持运行用于打断测试。\n", 80)
 	if err := fillTestID(page, "message-input", secondPrompt); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDValue(page, "message-input", secondPrompt, 5*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := getByTestID(page, "message-input").Focus(); err != nil {
 		return fail(err)
 	}
 	if err := page.Keyboard().Press("Enter"); err != nil {
 		return fail(err)
 	}
-	if err := expectTestIDText(page, "message-log", secondPrompt, 10*time.Second); err != nil {
+	if err := expectTestIDText(page, "message-log", secondPromptTitle, 10*time.Second); err != nil {
 		return fail(err)
 	}
-	if err := expectTestIDText(page, "chat-tabs", secondPrompt, 10*time.Second); err != nil {
+	if err := expectTestIDText(page, "chat-tabs", secondPromptTitle, 10*time.Second); err != nil {
 		return fail(err)
 	}
 	thirdPrompt := "第三条打断测试"
-	if err := fillTestID(page, "message-input", thirdPrompt); err != nil {
+	if err := getByTestID(page, "message-input").PressSequentially(thirdPrompt, playwright.LocatorPressSequentiallyOptions{Delay: playwright.Float(5)}); err != nil {
 		return fail(err)
 	}
 	if err := page.Keyboard().Press("Enter"); err != nil {
@@ -542,7 +549,7 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDText(page, "message-log", thirdPrompt, 10*time.Second); err != nil {
 		return fail(err)
 	}
-	if err := expectTestIDText(page, "chat-tabs", secondPrompt, 10*time.Second); err != nil {
+	if err := expectTestIDText(page, "chat-tabs", secondPromptTitle, 10*time.Second); err != nil {
 		return fail(err)
 	}
 	if err := expectTestIDText(page, "message-log", "Mock Claude", 20*time.Second); err != nil {

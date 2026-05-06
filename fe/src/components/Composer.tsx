@@ -74,8 +74,8 @@ interface ComposerProps {
   onRefreshAgentSkills: () => void
   /** onPlanModeChange 使用 enabled 参数切换 plan 模式。 */
   onPlanModeChange: (enabled: boolean) => void
-  /** onSubmitComposer 使用 event 参数提交输入框。 */
-  onSubmitComposer: (event?: FormEvent<HTMLFormElement>) => void
+  /** onSubmitComposer 使用 event 和 promptOverride 参数提交输入框。 */
+  onSubmitComposer: (event?: FormEvent<HTMLFormElement>, promptOverride?: string) => void
   /** onChangeAgentProvider 使用 provider 参数切换 agent。 */
   onChangeAgentProvider: (provider: AgentProvider) => void
   /** onChangeAgentModel 使用 model 参数切换模型。 */
@@ -240,7 +240,7 @@ export function Composer({
       return
     }
     event.preventDefault()
-    onSubmitComposer()
+    onSubmitComposer(undefined, event.currentTarget.value)
   }
 
   return (

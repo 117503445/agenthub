@@ -1,4 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { Loader2, LockKeyhole, Wifi, WifiOff } from 'lucide-react'
 import { getWebSocketUrl, sendClientMessage, type ServerMessage } from './lib/ws'
 import {
@@ -493,7 +494,7 @@ function App() {
   // finishChatSendSuccess 使用 chatId 参数处理聊天输入提交成功。
   const finishChatSendSuccess = useCallback(
     (chatId: string) => {
-      if (!pendingSendChatIdsRef.current[chatId]) {
+      if (!pendingSendChatIdsRef.current[chatId] || !awaitingSendChatIdsRef.current[chatId]) {
         return
       }
       clearChatSendAwaiting(chatId)
@@ -525,11 +526,13 @@ function App() {
       return
     }
     setChatSubmitError(chatId, '')
-    setComposerValues((current) => {
-      if (current[chatId] === value) {
-        return current
-      }
-      return { ...current, [chatId]: value }
+    flushSync(() => {
+      setComposerValues((current) => {
+        if (current[chatId] === value) {
+          return current
+        }
+        return { ...current, [chatId]: value }
+      })
     })
     sendClientMessage(wsRef.current, 'chat.draft.update', { chatId, text: value })
   }, [selectedChat?.id, setChatSubmitError])
@@ -1176,13 +1179,13 @@ function App() {
     sendClientMessage(wsRef.current, 'agent.skills.refresh')
   }
 
-  // submitComposer 处理 event 参数对应的聊天输入提交。
-  const submitComposer = (event?: FormEvent<HTMLFormElement>) => {
+  // submitComposer 处理 event 参数对应的聊天输入提交，promptOverride 用于回车事件中的 DOM 当前值。
+  const submitComposer = (event?: FormEvent<HTMLFormElement>, promptOverride?: string) => {
     event?.preventDefault()
     if (!selectedChat) {
       return
     }
-    const prompt = selectedComposerValue.trim()
+    const prompt = (promptOverride ?? selectedComposerValue).trim()
     const images = selectedComposerImages.map(({ id, fileName, mimeType, data }) => ({ id, fileName, mimeType, data }))
     const hasPayload = Boolean(prompt) || images.length > 0
     if (!hasPayload && isRunning) {
