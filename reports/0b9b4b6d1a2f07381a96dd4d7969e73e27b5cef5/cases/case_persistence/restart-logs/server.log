@@ -1,0 +1,3 @@
+2026-05-06 07:14:47.050 INF cmd/web/main.go:53 > 构建信息 BuildDir=/src BuildTime=2026-05-06T07:13:14Z GitBranch=master GitCommit=d0733e0dbf4fc988f3106fd30c6fe8ff6286fe5c GitDirty=true GitTag= GitVersion=d0733e0
+2026-05-06 07:14:47.051 INF cmd/web/data_lock.go:44 > 已持有数据目录锁 dataDir=/src/data/e2e/case_persistence/agenthub-data lockPath=/src/data/e2e/case_persistence/agenthub-data/agenthub.lock
+2026-05-06 07:14:47.060 INF cmd/web/server.go:167 > Web 服务已启动 addr=[::]:41695 dataDir=/src/data/e2e/case_persistence/agenthub-data

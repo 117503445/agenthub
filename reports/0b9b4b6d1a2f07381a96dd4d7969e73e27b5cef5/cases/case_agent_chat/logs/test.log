@@ -1,0 +1,5 @@
+2026/05/06 07:14:14 INFO - E2E 目标地址: http://127.0.0.1:40211
+2026/05/06 07:14:14 INFO - 开始运行用例: case_agent_chat
+2026/05/06 07:14:14 INFO - 打开页面: http://127.0.0.1:40211
+2026/05/06 07:14:28 ERROR - Agent 聊天 E2E 失败: 等待文本 "第三条打断测试" 超时，实际文本: 07:14:18第二条长流式测试已停止HTTP: http://127.0.0.1:40211/mock/anthropic/v1/messages运行中{"url":"http://127.0.0.1:40211/mock/anthropic/v1/messages"}Mock Claude正在回复：第二条
+2026/05/06 07:14:28 INFO - 用例 case_agent_chat 结果: 失败

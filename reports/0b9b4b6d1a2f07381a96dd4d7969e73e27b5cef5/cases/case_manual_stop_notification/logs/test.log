@@ -1,0 +1,4 @@
+2026/05/06 07:14:35 INFO - E2E 目标地址: http://127.0.0.1:44013
+2026/05/06 07:14:35 INFO - 开始运行用例: case_manual_stop_notification
+2026/05/06 07:14:35 INFO - 打开页面: http://127.0.0.1:44013
+2026/05/06 07:14:39 INFO - 用例 case_manual_stop_notification 结果: 通过
