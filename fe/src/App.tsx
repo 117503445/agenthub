@@ -35,6 +35,7 @@ import type {
   Chat,
   ChatChangedPayload,
   ChatDeletedPayload,
+  ChatDetailPayload,
   ChatMessage,
   ChatMessageDeltaPayload,
   ChatMessageDonePayload,
@@ -53,6 +54,32 @@ import type {
 
 const minimumSendPendingMs = 800
 
+// normalizeChatSummary 使用 chat 参数生成前端摘要状态。
+function normalizeChatSummary(chat: Chat) {
+  return normalizeChat({ ...chat, messages: [], plan: undefined, detailLoaded: false, detailLoadedAt: undefined })
+}
+
+// mergeChatSummary 使用 current 和 summary 参数合并聊天摘要并保留已加载详情。
+function mergeChatSummary(current: Chat[], summary: Chat) {
+  const existing = current.find((chat) => chat.id === summary.id)
+  const normalized = normalizeChatSummary(summary)
+  if (!existing?.detailLoaded) {
+    return normalized
+  }
+  return {
+    ...normalized,
+    messages: existing.messages,
+    plan: existing.plan,
+    detailLoaded: existing.detailLoaded,
+    detailLoadedAt: existing.detailLoadedAt,
+  }
+}
+
+// normalizeChatDetail 使用 chat 参数生成前端详情状态。
+function normalizeChatDetail(chat: Chat) {
+  return normalizeChat({ ...chat, detailLoaded: true, detailLoadedAt: chat.updatedAt })
+}
+
 // App 渲染 project 和 agent 聊天主界面。
 function App() {
   const wsRef = useRef<WebSocket | null>(null)
@@ -61,6 +88,8 @@ function App() {
   const awaitingSendChatIdsRef = useRef<Record<string, true>>({})
   const sendPendingTimersRef = useRef<Record<string, number>>({})
   const chatsRef = useRef<Chat[]>([])
+  const chatDetailLoadingAtRef = useRef<Record<string, string>>({})
+  const chatDetailLoadedAtRef = useRef<Record<string, string>>({})
   const chatScrollMemoryRef = useRef<Record<string, ChatScrollMemory>>({})
   const projectSelectedChatIdsRef = useRef<Record<string, string>>({})
   const [authChecked, setAuthChecked] = useState(false)
@@ -125,8 +154,8 @@ function App() {
   const selectedChatScrollBottomSignal = selectedChat ? (chatScrollBottomSignals[selectedChat.id] ?? 0) : 0
   const isRunning = selectedChat?.status === 'running'
   const selectedAgentProvider = selectedChat?.agentProvider ?? 'claude-code'
-  const chatBoundAgentProvider = selectedChat?.agentProfile
-    ? { id: selectedChat.agentProfile.id, label: selectedChat.agentProfile.label, models: selectedChat.agentProfile.models }
+  const chatBoundAgentProvider = selectedChat?.agentProfile?.id
+    ? { id: selectedChat.agentProfile.id, label: selectedChat.agentProfile.label || selectedChat.agentProfile.id, models: selectedChat.agentProfile.models }
     : null
   const visibleAgentProviders =
     chatBoundAgentProvider && !agentProviders.some((provider) => provider.id === chatBoundAgentProvider.id)
@@ -316,6 +345,14 @@ function App() {
   const removeChatScrollMemory = useCallback((chatIds: string[]) => {
     for (const chatId of chatIds) {
       delete chatScrollMemoryRef.current[chatId]
+    }
+  }, [])
+
+  // removeChatDetailState 使用 chatIds 参数移除指定聊天页详情加载记录。
+  const removeChatDetailState = useCallback((chatIds: string[]) => {
+    for (const chatId of chatIds) {
+      delete chatDetailLoadingAtRef.current[chatId]
+      delete chatDetailLoadedAtRef.current[chatId]
     }
   }, [])
 
@@ -635,6 +672,21 @@ function App() {
     updateHashRoute(selectedProject?.id ?? '', selectedChat?.id ?? '')
   }, [hasSnapshot, routeView, selectedProject?.id, selectedChat?.id])
 
+  useEffect(() => {
+    if (!hasSnapshot || routeView !== 'chat' || connectionState !== 'open' || !selectedChat?.id) {
+      return
+    }
+    const loadedAt = chatDetailLoadedAtRef.current[selectedChat.id] ?? ''
+    const loadingAt = chatDetailLoadingAtRef.current[selectedChat.id] ?? ''
+    if (loadedAt === selectedChat.updatedAt || loadingAt === selectedChat.updatedAt) {
+      return
+    }
+    chatDetailLoadingAtRef.current[selectedChat.id] = selectedChat.updatedAt
+    if (!sendClientMessage(wsRef.current, 'chat.detail.get', { chatId: selectedChat.id })) {
+      delete chatDetailLoadingAtRef.current[selectedChat.id]
+    }
+  }, [connectionState, hasSnapshot, routeView, selectedChat?.id, selectedChat?.updatedAt])
+
   // notifyAgentCompletion 使用 message 参数发送 agent 完成通知。
   const notifyAgentCompletion = useCallback((message: ChatMessage) => {
     if (!('Notification' in window) || Notification.permission !== 'granted') {
@@ -660,8 +712,10 @@ function App() {
       if (message.type === 'state.snapshot') {
         const payload = message.payload as SnapshotPayload
         const nextProjects = sortProjects(payload.projects ?? [])
-        const nextChats = sortByCreatedAt((payload.chats ?? []).map(normalizeChat))
+        const nextChats = sortByCreatedAt((payload.chats ?? []).map(normalizeChatSummary))
         const nextChatIds = new Set(nextChats.map((chat) => chat.id))
+        chatDetailLoadingAtRef.current = {}
+        chatDetailLoadedAtRef.current = {}
         setAgentProviders(payload.agentProviders ?? fallbackAgentProviders)
         setAgentProfiles(payload.agentProfiles ?? [])
         setBackendEnv(payload.backendEnv ?? [])
@@ -724,17 +778,18 @@ function App() {
         setSelectedChatId((current) => (payload.chatIds.includes(current) ? '' : current))
         removeComposerValues(payload.chatIds)
         removeChatScrollMemory(payload.chatIds)
+        removeChatDetailState(payload.chatIds)
         resetProjectForm(null)
         setProjectDialogOpen(false)
         return
       }
       if (message.type === 'chat.changed') {
         const payload = message.payload as ChatChangedPayload
-        const chat = normalizeChat(payload.chat)
+        const chat = normalizeChatSummary(payload.chat)
         if (chat.status === 'running') {
           finishChatSendSuccess(chat.id)
         }
-        setChats((current) => sortByCreatedAt(upsertById(current, chat, (item) => item.id)))
+        setChats((current) => sortByCreatedAt(upsertById(current, mergeChatSummary(current, chat), (item) => item.id)))
         setSelectedProjectId((current) => current || payload.chat.projectId)
         setSelectedChatId((current) => {
           if (pendingCreatedChatProjectIdRef.current === payload.chat.projectId) {
@@ -761,6 +816,15 @@ function App() {
         setSelectedChatId((current) => (current === payload.id ? '' : current))
         removeComposerValues([payload.id])
         removeChatScrollMemory([payload.id])
+        removeChatDetailState([payload.id])
+        return
+      }
+      if (message.type === 'chat.detail' || message.type === 'chat.detail.changed') {
+        const payload = message.payload as ChatDetailPayload
+        const chat = normalizeChatDetail(payload.chat)
+        delete chatDetailLoadingAtRef.current[chat.id]
+        chatDetailLoadedAtRef.current[chat.id] = chat.updatedAt
+        setChats((current) => sortByCreatedAt(upsertById(current, chat, (item) => item.id)))
         return
       }
       if (message.type === 'chat.message.delta') {
@@ -853,6 +917,7 @@ function App() {
       rememberProjectSelectedChat,
       forgetProjectSelectedChat,
       removeChatScrollMemory,
+      removeChatDetailState,
       removeComposerValues,
       resetProjectForm,
     ],

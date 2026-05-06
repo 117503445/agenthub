@@ -113,7 +113,13 @@ func registeredCases() map[string]E2ECase {
 		"case_agent_chat": {Name: "case_agent_chat", Run: runAgentChatCase, Env: map[string]string{
 			"MOCK_AGENT": "1",
 		}},
+		"case_agent_provider_empty_profile": {Name: "case_agent_provider_empty_profile", Run: runAgentProviderEmptyProfileCase, Env: map[string]string{
+			"MOCK_AGENT": "",
+		}},
 		"case_chat_send_feedback": {Name: "case_chat_send_feedback", Run: runChatSendFeedbackCase, Env: map[string]string{
+			"MOCK_AGENT": "1",
+		}},
+		"case_chat_detail_lazy_load": {Name: "case_chat_detail_lazy_load", Run: runChatDetailLazyLoadCase, Env: map[string]string{
 			"MOCK_AGENT": "1",
 		}},
 		"case_codex_dash_prompt": {Name: "case_codex_dash_prompt", Run: runCodexDashPromptCase, Env: map[string]string{

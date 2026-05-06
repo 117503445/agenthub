@@ -47,7 +47,7 @@ export function defaultReasoningForModel(providers: AgentProviderOption[], provi
 
 // chatHasStarted 使用 chat 参数判断当前聊天页是否已经发送过消息。
 export function chatHasStarted(chat: Chat | null) {
-  return Boolean(chat?.messages.some((message) => message.role === 'user'))
+  return Boolean(chat?.agentLocked || chat?.messages.some((message) => message.role === 'user'))
 }
 
 // normalizeChat 使用 chat 参数确保聊天页数据结构完整。

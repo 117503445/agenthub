@@ -256,6 +256,10 @@ export interface Chat {
   draftText?: string
   /** messages 表示消息列表。 */
   messages: ChatMessage[]
+  /** detailLoaded 表示前端是否已经加载该聊天页详情。 */
+  detailLoaded?: boolean
+  /** detailLoadedAt 表示前端加载详情时对应的聊天更新时间。 */
+  detailLoadedAt?: string
   /** createdAt 表示创建时间。 */
   createdAt: string
   /** updatedAt 表示更新时间。 */
@@ -305,6 +309,11 @@ export interface ProjectDeletedPayload {
 
 export interface ChatChangedPayload {
   /** chat 表示变更后的聊天页。 */
+  chat: Chat
+}
+
+export interface ChatDetailPayload {
+  /** chat 表示完整聊天页详情。 */
   chat: Chat
 }
 

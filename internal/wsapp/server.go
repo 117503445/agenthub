@@ -26,10 +26,16 @@ type Server struct {
 	store           *Store
 	agents          *AgentManager
 	agentConfig     AgentConfig
-	subscribers     map[string]chan ServerMessage
+	subscribers     map[string]*serverSubscriber
 	lastAgentSkills []AgentSkillOption
 	mu              sync.Mutex
 	skillsMu        sync.Mutex
+}
+
+// serverSubscriber 表示单个 WebSocket 连接的服务端订阅状态。
+type serverSubscriber struct {
+	outbound     chan ServerMessage // outbound 表示该连接的写出消息队列。
+	activeChatID string             // activeChatID 表示该连接当前进入的聊天页。
 }
 
 // NewServer 使用 ctx、version 和 agentConfig 参数创建 WebSocket 服务。
@@ -76,7 +82,7 @@ func newServerWithStore(ctx context.Context, version string, agentConfig AgentCo
 		store:           store,
 		agents:          NewAgentManager(ctx, agentConfig),
 		agentConfig:     agentConfig,
-		subscribers:     make(map[string]chan ServerMessage),
+		subscribers:     make(map[string]*serverSubscriber),
 		lastAgentSkills: store.AgentSkills(),
 	}
 }
@@ -147,7 +153,7 @@ func (s *Server) ServeWS(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if err := s.handle(ctx, outbound, msg); err != nil {
+		if err := s.handle(ctx, subscriberID, outbound, msg); err != nil {
 			log.Ctx(ctx).Error().Err(err).Str("type", msg.Type).Msg("处理 WebSocket 消息失败")
 			s.sendTo(outbound, "error", map[string]any{
 				"message": err.Error(),
@@ -175,7 +181,7 @@ func (s *Server) writeLoop(ctx context.Context, conn *websocket.Conn, outbound <
 }
 
 // handle 根据 msg 参数中的类型处理连接上的业务消息。
-func (s *Server) handle(ctx context.Context, outbound chan ServerMessage, msg ClientMessage) error {
+func (s *Server) handle(ctx context.Context, subscriberID string, outbound chan ServerMessage, msg ClientMessage) error {
 	switch msg.Type {
 	case "ping":
 		s.sendTo(outbound, "pong", map[string]any{"message": "pong"})
@@ -197,7 +203,7 @@ func (s *Server) handle(ctx context.Context, outbound chan ServerMessage, msg Cl
 			return err
 		}
 		s.broadcast("project.changed", map[string]any{"project": project})
-		s.broadcast("chat.changed", map[string]any{"chat": chat})
+		s.broadcastChatChanged(chat)
 		s.broadcastAgentSkills()
 		return nil
 	case "project.update":
@@ -247,7 +253,7 @@ func (s *Server) handle(ctx context.Context, outbound chan ServerMessage, msg Cl
 		if err != nil {
 			return err
 		}
-		s.broadcast("chat.changed", map[string]any{"chat": chat})
+		s.broadcastChatChanged(chat)
 		return nil
 	case "chat.delete":
 		var payload IDPayload
@@ -275,7 +281,19 @@ func (s *Server) handle(ctx context.Context, outbound chan ServerMessage, msg Cl
 			return nil
 		}
 		s.agents.Stop(payload.ChatID)
-		s.broadcast("chat.changed", map[string]any{"chat": chat})
+		s.broadcastChatChanged(chat)
+		return nil
+	case "chat.detail.get":
+		var payload ChatDetailGetPayload
+		if err := decodePayload(msg, &payload); err != nil {
+			return err
+		}
+		chat, err := s.store.GetChat(payload.ChatID)
+		if err != nil {
+			return err
+		}
+		s.setSubscriberActiveChat(subscriberID, chat.ID)
+		s.sendTo(outbound, "chat.detail", map[string]any{"chat": chat})
 		return nil
 	case "chat.draft.update":
 		var payload ChatDraftUpdatePayload
@@ -287,7 +305,7 @@ func (s *Server) handle(ctx context.Context, outbound chan ServerMessage, msg Cl
 			return err
 		}
 		if changed {
-			s.broadcast("chat.changed", map[string]any{"chat": chat})
+			s.broadcastChatChanged(chat)
 		}
 		return nil
 	case "agent.model.add":
@@ -396,12 +414,14 @@ func (s *Server) handle(ctx context.Context, outbound chan ServerMessage, msg Cl
 		if err := decodePayload(msg, &payload); err != nil {
 			return err
 		}
+		s.setSubscriberActiveChat(subscriberID, payload.ChatID)
 		return s.startChatRun(ctx, payload.ChatID, payload.Prompt, payload.Images, payload.PlanMode)
 	case "chat.plan.execute":
 		var payload ChatPlanExecutePayload
 		if err := decodePayload(msg, &payload); err != nil {
 			return err
 		}
+		s.setSubscriberActiveChat(subscriberID, payload.ChatID)
 		return s.startPlanExecution(ctx, payload.ChatID, payload.PlanID)
 	case "chat.stop":
 		var payload ChatStopPayload
@@ -429,13 +449,14 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string,
 	if err != nil {
 		return err
 	}
-	s.broadcast("chat.changed", map[string]any{"chat": chat})
+	s.broadcastChatChanged(chat)
+	s.broadcastChatDetailChanged(chatID, chat)
 	s.broadcast("agent.status", map[string]any{"chatId": chatID, "status": ChatStatusRunning})
 
 	callbacks := AgentRunCallbacks{
 		OnSessionID: func(sessionID string) {
 			if updatedChat, ok := s.store.SetChatSessionID(chatID, sessionID); ok {
-				s.broadcast("chat.changed", map[string]any{"chat": updatedChat})
+				s.broadcastChatChanged(updatedChat)
 			}
 		},
 		OnDelta: func(delta string) {
@@ -443,7 +464,7 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string,
 			if !ok {
 				return
 			}
-			s.broadcast("chat.message.delta", map[string]any{
+			s.broadcastToActiveChat(chatID, "chat.message.delta", map[string]any{
 				"chatId":    chatID,
 				"messageId": message.ID,
 				"delta":     delta,
@@ -456,12 +477,13 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string,
 			if !ok {
 				return
 			}
-			s.broadcast("chat.changed", map[string]any{"chat": updatedChat})
+			s.broadcastChatChanged(updatedChat)
+			s.broadcastChatDetailChanged(chatID, updatedChat)
 		},
 		OnUsage: func(usage ContextWindowUsage) {
 			updatedChat, ok := s.store.UpdateContextWindowUsage(chatID, usage)
 			if ok {
-				s.broadcast("chat.changed", map[string]any{"chat": updatedChat})
+				s.broadcastChatChanged(updatedChat)
 			}
 		},
 		OnDone: func() {
@@ -474,19 +496,22 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string,
 					updatedChat = planChat
 				}
 			}
-			s.broadcast("chat.message.done", map[string]any{"chatId": chatID, "message": message})
-			s.broadcast("chat.changed", map[string]any{"chat": updatedChat})
+			s.broadcastToActiveChat(chatID, "chat.message.done", map[string]any{"chatId": chatID, "message": message})
+			s.broadcastChatChanged(updatedChat)
+			s.broadcastChatDetailChanged(chatID, updatedChat)
 			s.broadcast("agent.status", map[string]any{"chatId": chatID, "status": ChatStatusIdle})
 		},
 		OnError: func(message string) {
 			updatedChat, assistant, ok := s.store.FinishAssistantMessage(chatID, assistantMessage.ID, MessageStatusError)
 			if ok {
-				s.broadcast("chat.message.done", map[string]any{"chatId": chatID, "message": assistant})
-				s.broadcast("chat.changed", map[string]any{"chat": updatedChat})
+				s.broadcastToActiveChat(chatID, "chat.message.done", map[string]any{"chatId": chatID, "message": assistant})
+				s.broadcastChatChanged(updatedChat)
+				s.broadcastChatDetailChanged(chatID, updatedChat)
 			}
 			if errorChat, systemMessage, err := s.store.AddSystemMessage(chatID, message, MessageStatusError); err == nil {
-				s.broadcast("chat.changed", map[string]any{"chat": errorChat})
-				s.broadcast("chat.message.done", map[string]any{"chatId": chatID, "message": systemMessage})
+				s.broadcastChatChanged(errorChat)
+				s.broadcastChatDetailChanged(chatID, errorChat)
+				s.broadcastToActiveChat(chatID, "chat.message.done", map[string]any{"chatId": chatID, "message": systemMessage})
 			}
 			s.broadcast("agent.status", map[string]any{"chatId": chatID, "status": ChatStatusError})
 		},
@@ -518,7 +543,8 @@ func (s *Server) startPlanExecution(ctx context.Context, chatID string, planID s
 	if err != nil {
 		return err
 	}
-	s.broadcast("chat.changed", map[string]any{"chat": chat})
+	s.broadcastChatChanged(chat)
+	s.broadcastChatDetailChanged(chatID, chat)
 	prompt := strings.Join([]string{
 		"开始执行已确认的 plan。",
 		"",
@@ -538,9 +564,10 @@ func (s *Server) stopChatRun(chatID string) {
 		return
 	}
 	if message.ID != "" {
-		s.broadcast("chat.message.done", map[string]any{"chatId": chatID, "message": message})
+		s.broadcastToActiveChat(chatID, "chat.message.done", map[string]any{"chatId": chatID, "message": message})
 	}
-	s.broadcast("chat.changed", map[string]any{"chat": chat})
+	s.broadcastChatChanged(chat)
+	s.broadcastChatDetailChanged(chatID, chat)
 	s.broadcast("agent.status", map[string]any{"chatId": chatID, "status": ChatStatusIdle})
 }
 
@@ -641,7 +668,7 @@ func (s *Server) subscribe() (string, chan ServerMessage) {
 	subscriberID := newID("subscriber")
 	ch := make(chan ServerMessage, 256)
 	s.mu.Lock()
-	s.subscribers[subscriberID] = ch
+	s.subscribers[subscriberID] = &serverSubscriber{outbound: ch}
 	s.mu.Unlock()
 	return subscriberID, ch
 }
@@ -649,10 +676,19 @@ func (s *Server) subscribe() (string, chan ServerMessage) {
 // unsubscribe 使用 subscriberID 参数取消消息订阅。
 func (s *Server) unsubscribe(subscriberID string) {
 	s.mu.Lock()
-	ch, ok := s.subscribers[subscriberID]
+	subscriber, ok := s.subscribers[subscriberID]
 	if ok {
 		delete(s.subscribers, subscriberID)
-		close(ch)
+		close(subscriber.outbound)
+	}
+	s.mu.Unlock()
+}
+
+// setSubscriberActiveChat 使用 subscriberID 和 chatID 参数记录连接当前进入的聊天页。
+func (s *Server) setSubscriberActiveChat(subscriberID string, chatID string) {
+	s.mu.Lock()
+	if subscriber, ok := s.subscribers[subscriberID]; ok {
+		subscriber.activeChatID = chatID
 	}
 	s.mu.Unlock()
 }
@@ -662,13 +698,40 @@ func (s *Server) broadcast(messageType string, payload any) {
 	message := s.message(messageType, payload)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, ch := range s.subscribers {
+	for _, subscriber := range s.subscribers {
 		select {
-		case ch <- message:
+		case subscriber.outbound <- message:
 		default:
 			log.Ctx(s.ctx).Warn().Str("type", messageType).Msg("订阅者消息队列已满，丢弃消息")
 		}
 	}
+}
+
+// broadcastToActiveChat 使用 chatID、messageType 和 payload 参数向已进入该聊天页的连接发送消息。
+func (s *Server) broadcastToActiveChat(chatID string, messageType string, payload any) {
+	message := s.message(messageType, payload)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, subscriber := range s.subscribers {
+		if subscriber.activeChatID != chatID {
+			continue
+		}
+		select {
+		case subscriber.outbound <- message:
+		default:
+			log.Ctx(s.ctx).Warn().Str("type", messageType).Str("chatID", chatID).Msg("聊天详情订阅者消息队列已满，丢弃消息")
+		}
+	}
+}
+
+// broadcastChatChanged 使用 chat 参数向所有连接广播聊天页摘要变更。
+func (s *Server) broadcastChatChanged(chat Chat) {
+	s.broadcast("chat.changed", map[string]any{"chat": cloneChatSummary(chat)})
+}
+
+// broadcastChatDetailChanged 使用 chatID 和 chat 参数向已进入聊天页的连接广播完整详情变更。
+func (s *Server) broadcastChatDetailChanged(chatID string, chat Chat) {
+	s.broadcastToActiveChat(chatID, "chat.detail.changed", map[string]any{"chat": cloneChat(chat)})
 }
 
 // sendTo 使用 ch、messageType 和 payload 参数发送单个服务端消息。

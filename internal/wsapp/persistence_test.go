@@ -1,9 +1,11 @@
 package wsapp
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -60,6 +62,7 @@ func TestPersistentStoreSaveLoad(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dataDir, persistedStateFileName)); err != nil {
 		t.Fatalf("状态文件未写入: %v", err)
 	}
+	assertPersistentChatSplit(t, dataDir, chat.ID, "持久化测试")
 
 	loaded, err := NewPersistentStore(dataDir, AgentProfiles(AgentOptionsConfig{}))
 	if err != nil {
@@ -85,6 +88,53 @@ func TestPersistentStoreSaveLoad(t *testing.T) {
 	if nextChat.Title != "聊天 3" {
 		t.Fatalf("恢复后的聊天页序号不正确: %q", nextChat.Title)
 	}
+}
+
+// assertPersistentChatSplit 使用 dataDir、chatID 和 prompt 参数断言聊天详情已拆分保存。
+func assertPersistentChatSplit(t *testing.T, dataDir string, chatID string, prompt string) {
+	t.Helper()
+	stateData, err := os.ReadFile(filepath.Join(dataDir, persistedStateFileName))
+	if err != nil {
+		t.Fatalf("读取 state.json 失败: %v", err)
+	}
+	var state PersistedStoreState
+	if err := json.Unmarshal(stateData, &state); err != nil {
+		t.Fatalf("解析 state.json 失败: %v", err)
+	}
+	if state.SchemaVersion != persistedStoreSchemaVersion {
+		t.Fatalf("state.json schema 版本不正确: %d", state.SchemaVersion)
+	}
+	foundSummary := false
+	for _, chat := range state.Chats {
+		if chat.ID != chatID {
+			continue
+		}
+		foundSummary = true
+		if len(chat.Messages) != 0 || chat.Plan != nil {
+			t.Fatalf("state.json 不应包含聊天详情: %#v", chat)
+		}
+	}
+	if !foundSummary {
+		t.Fatalf("state.json 缺少聊天摘要: %s", chatID)
+	}
+
+	detailData, err := os.ReadFile(filepath.Join(dataDir, persistedChatDetailsDirName, chatID+".json"))
+	if err != nil {
+		t.Fatalf("读取聊天详情文件失败: %v", err)
+	}
+	var detail PersistedChatDetail
+	if err := json.Unmarshal(detailData, &detail); err != nil {
+		t.Fatalf("解析聊天详情文件失败: %v", err)
+	}
+	if detail.SchemaVersion != persistedChatDetailSchemaVersion || detail.ChatID != chatID {
+		t.Fatalf("聊天详情文件头不正确: %#v", detail)
+	}
+	for _, message := range detail.Messages {
+		if message.Role == MessageRoleUser && strings.Contains(message.Text, prompt) {
+			return
+		}
+	}
+	t.Fatalf("聊天详情文件缺少目标消息: %#v", detail.Messages)
 }
 
 // findChatByID 使用 chats 和 chatID 参数查找聊天页。
@@ -159,9 +209,71 @@ func TestPersistentStoreNormalizesRunningState(t *testing.T) {
 		t.Fatalf("恢复后的聊天页数量不正确: %#v", snapshot.Chats)
 	}
 	loadedChat := snapshot.Chats[0]
-	if loadedChat.Status != ChatStatusIdle || loadedChat.Messages[0].Status != MessageStatusStopped {
-		t.Fatalf("运行中状态未归一为停止: %#v", loadedChat)
+	loadedChatDetail, err := store.GetChat(loadedChat.ID)
+	if err != nil {
+		t.Fatalf("读取恢复后的聊天详情失败: %v", err)
 	}
+	if loadedChat.Status != ChatStatusIdle || loadedChatDetail.Messages[0].Status != MessageStatusStopped {
+		t.Fatalf("运行中状态未归一为停止: summary=%#v detail=%#v", loadedChat, loadedChatDetail)
+	}
+}
+
+// TestPersistentStoreMigratesInlineChatDetails 验证旧 state.json 中的内联聊天详情会迁移到独立文件。
+func TestPersistentStoreMigratesInlineChatDetails(t *testing.T) {
+	dataDir := t.TempDir()
+	now := time.Now()
+	project := Project{ID: "project-migrate", Name: "project", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
+	chat := Chat{
+		ID:            "chat-migrate",
+		ProjectID:     project.ID,
+		Title:         "旧聊天",
+		Status:        ChatStatusIdle,
+		AgentProvider: AgentProviderCodex,
+		AgentModel:    "gpt-5.5",
+		Messages: []ChatMessage{{
+			ID:        "msg-migrate",
+			ChatID:    "chat-migrate",
+			Role:      MessageRoleUser,
+			Text:      "旧格式迁移",
+			Status:    MessageStatusComplete,
+			CreatedAt: now,
+			UpdatedAt: now,
+		}},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	state := PersistedStoreState{
+		SchemaVersion:      2,
+		Projects:           []Project{project},
+		Chats:              []Chat{chat},
+		AgentProfiles:      AgentProfiles(AgentOptionsConfig{}),
+		LastAgentSelection: defaultLastAgentSelection(DefaultAgentProviderOptions()),
+		NextChatOrdinal:    map[string]int{project.ID: 1},
+	}
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		t.Fatalf("编码旧状态失败: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, persistedStateFileName), append(data, '\n'), 0600); err != nil {
+		t.Fatalf("写入旧状态失败: %v", err)
+	}
+
+	store, err := NewPersistentStore(dataDir, AgentProfiles(AgentOptionsConfig{}))
+	if err != nil {
+		t.Fatalf("加载旧状态失败: %v", err)
+	}
+	snapshot := store.Snapshot()
+	if len(snapshot.Chats) != 1 || len(snapshot.Chats[0].Messages) != 0 {
+		t.Fatalf("迁移后的快照不应包含聊天详情: %#v", snapshot.Chats)
+	}
+	detail, err := store.GetChat(chat.ID)
+	if err != nil {
+		t.Fatalf("读取迁移后的聊天详情失败: %v", err)
+	}
+	if len(detail.Messages) != 1 || detail.Messages[0].Text != "旧格式迁移" {
+		t.Fatalf("迁移后的聊天详情不正确: %#v", detail.Messages)
+	}
+	assertPersistentChatSplit(t, dataDir, chat.ID, "旧格式迁移")
 }
 
 // TestPersistentStoreInvalidJSON 验证非法 JSON 会阻止启动且不覆盖原文件。

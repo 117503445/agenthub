@@ -731,6 +731,17 @@ func (s *Store) GetProjectAndChat(chatID string) (Project, Chat, error) {
 	return project, cloneChat(chat), nil
 }
 
+// GetChat 使用 chatID 参数读取完整聊天页详情。
+func (s *Store) GetChat(chatID string) (Chat, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	chat, ok := s.chats[chatID]
+	if !ok {
+		return Chat{}, ErrNotFound
+	}
+	return cloneChat(chat), nil
+}
+
 // AddRunMessages 使用 chatID、prompt、images 和 planMode 参数追加用户消息和 assistant 占位消息。
 func (s *Store) AddRunMessages(chatID string, prompt string, images []MessageImagePayload, planMode bool) (Chat, ChatMessage, ChatMessage, error) {
 	trimmedPrompt := strings.TrimSpace(prompt)
@@ -1162,7 +1173,7 @@ func (s *Store) Snapshot() Snapshot {
 
 	chats := make([]Chat, 0, len(s.chats))
 	for _, chat := range s.chats {
-		chats = append(chats, cloneChat(chat))
+		chats = append(chats, cloneChatSummary(chat))
 	}
 	agentProfiles := cloneAgentProfiles(s.agentProfiles)
 	agentProviders := AgentProviderOptionsFromProfiles(agentProfiles)
@@ -1267,15 +1278,31 @@ func cloneChat(chat Chat) Chat {
 		plan := *chat.Plan
 		chat.Plan = &plan
 	}
-	messages := chat.Messages
-	chat.Messages = make([]ChatMessage, 0, len(messages))
-	for _, message := range messages {
-		chat.Messages = append(chat.Messages, cloneChatMessage(message))
-	}
+	chat.Messages = cloneChatMessages(chat.Messages)
 	if chat.Messages == nil {
 		chat.Messages = []ChatMessage{}
 	}
 	return chat
+}
+
+// cloneChatSummary 使用 chat 参数创建不包含消息和 plan 详情的聊天页摘要。
+func cloneChatSummary(chat Chat) Chat {
+	chat = cloneChat(chat)
+	chat.Messages = []ChatMessage{}
+	chat.Plan = nil
+	return chat
+}
+
+// cloneChatMessages 使用 messages 参数创建不会共享子切片的消息副本。
+func cloneChatMessages(messages []ChatMessage) []ChatMessage {
+	if len(messages) == 0 {
+		return nil
+	}
+	result := make([]ChatMessage, 0, len(messages))
+	for _, message := range messages {
+		result = append(result, cloneChatMessage(message))
+	}
+	return result
 }
 
 // cloneChatMessage 使用 message 参数创建不会共享工具调用切片的副本。
