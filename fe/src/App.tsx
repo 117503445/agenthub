@@ -19,7 +19,7 @@ import {
   fallbackAgentProviders,
   normalizeChat,
 } from './lib/agent'
-import { chatVisualStatus, mergeProjectVisualStatus, sortByCreatedAt, upsertById } from './lib/chat'
+import { chatVisualStatus, mergeProjectVisualStatus, sortByCreatedAt, sortProjects, upsertById } from './lib/chat'
 import { parseHashRoute, updateHashRoute, updateSettingsHashRoute } from './lib/routes'
 import type {
   AgentProvider,
@@ -46,6 +46,7 @@ import type {
   Project,
   ProjectChangedPayload,
   ProjectDeletedPayload,
+  ProjectsReorderedPayload,
   SnapshotPayload,
 } from './types'
 
@@ -653,7 +654,7 @@ function App() {
       setBackendVersion(message.version || '')
       if (message.type === 'state.snapshot') {
         const payload = message.payload as SnapshotPayload
-        const nextProjects = sortByCreatedAt(payload.projects ?? [])
+        const nextProjects = sortProjects(payload.projects ?? [])
         const nextChats = sortByCreatedAt((payload.chats ?? []).map(normalizeChat))
         const nextChatIds = new Set(nextChats.map((chat) => chat.id))
         setAgentProviders(payload.agentProviders ?? fallbackAgentProviders)
@@ -691,10 +692,15 @@ function App() {
       }
       if (message.type === 'project.changed') {
         const payload = message.payload as ProjectChangedPayload
-        setProjects((current) => sortByCreatedAt(upsertById(current, payload.project, (project) => project.id)))
+        setProjects((current) => sortProjects(upsertById(current, payload.project, (project) => project.id)))
         setSelectedProjectId(payload.project.id)
         setProjectDialogOpen(false)
         resetProjectForm(null)
+        return
+      }
+      if (message.type === 'projects.reordered') {
+        const payload = message.payload as ProjectsReorderedPayload
+        setProjects(sortProjects(payload.projects ?? []))
         return
       }
       if (message.type === 'project.deleted') {
@@ -962,6 +968,41 @@ function App() {
   // deleteProject 使用 project 参数删除 project。
   const deleteProject = (project: Project) => {
     sendClientMessage(wsRef.current, 'project.delete', { id: project.id })
+  }
+
+  // reorderProjects 使用 sourceProjectId、targetProjectId 和 placement 参数调整 Project 侧栏顺序。
+  const reorderProjects = (sourceProjectId: string, targetProjectId: string, placement: 'before' | 'after') => {
+    if (!sourceProjectId || !targetProjectId || sourceProjectId === targetProjectId) {
+      return
+    }
+    const currentIds = projects.map((project) => project.id)
+    const sourceIndex = currentIds.indexOf(sourceProjectId)
+    const targetIndex = currentIds.indexOf(targetProjectId)
+    if (sourceIndex < 0 || targetIndex < 0) {
+      return
+    }
+    const nextIds = [...currentIds]
+    nextIds.splice(sourceIndex, 1)
+    const nextTargetIndex = nextIds.indexOf(targetProjectId)
+    if (nextTargetIndex < 0) {
+      return
+    }
+    const insertIndex = placement === 'after' ? nextTargetIndex + 1 : nextTargetIndex
+    nextIds.splice(insertIndex, 0, sourceProjectId)
+    setProjects((current) => {
+      const projectsByID = new Map(current.map((project) => [project.id, project]))
+      const nextProjects: Project[] = []
+      for (const [index, projectId] of nextIds.entries()) {
+        const project = projectsByID.get(projectId)
+        if (project) {
+          nextProjects.push({ ...project, sortOrder: index })
+        }
+      }
+      return nextProjects.length === current.length ? nextProjects : current
+    })
+    if (!sendClientMessage(wsRef.current, 'project.reorder', { projectIds: nextIds })) {
+      setErrorText('WebSocket 未连接')
+    }
   }
 
   // deleteChat 使用 chat 参数关闭并删除聊天页。
@@ -1240,6 +1281,7 @@ function App() {
         onProjectDialogClose={closeProjectDialog}
         onProjectSelect={selectProject}
         onProjectDelete={deleteProject}
+        onProjectReorder={reorderProjects}
         onSettingsOpen={openAgentSettings}
       />
 

@@ -1,5 +1,5 @@
-import type { FormEvent, ReactNode } from 'react'
-import { Folder, Monitor, Plus, Settings, Trash2, X } from 'lucide-react'
+import { useState, type DragEvent, type FormEvent, type ReactNode } from 'react'
+import { Folder, GripVertical, Monitor, Plus, Settings, Trash2, X } from 'lucide-react'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { projectDisplayName } from '../lib/chat'
@@ -46,6 +46,8 @@ interface AppSidebarProps {
   onProjectSelect: (project: Project) => void
   /** onProjectDelete 使用 project 参数删除 project。 */
   onProjectDelete: (project: Project) => void
+  /** onProjectReorder 使用 sourceProjectId、targetProjectId 和 placement 参数调整 project 顺序。 */
+  onProjectReorder: (sourceProjectId: string, targetProjectId: string, placement: 'before' | 'after') => void
   /** onSettingsOpen 打开设置页。 */
   onSettingsOpen: () => void
 }
@@ -68,8 +70,65 @@ export function AppSidebar({
   onProjectDialogClose,
   onProjectSelect,
   onProjectDelete,
+  onProjectReorder,
   onSettingsOpen,
 }: AppSidebarProps) {
+  const [draggedProjectId, setDraggedProjectId] = useState('')
+  const [dragOverProject, setDragOverProject] = useState<{ id: string; placement: 'before' | 'after' } | null>(null)
+
+  // projectDragPlacement 使用 event 参数判断拖拽目标应插入到项目之前还是之后。
+  const projectDragPlacement = (event: DragEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    return event.clientY > rect.top + rect.height / 2 ? 'after' : 'before'
+  }
+
+  // handleProjectDragStart 使用 event 和 projectId 参数开始拖拽 Project。
+  const handleProjectDragStart = (event: DragEvent<HTMLDivElement>, projectId: string) => {
+    setDraggedProjectId(projectId)
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', projectId)
+  }
+
+  // handleProjectDragOver 使用 event 和 projectId 参数更新当前拖拽落点。
+  const handleProjectDragOver = (event: DragEvent<HTMLDivElement>, projectId: string) => {
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+    const placement = projectDragPlacement(event)
+    setDragOverProject((current) => {
+      if (current?.id === projectId && current.placement === placement) {
+        return current
+      }
+      return { id: projectId, placement }
+    })
+  }
+
+  // handleProjectDragLeave 使用 event 和 projectId 参数清理离开的拖拽落点。
+  const handleProjectDragLeave = (event: DragEvent<HTMLDivElement>, projectId: string) => {
+    const nextTarget = event.relatedTarget
+    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+      return
+    }
+    setDragOverProject((current) => (current?.id === projectId ? null : current))
+  }
+
+  // handleProjectDrop 使用 event 和 targetProjectId 参数提交 Project 排序。
+  const handleProjectDrop = (event: DragEvent<HTMLDivElement>, targetProjectId: string) => {
+    event.preventDefault()
+    const sourceProjectId = event.dataTransfer.getData('text/plain') || draggedProjectId
+    const placement = dragOverProject?.id === targetProjectId ? dragOverProject.placement : projectDragPlacement(event)
+    setDraggedProjectId('')
+    setDragOverProject(null)
+    if (sourceProjectId && sourceProjectId !== targetProjectId) {
+      onProjectReorder(sourceProjectId, targetProjectId, placement)
+    }
+  }
+
+  // clearProjectDragState 清理当前 Project 拖拽状态。
+  const clearProjectDragState = () => {
+    setDraggedProjectId('')
+    setDragOverProject(null)
+  }
+
   return (
     <aside
       data-testid="sidebar"
@@ -99,16 +158,31 @@ export function AppSidebar({
         ) : (
           projects.map((project) => {
             const projectStatus = projectVisualStatuses.get(project.id)
+            const dragPlacement = dragOverProject?.id === project.id ? dragOverProject.placement : null
             return (
               <div
                 key={project.id}
+                data-testid="project-item"
+                draggable
+                onDragStart={(event) => handleProjectDragStart(event, project.id)}
+                onDragOver={(event) => handleProjectDragOver(event, project.id)}
+                onDragLeave={(event) => handleProjectDragLeave(event, project.id)}
+                onDrop={(event) => handleProjectDrop(event, project.id)}
+                onDragEnd={clearProjectDragState}
                 className={`mb-1 rounded-md border px-2 py-2 transition ${
                   project.id === selectedProjectId
                     ? 'border-[var(--agenthub-secondary)] bg-[var(--agenthub-primary-container)] shadow-[var(--agenthub-elevation-1)]'
                     : 'border-transparent hover:border-[var(--agenthub-outline)] hover:bg-[var(--agenthub-sidebar-hover)]'
+                } ${draggedProjectId === project.id ? 'opacity-55' : ''} ${
+                  dragPlacement === 'before'
+                    ? 'shadow-[inset_0_2px_0_var(--agenthub-primary)]'
+                    : dragPlacement === 'after'
+                      ? 'shadow-[inset_0_-2px_0_var(--agenthub-primary)]'
+                      : ''
                 }`}
               >
                 <div className="flex items-center gap-2">
+                  <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-[var(--agenthub-muted)] active:cursor-grabbing" />
                   <button
                     type="button"
                     onClick={() => onProjectSelect(project)}

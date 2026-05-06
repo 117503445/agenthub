@@ -23,6 +23,11 @@ type ProjectMutationPayload struct {
 	Path string `json:"path"`         // Path 表示 project 在后端机器上的工作目录。
 }
 
+// ProjectReorderPayload 表示 Project 侧栏重排序请求参数。
+type ProjectReorderPayload struct {
+	ProjectIDs []string `json:"projectIds"` // ProjectIDs 表示排序后的 project 标识列表。
+}
+
 // IDPayload 表示只携带 id 参数的请求。
 type IDPayload struct {
 	ID string `json:"id"` // ID 表示目标资源标识。

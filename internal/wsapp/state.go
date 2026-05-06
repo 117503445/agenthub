@@ -84,6 +84,7 @@ type Project struct {
 	Name      string    `json:"name"`      // Name 表示由工作目录最后一级派生的展示名称。
 	Path      string    `json:"path"`      // Path 表示 project 工作目录。
 	Git       GitInfo   `json:"git"`       // Git 表示 project 当前 Git 摘要。
+	SortOrder int64     `json:"sortOrder"` // SortOrder 表示 project 在侧栏中的排序值，越小越靠前。
 	CreatedAt time.Time `json:"createdAt"` // CreatedAt 表示创建时间。
 	UpdatedAt time.Time `json:"updatedAt"` // UpdatedAt 表示更新时间。
 }
@@ -213,6 +214,7 @@ func (s *Store) CreateProject(projectPath string) (Project, error) {
 	}
 
 	if err := s.commit(func(state *storeState) error {
+		project.SortOrder = nextTopProjectSortOrder(state)
 		state.projects[project.ID] = project
 		return nil
 	}); err != nil {
@@ -252,6 +254,7 @@ func (s *Store) CreateProjectFromGitWorkdir(workdir string) (Project, Chat, bool
 				return errStoreUnchanged
 			}
 		}
+		project.SortOrder = nextTopProjectSortOrder(state)
 		state.projects[project.ID] = project
 		chat = createChatInState(state, project.ID, now)
 		return nil
@@ -292,6 +295,36 @@ func (s *Store) UpdateProject(id string, projectPath string) (Project, error) {
 		return Project{}, err
 	}
 	return project, nil
+}
+
+// ReorderProjects 使用 projectIDs 参数保存 Project 侧栏顺序，并返回排序后的 Project 列表。
+func (s *Store) ReorderProjects(projectIDs []string) ([]Project, error) {
+	var projects []Project
+	now := time.Now()
+	if err := s.commit(func(state *storeState) error {
+		if len(projectIDs) != len(state.projects) {
+			return fmt.Errorf("%w: project 排序数量不匹配", ErrInvalidInput)
+		}
+		seen := make(map[string]bool, len(projectIDs))
+		for index, projectID := range projectIDs {
+			project, ok := state.projects[projectID]
+			if !ok {
+				return fmt.Errorf("%w: Project 不存在: %s", ErrNotFound, projectID)
+			}
+			if seen[projectID] {
+				return fmt.Errorf("%w: Project 重复: %s", ErrInvalidInput, projectID)
+			}
+			seen[projectID] = true
+			project.SortOrder = int64(index)
+			project.UpdatedAt = now
+			state.projects[projectID] = project
+		}
+		projects = sortedProjectsFromState(state)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return projects, nil
 }
 
 // DeleteProject 使用 id 参数删除 project 及其聊天页，并返回被删除的聊天页标识。
@@ -1127,16 +1160,7 @@ func (s *Store) SetChatSessionID(chatID string, sessionID string) (Chat, bool) {
 func (s *Store) Snapshot() Snapshot {
 	s.mu.RLock()
 
-	projects := make([]Project, 0, len(s.projects))
-	for _, project := range s.projects {
-		projects = append(projects, project)
-	}
-	sort.Slice(projects, func(i int, j int) bool {
-		if projects[i].CreatedAt.Equal(projects[j].CreatedAt) {
-			return projects[i].ID < projects[j].ID
-		}
-		return projects[i].CreatedAt.Before(projects[j].CreatedAt)
-	})
+	projects := sortedProjectsFromStore(s.projects)
 
 	chats := make([]Chat, 0, len(s.chats))
 	for _, chat := range s.chats {
@@ -1167,6 +1191,45 @@ func (s *Store) Snapshot() Snapshot {
 		AgentSkills:        LoadAgentSkillOptions(projectPaths),
 		LastAgentSelection: lastAgent,
 	}
+}
+
+// nextTopProjectSortOrder 使用 state 参数返回插入顶部的 project 排序值。
+func nextTopProjectSortOrder(state *storeState) int64 {
+	if len(state.projects) == 0 {
+		return 0
+	}
+	minOrder := int64(0)
+	first := true
+	for _, project := range state.projects {
+		if first || project.SortOrder < minOrder {
+			minOrder = project.SortOrder
+			first = false
+		}
+	}
+	return minOrder - 1
+}
+
+// sortedProjectsFromState 使用 state 参数返回稳定排序的 Project 列表。
+func sortedProjectsFromState(state *storeState) []Project {
+	return sortedProjectsFromStore(state.projects)
+}
+
+// sortedProjectsFromStore 使用 projects 参数返回稳定排序的 Project 列表。
+func sortedProjectsFromStore(projects map[string]Project) []Project {
+	result := make([]Project, 0, len(projects))
+	for _, project := range projects {
+		result = append(result, project)
+	}
+	sort.Slice(result, func(i int, j int) bool {
+		if result[i].SortOrder != result[j].SortOrder {
+			return result[i].SortOrder < result[j].SortOrder
+		}
+		if !result[i].CreatedAt.Equal(result[j].CreatedAt) {
+			return result[i].CreatedAt.After(result[j].CreatedAt)
+		}
+		return result[i].ID < result[j].ID
+	})
+	return result
 }
 
 // AgentSkills 返回当前 project 和用户目录中可用的 skill 列表。

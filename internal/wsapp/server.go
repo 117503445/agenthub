@@ -209,6 +209,17 @@ func (s *Server) handle(ctx context.Context, outbound chan ServerMessage, msg Cl
 		s.broadcast("project.changed", map[string]any{"project": project})
 		s.broadcastAgentSkills()
 		return nil
+	case "project.reorder":
+		var payload ProjectReorderPayload
+		if err := decodePayload(msg, &payload); err != nil {
+			return err
+		}
+		projects, err := s.store.ReorderProjects(payload.ProjectIDs)
+		if err != nil {
+			return err
+		}
+		s.broadcast("projects.reordered", map[string]any{"projects": projects})
+		return nil
 	case "project.delete":
 		var payload IDPayload
 		if err := decodePayload(msg, &payload); err != nil {

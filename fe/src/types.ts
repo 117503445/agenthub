@@ -151,6 +151,8 @@ export interface Project {
   path: string
   /** git 表示 project 当前 Git 摘要。 */
   git?: ProjectGitInfo
+  /** sortOrder 表示侧栏排序值，值越小越靠前。 */
+  sortOrder: number
   /** createdAt 表示创建时间。 */
   createdAt: string
   /** updatedAt 表示更新时间。 */
@@ -285,6 +287,11 @@ export interface SnapshotPayload {
 export interface ProjectChangedPayload {
   /** project 表示变更后的 project。 */
   project: Project
+}
+
+export interface ProjectsReorderedPayload {
+  /** projects 表示重排序后的完整 project 列表。 */
+  projects: Project[]
 }
 
 export interface ProjectDeletedPayload {

@@ -134,3 +134,18 @@ export function sortByCreatedAt<TItem extends { createdAt: string; id: string }>
     return leftTime - rightTime
   })
 }
+
+// sortProjects 使用 projects 参数按侧栏顺序稳定排序。
+export function sortProjects(projects: Project[]) {
+  return [...projects].sort((left, right) => {
+    if (left.sortOrder !== right.sortOrder) {
+      return left.sortOrder - right.sortOrder
+    }
+    const leftTime = new Date(left.createdAt).getTime()
+    const rightTime = new Date(right.createdAt).getTime()
+    if (leftTime !== rightTime) {
+      return rightTime - leftTime
+    }
+    return left.id.localeCompare(right.id)
+  })
+}
