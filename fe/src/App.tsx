@@ -476,6 +476,9 @@ function App() {
     if (message.role !== 'assistant') {
       return
     }
+    if (message.status === 'stopped') {
+      return
+    }
     const title = message.status === 'error' ? 'Agent 回复失败' : 'Agent 回复完成'
     const body = message.text.trim().replace(/\s+/g, ' ').slice(0, 120)
     new Notification(title, { body: body || '任务已结束' })

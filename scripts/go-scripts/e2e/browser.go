@@ -703,6 +703,34 @@ func expectNotificationCount(page playwright.Page, minimum int, timeout time.Dur
 	return fmt.Errorf("等待桌面通知数量达到 %d 超时，实际数量: %d", minimum, lastCount)
 }
 
+// expectNotificationCountExactly 使用 page、expected 和 timeout 参数确认桌面通知数量保持为 expected。
+func expectNotificationCountExactly(page playwright.Page, expected int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastCount int
+	var lastErr error
+	for time.Now().Before(deadline) {
+		value, err := page.Evaluate(`() => window.__agenthubNotifications?.length ?? 0`, nil)
+		if err == nil {
+			switch typed := value.(type) {
+			case int:
+				lastCount = typed
+			case float64:
+				lastCount = int(typed)
+			}
+			if lastCount != expected {
+				return fmt.Errorf("桌面通知数量应保持为 %d，实际为 %d", expected, lastCount)
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("确认桌面通知数量保持为 %d 失败，最后错误: %w", expected, lastErr)
+	}
+	return nil
+}
+
 // expectClipboardText 使用 page、expected 和 timeout 参数等待复制内容包含 expected。
 func expectClipboardText(page playwright.Page, expected string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
