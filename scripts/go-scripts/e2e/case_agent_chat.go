@@ -83,7 +83,7 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := expectLocatorBackgroundLuminance(page.Locator("aside"), 235, 2*time.Second); err != nil {
 		return fail(err)
 	}
-	events = append(events, reportStep("前端使用 paseo 浅色工作台风格，侧栏左下角集中展示连接状态、机器名、添加项目和设置入口。"))
+	events = append(events, reportStep("前端使用 Material 浅色工作台风格，侧栏左下角集中展示添加项目和设置入口。"))
 
 	projectPath := ctx.RootDir
 	projectDisplayName := filepath.Base(projectPath)

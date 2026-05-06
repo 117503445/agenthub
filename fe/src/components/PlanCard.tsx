@@ -28,12 +28,12 @@ export function PlanCard({ plan, projectRoot, onExecute }: PlanCardProps) {
   const executing = plan.status !== 'pending'
 
   return (
-    <section data-testid="plan-card" className="rounded-md border border-slate-200 bg-white p-3">
+    <section data-testid="plan-card" className="rounded-md border border-[var(--agenthub-outline)] bg-[var(--agenthub-surface-0)] p-3 shadow-[var(--agenthub-elevation-1)]">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <span className="inline-flex min-w-0 items-center gap-2 text-sm font-medium text-slate-900">
-          <ClipboardList className="h-4 w-4 shrink-0 text-slate-500" />
+        <span className="inline-flex min-w-0 items-center gap-2 text-sm font-medium text-[var(--agenthub-foreground)]">
+          <ClipboardList className="h-4 w-4 shrink-0 text-[var(--agenthub-primary)]" />
           <span>Plan</span>
-          <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">{planStatusText(plan.status)}</span>
+          <span className="rounded bg-[var(--agenthub-surface-2)] px-1.5 py-0.5 text-xs text-[var(--agenthub-muted)]">{planStatusText(plan.status)}</span>
         </span>
         <Button
           data-testid="plan-execute-button"

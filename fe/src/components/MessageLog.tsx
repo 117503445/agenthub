@@ -96,14 +96,14 @@ export function MessageLog({
     })
     return () => {
       window.cancelAnimationFrame(frame)
-      saveCurrentScroll(logRef.current)
+      saveCurrentScroll(element)
     }
   }, [chat.id, onReadScrollMemory, saveCurrentScroll])
 
   return (
     <div
       ref={logRef}
-      className="min-h-0 flex-1 overflow-y-auto px-4 py-5"
+      className="min-h-0 flex-1 overflow-y-auto bg-[var(--agenthub-bg)] px-4 py-5"
       data-testid="message-log"
       aria-live="polite"
       onScroll={(event) => saveCurrentScroll(event.currentTarget)}
@@ -117,14 +117,14 @@ export function MessageLog({
                 key={message.id}
                 className={`message-card message-${message.role} group/message relative mt-5 rounded-md border p-4 ${
                   message.role === 'user'
-                    ? 'mb-8 border-teal-200 bg-teal-50'
+                    ? 'mb-8 border-[var(--agenthub-secondary)] bg-[var(--agenthub-primary-container)]'
                     : message.role === 'system'
-                      ? 'border-rose-200 bg-rose-50'
+                      ? 'border-[var(--agenthub-danger)] bg-[var(--agenthub-danger-muted)]'
                       : 'border-transparent bg-transparent'
                 }`}
               >
-                <span data-testid="message-time" className={`absolute ${timePosition} inline-flex items-center gap-2 text-xs text-slate-500`}>
-                  {message.status === 'streaming' ? <Loader2 className="h-3.5 w-3.5 animate-spin text-orange-500" /> : null}
+                <span data-testid="message-time" className={`absolute ${timePosition} inline-flex items-center gap-2 text-xs text-[var(--agenthub-muted)]`}>
+                  {message.status === 'streaming' ? <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--agenthub-warning)]" /> : null}
                   {message.status === 'stopped' ? '已停止' : message.status === 'error' ? '失败' : formatTime(message.updatedAt)}
                 </span>
                 {message.role === 'assistant' ? (
@@ -137,20 +137,20 @@ export function MessageLog({
                           <details
                             key={part.id}
                             data-testid="tool-call-details"
-                            className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"
+                            className="rounded-md border border-[var(--agenthub-outline)] bg-[var(--agenthub-surface-1)] px-3 py-2"
                           >
                             <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
-                              <span className="inline-flex min-w-0 items-center gap-2 text-sm font-medium text-slate-800">
-                                <Wrench className="h-4 w-4 shrink-0 text-slate-500" />
+                              <span className="inline-flex min-w-0 items-center gap-2 text-sm font-medium text-[var(--agenthub-foreground)]">
+                                <Wrench className="h-4 w-4 shrink-0 text-[var(--agenthub-muted)]" />
                                 <span className="truncate font-mono text-xs">{toolCommandTitle(part.toolCall)}</span>
                               </span>
-                              <span className="shrink-0 text-xs text-slate-500">
+                              <span className="shrink-0 text-xs text-[var(--agenthub-muted)]">
                                 {part.toolCall.status === 'running' ? '运行中' : part.toolCall.status === 'error' ? '失败' : '完成'}
                               </span>
                             </summary>
-                            {part.toolCall.input ? <pre className="mt-2 truncate font-mono text-xs text-slate-500">{part.toolCall.input}</pre> : null}
+                            {part.toolCall.input ? <pre className="mt-2 truncate font-mono text-xs text-[var(--agenthub-muted)]">{part.toolCall.input}</pre> : null}
                             {part.toolCall.output ? (
-                              <pre data-testid="tool-call-output" className="mt-2 whitespace-pre-wrap break-words font-mono text-xs text-slate-600">
+                              <pre data-testid="tool-call-output" className="mt-2 whitespace-pre-wrap break-words font-mono text-xs text-[var(--agenthub-muted)]">
                                 {part.toolCall.output}
                               </pre>
                             ) : null}
@@ -163,13 +163,17 @@ export function MessageLog({
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    <pre className="whitespace-pre-wrap break-words font-sans text-base leading-7 text-slate-800">{message.text}</pre>
+                    <pre className="whitespace-pre-wrap break-words font-sans text-base leading-7 text-[var(--agenthub-foreground)]">{message.text}</pre>
                     {message.images?.length ? (
                       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                         {message.images.map((image) => (
-                          <figure key={image.id} data-testid="message-image" className="overflow-hidden rounded-md border border-slate-200 bg-white">
+                          <figure
+                            key={image.id}
+                            data-testid="message-image"
+                            className="overflow-hidden rounded-md border border-[var(--agenthub-outline)] bg-[var(--agenthub-surface-0)]"
+                          >
                             <img src={`data:${image.mimeType};base64,${image.data}`} alt={image.fileName} className="h-28 w-full object-cover" />
-                            <figcaption className="truncate px-2 py-1 text-xs text-slate-500">{image.fileName}</figcaption>
+                            <figcaption className="truncate px-2 py-1 text-xs text-[var(--agenthub-muted)]">{image.fileName}</figcaption>
                           </figure>
                         ))}
                       </div>
@@ -181,7 +185,7 @@ export function MessageLog({
                     data-testid="user-copy-button"
                     type="button"
                     onClick={() => onCopyMessage(message)}
-                    className="absolute -bottom-8 right-0 inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-slate-500 opacity-0 transition hover:bg-slate-100 hover:text-slate-900 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-teal-500/20 group-hover/message:opacity-100"
+                    className="absolute -bottom-8 right-0 inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-[var(--agenthub-muted)] opacity-0 transition hover:bg-[var(--agenthub-surface-2)] hover:text-[var(--agenthub-foreground)] focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-[var(--agenthub-primary)]/20 group-hover/message:opacity-100"
                     aria-label="复制消息"
                     title="复制"
                   >
@@ -194,7 +198,7 @@ export function MessageLog({
                       data-testid="assistant-copy-button"
                       type="button"
                       onClick={() => onCopyMessage(message)}
-                      className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                      className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-[var(--agenthub-muted)] transition hover:bg-[var(--agenthub-surface-2)] hover:text-[var(--agenthub-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--agenthub-primary)]/20"
                       aria-label="复制回复"
                       title="复制"
                     >

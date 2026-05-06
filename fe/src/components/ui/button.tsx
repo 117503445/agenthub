@@ -12,11 +12,11 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantClass: Record<ButtonVariant, string> = {
-  default: 'bg-[var(--paseo-accent)] text-[#ffffff] hover:bg-[var(--paseo-accent-hover)]',
+  default: 'bg-[var(--agenthub-primary)] text-[#ffffff] hover:bg-[var(--agenthub-primary-hover)]',
   outline:
-    'border border-[var(--paseo-border)] bg-[var(--paseo-surface-0)] text-[var(--paseo-foreground)] hover:bg-[var(--paseo-sidebar-hover)]',
-  ghost: 'text-[var(--paseo-muted)] hover:bg-[var(--paseo-sidebar-hover)] hover:text-[var(--paseo-foreground)]',
-  destructive: 'bg-[var(--paseo-danger)] text-[#ffffff] hover:bg-[#c64f43]',
+    'border border-[var(--agenthub-outline)] bg-[var(--agenthub-surface-0)] text-[var(--agenthub-foreground)] hover:bg-[var(--agenthub-sidebar-hover)]',
+  ghost: 'text-[var(--agenthub-muted)] hover:bg-[var(--agenthub-sidebar-hover)] hover:text-[var(--agenthub-foreground)]',
+  destructive: 'bg-[var(--agenthub-danger)] text-[#ffffff] hover:bg-[#b3261e]',
 }
 
 const sizeClass: Record<ButtonSize, string> = {
@@ -32,7 +32,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       ref={ref}
       type={type}
       className={cn(
-        'inline-flex cursor-pointer items-center justify-center gap-2 rounded-md font-medium transition focus:outline-none focus:ring-2 focus:ring-[var(--paseo-accent)]/25 disabled:cursor-not-allowed disabled:opacity-50',
+        'inline-flex cursor-pointer items-center justify-center gap-2 rounded-md font-medium transition focus:outline-none focus:ring-2 focus:ring-[var(--agenthub-primary)]/25 disabled:cursor-not-allowed disabled:opacity-50',
         variantClass[variant],
         sizeClass[size],
         className,

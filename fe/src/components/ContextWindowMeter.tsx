@@ -22,23 +22,23 @@ export function ContextWindowMeter({ usage }: ContextWindowMeterProps) {
   const maxTokens = Math.max(usage?.maxTokens ?? 0, 0)
   const usedTokens = Math.max(usage?.usedTokens ?? 0, 0)
   const percent = maxTokens > 0 ? Math.min(100, Math.round((usedTokens / maxTokens) * 100)) : 0
-  const tone = percent >= 90 ? '#b04138' : percent >= 70 ? '#d97706' : '#20744a'
+  const tone = percent >= 90 ? 'var(--agenthub-danger)' : percent >= 70 ? 'var(--agenthub-warning)' : 'var(--agenthub-primary)'
 
   return (
     <div
       data-testid="context-window-meter"
       data-percent={percent}
-      className="context-window-meter group relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-500"
-      style={{ background: `conic-gradient(${tone} ${percent * 3.6}deg, #e4e4e7 0deg)` }}
+      className="context-window-meter group relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--agenthub-muted)]"
+      style={{ background: `conic-gradient(${tone} ${percent * 3.6}deg, var(--agenthub-surface-3) 0deg)` }}
       aria-label={`Context window ${percent}% used`}
       title={`Context window ${percent}% used`}
       tabIndex={0}
     >
-      <span className="absolute inset-[3px] rounded-full bg-white" />
+      <span className="absolute inset-[3px] rounded-full bg-[var(--agenthub-surface-0)]" />
       <Gauge className="relative h-4 w-4" />
       <span className="sr-only">Context window</span>
-      <span className="pointer-events-none absolute bottom-[calc(100%+10px)] right-0 z-40 hidden w-40 rounded-md border border-slate-200 bg-white p-3 text-left text-xs leading-5 text-slate-600 shadow-lg group-hover:block group-focus:block">
-        <span className="block font-medium text-slate-900">Context window</span>
+      <span className="pointer-events-none absolute bottom-[calc(100%+10px)] right-0 z-40 hidden w-40 rounded-md border border-[var(--agenthub-outline)] bg-[var(--agenthub-surface-0)] p-3 text-left text-xs leading-5 text-[var(--agenthub-muted)] shadow-[var(--agenthub-elevation-2)] group-hover:block group-focus:block">
+        <span className="block font-medium text-[var(--agenthub-foreground)]">Context window</span>
         <span className="block">{percent}% used</span>
         <span className="block font-mono">
           {compactTokenCount(usedTokens)} / {compactTokenCount(maxTokens)} tokens

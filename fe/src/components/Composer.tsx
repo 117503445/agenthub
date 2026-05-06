@@ -232,15 +232,18 @@ export function Composer({
   }
 
   return (
-    <form data-testid="composer-taskbar" className="composer-taskbar sticky bottom-0 z-10 shrink-0 bg-white px-4 py-4" onSubmit={onSubmitComposer}>
-      <div data-testid="composer-shell" className="composer-shell relative mx-auto w-full max-w-[860px] rounded-[20px] border border-slate-200 bg-white px-4 py-3 shadow-sm">
+    <form data-testid="composer-taskbar" className="composer-taskbar sticky bottom-0 z-10 shrink-0 bg-[var(--agenthub-surface-0)] px-4 py-4" onSubmit={onSubmitComposer}>
+      <div
+        data-testid="composer-shell"
+        className="composer-shell relative mx-auto w-full max-w-[860px] rounded-[18px] border border-[var(--agenthub-outline)] bg-[var(--agenthub-surface-1)] px-4 py-3 shadow-[var(--agenthub-elevation-2)]"
+      >
         {skillMenuVisible ? (
           <div
             id={skillMenuID}
             data-testid="skill-menu"
             role="listbox"
             aria-label="选择 skill"
-            className="absolute bottom-[calc(100%+8px)] left-0 right-0 z-30 mx-auto max-h-64 max-w-[860px] overflow-y-auto rounded-md border border-slate-200 bg-white p-1 shadow-lg"
+            className="absolute bottom-[calc(100%+8px)] left-0 right-0 z-30 mx-auto max-h-64 max-w-[860px] overflow-y-auto rounded-lg border border-[var(--agenthub-outline)] bg-[var(--agenthub-surface-0)] p-1 shadow-[var(--agenthub-elevation-2)]"
           >
             {filteredSkills.map((skill, index) => (
               <button
@@ -255,11 +258,11 @@ export function Composer({
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => applySkill(skill)}
                 className={`flex w-full cursor-pointer items-start gap-3 rounded-md px-3 py-2 text-left transition ${
-                  index === activeSkillIndex ? 'bg-slate-100' : 'hover:bg-slate-50'
+                  index === activeSkillIndex ? 'bg-[var(--agenthub-primary-container)]' : 'hover:bg-[var(--agenthub-surface-2)]'
                 }`}
               >
-                <span className="shrink-0 font-mono text-sm text-teal-700">/{skill.label}</span>
-                <span className="min-w-0 flex-1 truncate text-xs leading-5 text-slate-500">{skill.description}</span>
+                <span className="shrink-0 font-mono text-sm text-[var(--agenthub-primary)]">/{skill.label}</span>
+                <span className="min-w-0 flex-1 truncate text-xs leading-5 text-[var(--agenthub-muted)]">{skill.description}</span>
               </button>
             ))}
           </div>
@@ -289,12 +292,15 @@ export function Composer({
         {composerImages.length > 0 ? (
           <div data-testid="composer-attachments" className="mt-3 flex flex-wrap gap-2">
             {composerImages.map((image) => (
-              <div key={image.id} className="inline-flex max-w-52 items-center gap-2 rounded-md border border-slate-200 bg-white p-1 pr-2">
+              <div
+                key={image.id}
+                className="inline-flex max-w-52 items-center gap-2 rounded-md border border-[var(--agenthub-outline)] bg-[var(--agenthub-surface-0)] p-1 pr-2"
+              >
                 <img src={image.previewUrl} alt="" className="h-9 w-9 rounded object-cover" />
-                <span className="min-w-0 truncate text-xs text-slate-600">{image.fileName}</span>
+                <span className="min-w-0 truncate text-xs text-[var(--agenthub-muted)]">{image.fileName}</span>
                 <button
                   type="button"
-                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-[var(--agenthub-muted)] hover:bg-[var(--agenthub-surface-2)] hover:text-[var(--agenthub-foreground)]"
                   onClick={() => removeImage(image.id)}
                   aria-label="移除图片"
                   title="移除"
@@ -320,7 +326,7 @@ export function Composer({
             type="button"
             variant="ghost"
             size="icon"
-            className="h-8 w-8 rounded-full text-slate-500"
+            className="h-8 w-8 rounded-full text-[var(--agenthub-muted)]"
             aria-label="添加图片"
             title="添加图片"
             onClick={() => fileInputRef.current?.click()}
@@ -333,7 +339,7 @@ export function Composer({
             type="button"
             variant="ghost"
             size="icon"
-            className={`h-8 w-8 rounded-full text-slate-500 ${planMode ? 'bg-slate-200 text-slate-900' : ''}`}
+            className={`h-8 w-8 rounded-full text-[var(--agenthub-muted)] ${planMode ? 'bg-[var(--agenthub-primary-container)] text-[var(--agenthub-primary)]' : ''}`}
             aria-pressed={planMode}
             aria-label="切换 plan 模式"
             title="Plan 模式"
@@ -342,7 +348,7 @@ export function Composer({
             <ClipboardList className="h-4 w-4" />
           </Button>
           <div className="relative">
-            <Bot className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+            <Bot className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--agenthub-muted)]" />
             <Select
               id="agent-provider-select"
               data-testid="agent-provider-select"
@@ -351,7 +357,7 @@ export function Composer({
               disabled={agentControlsDisabled || providerLocked}
               aria-label="选择助理"
               style={composerSelectWidthStyle(selectedProviderLabel, 4, 32)}
-              className="composer-select h-8 appearance-none rounded-full border-transparent bg-slate-50 pl-8 pr-8 text-xs"
+              className="composer-select h-8 appearance-none rounded-full border-transparent bg-[var(--agenthub-surface-2)] pl-8 pr-8 text-xs"
             >
               {agentProviders.map((provider) => (
                 <option key={provider.id} value={provider.id}>
@@ -359,13 +365,13 @@ export function Composer({
                 </option>
               ))}
             </Select>
-            <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
+            <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--agenthub-muted)]" />
           </div>
           <label htmlFor="agent-model-select" className="sr-only">
             模型
           </label>
           <div className="relative">
-            <MessageSquare className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+            <MessageSquare className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--agenthub-muted)]" />
             <Select
               id="agent-model-select"
               data-testid="agent-model-select"
@@ -373,7 +379,7 @@ export function Composer({
               onChange={(event) => onChangeAgentModel(event.target.value)}
               disabled={modelControlsDisabled}
               style={composerSelectWidthStyle(selectedModelValue, 4, 42)}
-              className="composer-select h-8 appearance-none rounded-full border-transparent bg-slate-50 pl-8 pr-8 text-xs"
+              className="composer-select h-8 appearance-none rounded-full border-transparent bg-[var(--agenthub-surface-2)] pl-8 pr-8 text-xs"
             >
               {selectedAgentModels.map((model) => (
                 <option key={model.id} value={model.id}>
@@ -381,14 +387,14 @@ export function Composer({
                 </option>
               ))}
             </Select>
-            <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
+            <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--agenthub-muted)]" />
           </div>
           {selectedAgentModelOption?.reasoningLevels?.length ? (
             <div className="relative">
               <label htmlFor="agent-reasoning-select" className="sr-only">
                 推理级别
               </label>
-              <Brain className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+              <Brain className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--agenthub-muted)]" />
               <Select
                 id="agent-reasoning-select"
                 data-testid="agent-reasoning-select"
@@ -396,7 +402,7 @@ export function Composer({
                 onChange={(event) => onChangeAgentReasoning(event.target.value)}
                 disabled={modelControlsDisabled}
                 style={composerSelectWidthStyle(selectedReasoningLabel, 4, 24)}
-                className="composer-select h-8 appearance-none rounded-full border-transparent bg-slate-50 pl-8 pr-8 text-xs"
+                className="composer-select h-8 appearance-none rounded-full border-transparent bg-[var(--agenthub-surface-2)] pl-8 pr-8 text-xs"
               >
                 {selectedAgentModelOption.reasoningLevels.map((level) => (
                   <option key={level.id} value={level.id}>
@@ -404,7 +410,7 @@ export function Composer({
                   </option>
                 ))}
               </Select>
-              <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
+              <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--agenthub-muted)]" />
             </div>
           ) : null}
           <span className="min-w-4 flex-1" />
@@ -415,7 +421,7 @@ export function Composer({
               type="submit"
               size="icon"
               disabled={!selectedChat || connectionState !== 'open' || (!hasComposerPayload && !isRunning)}
-              className={`h-9 w-9 shrink-0 rounded-full ${isRunning && !hasComposerPayload ? 'bg-orange-600 hover:bg-orange-500' : ''}`}
+              className={`h-9 w-9 shrink-0 rounded-full ${isRunning && !hasComposerPayload ? 'bg-[var(--agenthub-warning)] hover:bg-[var(--agenthub-warning)]' : ''}`}
               aria-label={isRunning && !hasComposerPayload ? '停止' : '发送'}
             >
               {isRunning && !hasComposerPayload ? <Square className="h-4 w-4" fill="currentColor" /> : <ArrowUp className="h-4 w-4" />}

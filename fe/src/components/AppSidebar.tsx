@@ -71,14 +71,20 @@ export function AppSidebar({
   onSettingsOpen,
 }: AppSidebarProps) {
   return (
-    <aside data-testid="sidebar" className="relative flex h-full min-h-0 flex-col border-r border-slate-800 bg-slate-950 text-slate-100">
-      <div className="border-b border-slate-800 px-3 py-3">
-        <div data-testid="sidebar-identity" className="flex min-w-0 items-center gap-2 text-xs text-slate-500">
-          <Monitor className="h-3.5 w-3.5 shrink-0" />
-          <span data-testid="machine-name" className="min-w-0 flex-1 truncate font-mono">
+    <aside
+      data-testid="sidebar"
+      className="relative flex h-full min-h-0 flex-col border-r border-[var(--agenthub-outline)] bg-[var(--agenthub-sidebar)] text-[var(--agenthub-foreground)]"
+    >
+      <div className="border-b border-[var(--agenthub-outline)] px-3 py-3">
+        <div
+          data-testid="sidebar-identity"
+          className="flex min-w-0 items-center gap-2 rounded-md border border-[var(--agenthub-outline)] bg-[var(--agenthub-surface-0)] px-2.5 py-2 text-xs text-[var(--agenthub-muted)] shadow-[var(--agenthub-elevation-1)]"
+        >
+          <Monitor className="h-3.5 w-3.5 shrink-0 text-[var(--agenthub-primary)]" />
+          <span data-testid="machine-name" className="min-w-0 flex-1 truncate font-mono text-[var(--agenthub-foreground)]">
             {hostname || 'unknown'}
           </span>
-          <span data-testid="connection-state" className="inline-flex shrink-0 items-center gap-1.5">
+          <span data-testid="connection-state" className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[var(--agenthub-surface-2)] px-2 py-1">
             {connectionIcon}
             <span>{connectionText[connectionState]}</span>
           </span>
@@ -87,7 +93,7 @@ export function AppSidebar({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-3" data-testid="project-list">
         {projects.length === 0 ? (
-          <div className="rounded-md border border-dashed border-slate-700 px-3 py-8 text-center text-sm text-slate-500">
+          <div className="rounded-md border border-dashed border-[var(--agenthub-outline-strong)] px-3 py-8 text-center text-sm text-[var(--agenthub-muted)]">
             还没有 Project
           </div>
         ) : (
@@ -98,8 +104,8 @@ export function AppSidebar({
                 key={project.id}
                 className={`mb-1 rounded-md border px-2 py-2 transition ${
                   project.id === selectedProjectId
-                    ? 'border-teal-500 bg-teal-500/10'
-                    : 'border-transparent hover:border-slate-700 hover:bg-slate-900'
+                    ? 'border-[var(--agenthub-secondary)] bg-[var(--agenthub-primary-container)] shadow-[var(--agenthub-elevation-1)]'
+                    : 'border-transparent hover:border-[var(--agenthub-outline)] hover:bg-[var(--agenthub-sidebar-hover)]'
                 }`}
               >
                 <div className="flex items-center gap-2">
@@ -108,8 +114,8 @@ export function AppSidebar({
                     onClick={() => onProjectSelect(project)}
                     className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
                   >
-                    <Folder className="h-4 w-4 shrink-0 text-teal-400" />
-                    <span data-testid="project-name" className="min-w-0 flex-1 truncate text-sm font-medium text-slate-100">
+                    <Folder className="h-4 w-4 shrink-0 text-[var(--agenthub-primary)]" />
+                    <span data-testid="project-name" className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--agenthub-foreground)]">
                       {projectDisplayName(project)}
                     </span>
                     {projectStatus ? <StatusDot status={projectStatus} testID="project-status-dot" /> : null}
@@ -118,7 +124,7 @@ export function AppSidebar({
                     data-testid="project-delete-button"
                     type="button"
                     onClick={() => onProjectDelete(project)}
-                    className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-slate-400 transition hover:bg-rose-500/15 hover:text-rose-300"
+                    className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-[var(--agenthub-muted)] transition hover:bg-[var(--agenthub-danger-muted)] hover:text-[var(--agenthub-danger)]"
                     aria-label="删除 Project"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -132,15 +138,18 @@ export function AppSidebar({
 
       {projectDialogOpen ? (
         <div className="absolute bottom-[4.5rem] left-3 right-3 z-20">
-          <form className="rounded-lg border border-slate-200 bg-white p-3 text-slate-900 shadow-lg" onSubmit={onProjectSave}>
+          <form
+            className="rounded-lg border border-[var(--agenthub-outline)] bg-[var(--agenthub-surface-0)] p-3 text-[var(--agenthub-foreground)] shadow-[var(--agenthub-elevation-2)]"
+            onSubmit={onProjectSave}
+          >
             <div className="mb-2 flex items-center justify-between gap-2">
-              <label htmlFor="project-path-input" className="text-xs font-medium text-slate-500">
+              <label htmlFor="project-path-input" className="text-xs font-medium text-[var(--agenthub-muted)]">
                 工作目录
               </label>
               <button
                 type="button"
                 onClick={onProjectDialogClose}
-                className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-900"
+                className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-[var(--agenthub-muted)] transition hover:bg-[var(--agenthub-surface-2)] hover:text-[var(--agenthub-foreground)]"
                 aria-label="关闭"
               >
                 <X className="h-4 w-4" />
@@ -151,24 +160,24 @@ export function AppSidebar({
               data-testid="project-path-input"
               value={projectPath}
               onChange={(event) => onProjectPathChange(event.target.value)}
-              className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 font-mono text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-teal-600 focus:ring-2 focus:ring-teal-100"
+              className="h-9 w-full rounded-md border border-[var(--agenthub-outline)] bg-[var(--agenthub-surface-0)] px-3 font-mono text-sm text-[var(--agenthub-foreground)] outline-none transition placeholder:text-[var(--agenthub-muted)] focus:border-[var(--agenthub-primary)] focus:ring-2 focus:ring-[var(--agenthub-primary)]/10"
               placeholder="/workspace/project/agenthub"
             />
             <button
               data-testid="project-save-button"
               type="submit"
               disabled={connectionState !== 'open' || !projectPath.trim()}
-              className="mt-3 inline-flex h-9 w-full cursor-pointer items-center justify-center gap-2 rounded-md bg-teal-600 px-3 text-sm font-medium text-white transition hover:bg-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-400 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+              className="mt-3 inline-flex h-9 w-full cursor-pointer items-center justify-center gap-2 rounded-md bg-[var(--agenthub-primary)] px-3 text-sm font-medium text-white transition hover:bg-[var(--agenthub-primary-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--agenthub-primary)]/20 disabled:cursor-not-allowed disabled:bg-[var(--agenthub-surface-3)] disabled:text-[var(--agenthub-muted)]"
             >
               <Plus className="h-4 w-4" />
               添加
             </button>
-            {errorText ? <p className="mt-2 text-xs text-rose-600">{errorText}</p> : null}
+            {errorText ? <p className="mt-2 text-xs text-[var(--agenthub-danger)]">{errorText}</p> : null}
           </form>
         </div>
       ) : null}
 
-      <div data-testid="sidebar-footer" className="border-t border-slate-800 p-3">
+      <div data-testid="sidebar-footer" className="border-t border-[var(--agenthub-outline)] p-3">
         <div className="flex gap-2">
           <Button
             data-testid="project-add-button"

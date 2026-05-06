@@ -7,9 +7,9 @@ const chatStatusLabel: Record<ChatVisualStatus, string> = {
 }
 
 const chatStatusClass: Record<ChatVisualStatus, string> = {
-  running: 'bg-amber-400',
-  success: 'bg-emerald-500',
-  error: 'bg-red-500',
+  running: 'bg-[var(--agenthub-warning)]',
+  success: 'bg-[var(--agenthub-success)]',
+  error: 'bg-[var(--agenthub-danger)]',
 }
 
 interface StatusDotProps {

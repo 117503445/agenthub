@@ -140,12 +140,15 @@ export function ChatWorkspace({
 }: ChatWorkspaceProps) {
   return (
     <>
-      <header className="flex min-h-14 items-center border-b border-slate-200 bg-white px-4" data-testid="project-meta">
-        <div className="flex min-w-0 flex-1 items-center gap-3 text-xs text-slate-500">
-          <span data-testid="project-path-text" className="min-w-0 truncate font-mono text-sm font-medium text-slate-900">
+      <header
+        className="flex min-h-14 items-center border-b border-[var(--agenthub-outline)] bg-[var(--agenthub-surface-0)] px-4"
+        data-testid="project-meta"
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-3 text-xs text-[var(--agenthub-muted)]">
+          <span data-testid="project-path-text" className="min-w-0 truncate font-mono text-sm font-medium text-[var(--agenthub-foreground)]">
             {selectedProject?.path ?? '选择或创建 Project'}
           </span>
-          <span data-testid="project-git-info" className="inline-flex min-w-0 shrink-0 items-center gap-2">
+          <span data-testid="project-git-info" className="inline-flex min-w-0 shrink-0 items-center gap-2 rounded-full bg-[var(--agenthub-surface-2)] px-2 py-1">
             <span className="inline-flex min-w-0 items-center gap-1">
               <GitBranch className="h-3.5 w-3.5 shrink-0" />
               <span className="truncate">{projectGitText(selectedProject)}</span>
@@ -170,10 +173,10 @@ export function ChatWorkspace({
         }}
         className="min-h-0 flex-1 overflow-hidden"
       >
-        <div className="flex min-h-8 items-stretch border-b border-slate-200 bg-slate-50 px-2" data-testid="chat-tabs">
+        <div className="flex min-h-8 items-stretch border-b border-[var(--agenthub-outline)] bg-[var(--agenthub-surface-1)] px-2" data-testid="chat-tabs">
           <TabsList className="h-full flex-1">
             {projectChats.length === 0 ? (
-              <span className="flex items-center text-xs text-slate-500">没有聊天页</span>
+              <span className="flex items-center text-xs text-[var(--agenthub-muted)]">没有聊天页</span>
             ) : (
               projectChats.map((chat) => {
                 const status = chatVisualStatus(chat, chatIndicators)
@@ -198,7 +201,7 @@ export function ChatWorkspace({
                         event.stopPropagation()
                         onDeleteChat(chat)
                       }}
-                      className="inline-flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded text-slate-400 opacity-80 transition hover:bg-slate-200 hover:text-slate-900 group-hover/tab:opacity-100"
+                      className="inline-flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded text-[var(--agenthub-muted)] opacity-80 transition hover:bg-[var(--agenthub-surface-2)] hover:text-[var(--agenthub-foreground)] group-hover/tab:opacity-100"
                       aria-label="关闭聊天页"
                       title="关闭"
                     >

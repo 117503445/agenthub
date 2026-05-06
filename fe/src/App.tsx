@@ -136,16 +136,6 @@ function App() {
   }, [chats])
 
   useEffect(() => {
-    if (!agentProfiles.length) {
-      setSelectedSettingsProfileId('')
-      return
-    }
-    if (!selectedSettingsProfileId || !agentProfiles.some((profile) => profile.id === selectedSettingsProfileId)) {
-      setSelectedSettingsProfileId(agentProfiles[0].id)
-    }
-  }, [agentProfiles, selectedSettingsProfileId])
-
-  useEffect(() => {
     let stopped = false
 
     // loadAuthStatus 读取服务端鉴权状态，并决定是否需要 token。
@@ -924,18 +914,18 @@ function App() {
 
   const connectionIcon =
     connectionState === 'open' ? (
-      <Wifi className="h-4 w-4 text-teal-500" />
+      <Wifi className="h-4 w-4 text-[var(--agenthub-success)]" />
     ) : connectionState === 'connecting' ? (
-      <Loader2 className="h-4 w-4 animate-spin text-amber-500" />
+      <Loader2 className="h-4 w-4 animate-spin text-[var(--agenthub-warning)]" />
     ) : (
-      <WifiOff className="h-4 w-4 text-rose-500" />
+      <WifiOff className="h-4 w-4 text-[var(--agenthub-danger)]" />
     )
 
   if (!authChecked) {
     return (
-      <main className="theme-paseo flex h-[100dvh] items-center justify-center bg-slate-100 text-slate-950">
-        <div className="flex items-center gap-2 text-sm text-[var(--paseo-muted)]" data-testid="auth-loading">
-          <Loader2 className="h-4 w-4 animate-spin text-amber-500" />
+      <main data-theme="material" className="theme-material flex h-[100dvh] items-center justify-center bg-[var(--agenthub-bg)] text-[var(--agenthub-foreground)]">
+        <div className="flex items-center gap-2 text-sm text-[var(--agenthub-muted)]" data-testid="auth-loading">
+          <Loader2 className="h-4 w-4 animate-spin text-[var(--agenthub-warning)]" />
           <span>正在连接</span>
         </div>
       </main>
@@ -944,19 +934,19 @@ function App() {
 
   if (authRequired && !authToken) {
     return (
-      <main className="theme-paseo flex h-[100dvh] items-center justify-center bg-slate-100 px-4 text-slate-950">
+      <main data-theme="material" className="theme-material flex h-[100dvh] items-center justify-center bg-[var(--agenthub-bg)] px-4 text-[var(--agenthub-foreground)]">
         <form
-          className="w-full max-w-sm rounded-lg border border-[var(--paseo-border)] bg-white p-5 shadow-sm"
+          className="w-full max-w-sm rounded-lg border border-[var(--agenthub-outline)] bg-[var(--agenthub-surface-0)] p-5 shadow-[var(--agenthub-elevation-1)]"
           data-testid="token-auth-form"
           onSubmit={submitAgentHubToken}
         >
           <div className="mb-5 flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-md border border-[var(--paseo-border)] bg-[var(--paseo-surface-1)] text-[var(--paseo-accent)]">
+            <div className="flex h-9 w-9 items-center justify-center rounded-md border border-[var(--agenthub-outline)] bg-[var(--agenthub-primary-container)] text-[var(--agenthub-primary)]">
               <LockKeyhole className="h-4 w-4" />
             </div>
-            <h1 className="text-base font-medium text-[var(--paseo-foreground)]">AgentHub Token</h1>
+            <h1 className="text-base font-medium text-[var(--agenthub-foreground)]">AgentHub Token</h1>
           </div>
-          <label className="mb-2 block text-sm text-[var(--paseo-muted)]" htmlFor="agenthub-token-input">
+          <label className="mb-2 block text-sm text-[var(--agenthub-muted)]" htmlFor="agenthub-token-input">
             Token
           </label>
           <Input
@@ -968,7 +958,7 @@ function App() {
             type="password"
             value={authTokenInput}
           />
-          <p className="mt-3 min-h-5 text-sm text-[var(--paseo-danger)]" data-testid="token-auth-error">
+          <p className="mt-3 min-h-5 text-sm text-[var(--agenthub-danger)]" data-testid="token-auth-error">
             {authErrorText}
           </p>
           <Button className="mt-2 w-full" data-testid="agenthub-token-submit" type="submit">
@@ -980,7 +970,10 @@ function App() {
   }
 
   return (
-    <main className="theme-paseo grid h-[100dvh] min-h-0 overflow-hidden bg-slate-100 text-slate-950 lg:grid-cols-[320px_minmax(0,1fr)]">
+    <main
+      data-theme="material"
+      className="theme-material grid h-[100dvh] min-h-0 overflow-hidden bg-[var(--agenthub-bg)] text-[var(--agenthub-foreground)] lg:grid-cols-[304px_minmax(0,1fr)]"
+    >
       <AppSidebar
         connectionState={connectionState}
         connectionIcon={connectionIcon}
