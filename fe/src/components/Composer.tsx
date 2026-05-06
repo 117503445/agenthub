@@ -244,7 +244,7 @@ export function Composer({
   }
 
   return (
-    <form data-testid="composer-taskbar" className="composer-taskbar sticky bottom-0 z-10 shrink-0 bg-[var(--agenthub-surface-0)] px-4 py-4" onSubmit={onSubmitComposer}>
+    <form data-testid="composer-taskbar" className="composer-taskbar sticky bottom-0 z-10 shrink-0 bg-[var(--agenthub-bg)] px-4 py-4" onSubmit={onSubmitComposer}>
       <div
         data-testid="composer-shell"
         className="composer-shell relative mx-auto w-full max-w-[860px] rounded-[18px] border border-[var(--agenthub-outline)] bg-[var(--agenthub-surface-1)] px-4 py-3 shadow-[var(--agenthub-elevation-2)]"

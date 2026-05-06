@@ -1048,25 +1048,38 @@ func expectComposerInitialSizing(page playwright.Page, timeout time.Duration) er
 			}
 			const inputRect = input.getBoundingClientRect();
 			const fontSize = Number.parseFloat(getComputedStyle(input).fontSize);
-			const taskbarLum = cssLuminance(getComputedStyle(taskbar).backgroundColor);
+			const root = taskbar.closest('.theme-material');
+			const rootStyle = root ? getComputedStyle(root) : null;
+			const taskbarBackground = normalizeColor(getComputedStyle(taskbar).backgroundColor);
+			const pageBackground = normalizeColor(rootStyle?.getPropertyValue('--agenthub-bg') ?? '');
 			const shellLum = cssLuminance(getComputedStyle(shell).backgroundColor);
 			const compact = inputRect.height <= 72;
 			const fontOK = Math.abs(fontSize - 16) <= 0.5;
-			const shellGrey = shellLum < taskbarLum - 1;
-			const taskbarWhite = taskbarLum >= 252;
-			if (compact && fontOK && shellGrey && taskbarWhite) {
+			const taskbarMatchesPage = taskbarBackground === pageBackground;
+			if (compact && fontOK && taskbarMatchesPage) {
 				return '';
 			}
 			return 'height=' + inputRect.height.toFixed(2) +
 				', font=' + fontSize.toFixed(2) +
 				', shellLum=' + shellLum.toFixed(1) +
-				', taskbarLum=' + taskbarLum.toFixed(1);
+				', taskbarBackground=' + taskbarBackground +
+				', pageBackground=' + pageBackground;
 			function cssLuminance(text) {
 				const match = text.match(/rgba?\(([^)]+)\)/);
 				if (!match) return 0;
 				const parts = match[1].split(',').slice(0, 3).map((item) => Number.parseFloat(item.trim()));
 				if (parts.length < 3 || parts.some((item) => !Number.isFinite(item))) return 0;
 				return parts[0] * 0.299 + parts[1] * 0.587 + parts[2] * 0.114;
+			}
+			function normalizeColor(text) {
+				const probe = document.createElement('span');
+				probe.style.color = text.trim();
+				document.body.appendChild(probe);
+				const normalized = getComputedStyle(probe).color;
+				probe.remove();
+				const match = normalized.match(/rgba?\(([^)]+)\)/);
+				if (!match) return normalized.trim().toLowerCase();
+				return match[1].split(',').slice(0, 3).map((item) => String(Math.round(Number.parseFloat(item.trim())))).join(',');
 			}
 		}`, nil)
 		if err == nil {

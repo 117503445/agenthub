@@ -292,7 +292,7 @@ textarea {
 }
 
 .theme-material .composer-taskbar {
-  background-color: var(--agenthub-surface-0) !important;
+  background-color: var(--agenthub-bg) !important;
   backdrop-filter: blur(10px);
 }
 
