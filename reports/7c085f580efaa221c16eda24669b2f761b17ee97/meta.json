@@ -1,0 +1,97 @@
+{
+  "sha": "7c085f580efaa221c16eda24669b2f761b17ee97",
+  "shortSHA": "7c085f580efa",
+  "refName": "master",
+  "runURL": "https://github.com/117503445/agenthub/actions/runs/25422423477",
+  "pagesURL": "https://117503445.github.io/agenthub/reports/7c085f580efaa221c16eda24669b2f761b17ee97/",
+  "passed": true,
+  "exitCode": 0,
+  "createdAt": "2026-05-06T07:37:17Z",
+  "cases": [
+    {
+      "name": "case_agent_chat",
+      "passed": true,
+      "reportURL": "cases/case_agent_chat/report.html"
+    },
+    {
+      "name": "case_agent_profile",
+      "passed": true,
+      "reportURL": "cases/case_agent_profile/report.html"
+    },
+    {
+      "name": "case_chat_send_feedback",
+      "passed": true,
+      "reportURL": "cases/case_chat_send_feedback/report.html"
+    },
+    {
+      "name": "case_codex_dash_prompt",
+      "passed": true,
+      "reportURL": "cases/case_codex_dash_prompt/report.html"
+    },
+    {
+      "name": "case_manual_stop_notification",
+      "passed": true,
+      "reportURL": "cases/case_manual_stop_notification/report.html"
+    },
+    {
+      "name": "case_markdown_filesystem_links",
+      "passed": true,
+      "reportURL": "cases/case_markdown_filesystem_links/report.html"
+    },
+    {
+      "name": "case_markdown_ordered_list",
+      "passed": true,
+      "reportURL": "cases/case_markdown_ordered_list/report.html"
+    },
+    {
+      "name": "case_material_theme",
+      "passed": true,
+      "reportURL": "cases/case_material_theme/report.html"
+    },
+    {
+      "name": "case_mock_agent_gate",
+      "passed": true,
+      "reportURL": "cases/case_mock_agent_gate/report.html"
+    },
+    {
+      "name": "case_persistence",
+      "passed": true,
+      "reportURL": "cases/case_persistence/report.html"
+    },
+    {
+      "name": "case_project_chat_tab_memory",
+      "passed": true,
+      "reportURL": "cases/case_project_chat_tab_memory/report.html"
+    },
+    {
+      "name": "case_project_icon",
+      "passed": true,
+      "reportURL": "cases/case_project_icon/report.html"
+    },
+    {
+      "name": "case_project_reorder",
+      "passed": true,
+      "reportURL": "cases/case_project_reorder/report.html"
+    },
+    {
+      "name": "case_settings_backend_version",
+      "passed": true,
+      "reportURL": "cases/case_settings_backend_version/report.html"
+    },
+    {
+      "name": "case_token_auth",
+      "passed": true,
+      "reportURL": "cases/case_token_auth/report.html"
+    },
+    {
+      "name": "case_token_cli_auth",
+      "passed": true,
+      "reportURL": "cases/case_token_cli_auth/report.html"
+    },
+    {
+      "name": "case_ws",
+      "passed": true,
+      "reportURL": "cases/case_ws/report.html"
+    }
+  ]
+}
