@@ -71,6 +71,7 @@ function App() {
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting')
   const [hostname, setHostname] = useState('')
   const [backendVersion, setBackendVersion] = useState('')
+  const [backendBuildTime, setBackendBuildTime] = useState('')
   const [projects, setProjects] = useState<Project[]>([])
   const [chats, setChats] = useState<Chat[]>([])
   const [agentProviders, setAgentProviders] = useState(fallbackAgentProviders)
@@ -655,6 +656,7 @@ function App() {
     (message: ServerMessage) => {
       setHostname(message.hostname || window.location.hostname || 'unknown')
       setBackendVersion(message.version || '')
+      setBackendBuildTime(message.buildTime || '')
       if (message.type === 'state.snapshot') {
         const payload = message.payload as SnapshotPayload
         const nextProjects = sortProjects(payload.projects ?? [])
@@ -1293,6 +1295,7 @@ function App() {
           <AgentSettingsPage
             connectionState={connectionState}
             backendVersion={backendVersion}
+            backendBuildTime={backendBuildTime}
             hostname={hostname}
             agentProfiles={agentProfiles}
             backendEnv={backendEnv}

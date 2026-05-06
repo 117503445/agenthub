@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/117503445/agenthub/internal/buildinfo"
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/rs/zerolog/log"
@@ -20,6 +21,7 @@ import (
 type Server struct {
 	ctx             context.Context
 	version         string
+	buildTime       string
 	hostname        string
 	store           *Store
 	agents          *AgentManager
@@ -69,6 +71,7 @@ func newServerWithStore(ctx context.Context, version string, agentConfig AgentCo
 	return &Server{
 		ctx:             ctx,
 		version:         version,
+		buildTime:       buildinfo.BuildTime,
 		hostname:        hostname,
 		store:           store,
 		agents:          NewAgentManager(ctx, agentConfig),
@@ -685,6 +688,7 @@ func (s *Server) message(messageType string, payload any) ServerMessage {
 		Payload:    payload,
 		ServerTime: time.Now().Format(time.RFC3339),
 		Version:    s.version,
+		BuildTime:  s.buildTime,
 		Hostname:   s.hostname,
 	}
 }

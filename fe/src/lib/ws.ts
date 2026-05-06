@@ -14,6 +14,8 @@ export interface ServerMessage<TPayload = unknown> {
   serverTime: string
   /** version 表示服务端构建版本。 */
   version: string
+  /** buildTime 表示后端构建时间。 */
+  buildTime: string
   /** hostname 表示后端机器名。 */
   hostname?: string
 }

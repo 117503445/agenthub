@@ -16,6 +16,8 @@ interface AgentSettingsPageProps {
   connectionState: ConnectionState
   /** backendVersion 表示后端构建版本。 */
   backendVersion: string
+  /** backendBuildTime 表示后端构建时间。 */
+  backendBuildTime: string
   /** hostname 表示后端机器名。 */
   hostname: string
   /** agentProfiles 表示可编辑的 Profile 列表。 */
@@ -52,6 +54,7 @@ interface AgentSettingsPageProps {
 export function AgentSettingsPage({
   connectionState,
   backendVersion,
+  backendBuildTime,
   hostname,
   agentProfiles,
   backendEnv,
@@ -153,6 +156,7 @@ export function AgentSettingsPage({
             key={selectedProfile?.id ?? 'empty'}
             connectionState={connectionState}
             backendVersion={backendVersion}
+            backendBuildTime={backendBuildTime}
             hostname={hostname}
             selectedProfile={selectedProfile}
             backendEnv={backendEnv}
@@ -175,6 +179,8 @@ interface AgentSettingsDetailProps {
   connectionState: ConnectionState
   /** backendVersion 表示后端构建版本。 */
   backendVersion: string
+  /** backendBuildTime 表示后端构建时间。 */
+  backendBuildTime: string
   /** hostname 表示后端机器名。 */
   hostname: string
   /** selectedProfile 表示当前选中的 Profile。 */
@@ -201,6 +207,7 @@ interface AgentSettingsDetailProps {
 function AgentSettingsDetail({
   connectionState,
   backendVersion,
+  backendBuildTime,
   hostname,
   selectedProfile,
   backendEnv,
@@ -393,6 +400,7 @@ function AgentSettingsDetail({
           <h3 className="text-base font-semibold text-slate-900">后端信息</h3>
           <dl className="mt-4 grid gap-3 text-sm">
             <InfoItem label="版本" testID="backend-version-text" value={backendVersion || '-'} />
+            <InfoItem label="构建时间" testID="backend-build-time-text" value={formatBackendBuildTime(backendBuildTime)} />
             <InfoItem label="机器名" testID="backend-hostname-text" value={hostname || '-'} />
           </dl>
         </section>
@@ -401,6 +409,27 @@ function AgentSettingsDetail({
       </div>
     </>
   )
+}
+
+// formatBackendBuildTime 使用 value 参数把后端构建时间格式化为本地可读文本。
+function formatBackendBuildTime(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return '-'
+  }
+  const date = new Date(trimmed)
+  if (Number.isNaN(date.getTime())) {
+    return trimmed
+  }
+  return date.toLocaleString('zh-CN', {
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
 }
 
 // InfoItem 使用 props 参数渲染一项后端信息。
