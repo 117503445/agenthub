@@ -80,6 +80,10 @@ func mockAgentMode(args []string) string {
 // runMockCodexCLI 使用 args、stdout 和 stderr 参数运行 Codex JSONL mock。
 func runMockCodexCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 	model := mockCLIModelFromArgs(args)
+	if mockCodexDashPromptWithoutSeparator(args) {
+		_, _ = fmt.Fprintf(stderr, "error: unexpected argument %q found\n", mockCLIRawLastArg(args))
+		return 2
+	}
 	prompt := mockCLILastArg(args)
 	writer := bufio.NewWriter(stdout)
 	threadID := fmt.Sprintf("mock-codex-%d", time.Now().UnixNano())
@@ -132,6 +136,26 @@ func runMockCodexCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 	// 让父进程先消费 stdout，避免极快退出时先收到进程完成回调。
 	time.Sleep(300 * time.Millisecond)
 	return 0
+}
+
+// mockCodexDashPromptWithoutSeparator 使用 args 参数模拟 Codex resume 对 dash prompt 的参数校验。
+func mockCodexDashPromptWithoutSeparator(args []string) bool {
+	prompt := mockCLIRawLastArg(args)
+	if !strings.HasPrefix(prompt, "-") {
+		return false
+	}
+	for index := 0; index < len(args)-1; index += 1 {
+		if args[index] != "resume" {
+			continue
+		}
+		for promptIndex := len(args) - 1; promptIndex > index; promptIndex -= 1 {
+			if strings.TrimSpace(args[promptIndex]) == "" {
+				continue
+			}
+			return promptIndex > 0 && args[promptIndex-1] != "--"
+		}
+	}
+	return false
 }
 
 // requestMockCodexText 使用 model 和 prompt 参数请求 OpenAI 兼容 mock 模型服务。
@@ -308,9 +332,35 @@ func mockCLIModelFromArgs(args []string) string {
 
 // mockCLILastArg 使用 args 参数提取最后一个非空参数。
 func mockCLILastArg(args []string) string {
+	if prompt, ok := mockCLIAfterDoubleDash(args); ok {
+		return prompt
+	}
 	for index := len(args) - 1; index >= 0; index-- {
 		value := strings.TrimSpace(args[index])
 		if value != "" && !strings.HasPrefix(value, "-") {
+			return value
+		}
+	}
+	return ""
+}
+
+// mockCLIAfterDoubleDash 使用 args 参数提取 -- 分隔符后的 prompt。
+func mockCLIAfterDoubleDash(args []string) (string, bool) {
+	for index := len(args) - 2; index >= 0; index-- {
+		if args[index] != "--" {
+			continue
+		}
+		prompt := strings.TrimSpace(args[index+1])
+		return prompt, prompt != ""
+	}
+	return "", false
+}
+
+// mockCLIRawLastArg 使用 args 参数提取最后一个非空参数。
+func mockCLIRawLastArg(args []string) string {
+	for index := len(args) - 1; index >= 0; index-- {
+		value := strings.TrimSpace(args[index])
+		if value != "" {
 			return value
 		}
 	}

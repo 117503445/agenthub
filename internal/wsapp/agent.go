@@ -462,7 +462,7 @@ func (r *AgentRuntime) startCodex(ctx context.Context, prompt string, images []M
 	} else {
 		args = append(args, "resume", resumeSessionID)
 	}
-	args = append(args, prompt)
+	args = append(args, "--", prompt)
 
 	command := r.profile.Command
 	cmd := exec.CommandContext(r.ctx, command, args...)
