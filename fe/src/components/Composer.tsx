@@ -84,6 +84,29 @@ interface ComposerProps {
   onChangeAgentReasoning: (reasoning: string) => void
 }
 
+interface ComposerSuggestion {
+  /** type 表示建议来源类型。 */
+  type: 'skill' | 'command'
+  /** trigger 表示触发建议菜单的前缀。 */
+  trigger: '/' | '#'
+  /** id 表示插入输入框的命令标识。 */
+  id: string
+  /** label 表示界面展示名称。 */
+  label: string
+  /** description 表示建议说明。 */
+  description: string
+}
+
+const composerCommandOptions: ComposerSuggestion[] = [
+  {
+    type: 'command',
+    trigger: '#',
+    id: 'skills',
+    label: 'skills',
+    description: '显示当前可用 skills 列表',
+  },
+]
+
 // Composer 使用 props 参数渲染聊天输入框和 agent 控件。
 export function Composer({
   selectedChat,
@@ -117,20 +140,9 @@ export function Composer({
   const skillMenuID = useId()
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const [selectedSkillIndex, setSelectedSkillIndex] = useState(0)
-  const skillQuery = composerValue.startsWith('/') && !composerValue.includes(' ') ? composerValue.slice(1).toLowerCase() : ''
-  const filteredSkills = useMemo(() => {
-    if (!composerValue.startsWith('/') || composerValue.includes(' ')) {
-      return []
-    }
-    return agentSkills
-      .filter((skill) => {
-        const haystack = `${skill.id} ${skill.label} ${skill.description}`.toLowerCase()
-        return haystack.includes(skillQuery)
-      })
-      .slice(0, 8)
-  }, [agentSkills, composerValue, skillQuery])
-  const skillMenuVisible = filteredSkills.length > 0
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0)
+  const filteredSuggestions = useMemo(() => buildComposerSuggestions(composerValue, agentSkills), [agentSkills, composerValue])
+  const skillMenuVisible = filteredSuggestions.length > 0
   const hasComposerPayload = Boolean(composerValue.trim()) || composerImages.length > 0
   const blockSubmit = isSendAwaiting && !(isRunning && hasComposerPayload)
   const showSendingState = blockSubmit || isSending
@@ -158,14 +170,14 @@ export function Composer({
     resizeTextarea()
   }, [composerValue, resizeTextarea, selectedChat?.id])
 
-  const activeSkillIndex = skillMenuVisible ? boundedSkillIndex(selectedSkillIndex, filteredSkills.length) : 0
-  const activeSkill = filteredSkills[activeSkillIndex] ?? null
+  const activeSuggestionIndex = skillMenuVisible ? boundedSkillIndex(selectedSuggestionIndex, filteredSuggestions.length) : 0
+  const activeSuggestion = filteredSuggestions[activeSuggestionIndex] ?? null
 
-  // applySkill 使用 skill 参数把 slash skill 插入输入框。
-  const applySkill = useCallback(
-    (skill: AgentSkillOption) => {
-      setSelectedSkillIndex(0)
-      onComposerValueChange(`/${skill.id} `)
+  // applySuggestion 使用 suggestion 参数把 slash skill 或本地命令插入输入框。
+  const applySuggestion = useCallback(
+    (suggestion: ComposerSuggestion) => {
+      setSelectedSuggestionIndex(0)
+      onComposerValueChange(`${suggestion.trigger}${suggestion.id} `)
       window.setTimeout(() => textareaRef.current?.focus(), 0)
     },
     [onComposerValueChange],
@@ -200,8 +212,8 @@ export function Composer({
 
   // handleComposerValueChange 使用 value 参数更新输入内容、刷新 skills 并重置 skill 键盘选中项。
   const handleComposerValueChange = (value: string) => {
-    setSelectedSkillIndex(0)
-    if (value === '/' && composerValue !== '/') {
+    setSelectedSuggestionIndex(0)
+    if ((value === '/' || value === '#') && composerValue !== value) {
       onRefreshAgentSkills()
     }
     onComposerValueChange(value)
@@ -222,17 +234,19 @@ export function Composer({
     if (skillMenuVisible) {
       if (event.key === 'ArrowDown') {
         event.preventDefault()
-        setSelectedSkillIndex((current) => (boundedSkillIndex(current, filteredSkills.length) + 1) % filteredSkills.length)
+        setSelectedSuggestionIndex((current) => (boundedSkillIndex(current, filteredSuggestions.length) + 1) % filteredSuggestions.length)
         return
       }
       if (event.key === 'ArrowUp') {
         event.preventDefault()
-        setSelectedSkillIndex((current) => (boundedSkillIndex(current, filteredSkills.length) - 1 + filteredSkills.length) % filteredSkills.length)
+        setSelectedSuggestionIndex(
+          (current) => (boundedSkillIndex(current, filteredSuggestions.length) - 1 + filteredSuggestions.length) % filteredSuggestions.length,
+        )
         return
       }
       if (event.key === 'Tab' || event.key === 'Enter') {
         event.preventDefault()
-        applySkill(activeSkill ?? filteredSkills[0])
+        applySuggestion(activeSuggestion ?? filteredSuggestions[0])
         return
       }
     }
@@ -254,27 +268,31 @@ export function Composer({
             id={skillMenuID}
             data-testid="skill-menu"
             role="listbox"
-            aria-label="选择 skill"
+            aria-label="选择 skill 或命令"
             className="absolute bottom-[calc(100%+8px)] left-0 right-0 z-30 mx-auto max-h-64 max-w-[860px] overflow-y-auto rounded-lg border border-[var(--agenthub-outline)] bg-[var(--agenthub-surface-0)] p-1 shadow-[var(--agenthub-elevation-2)]"
           >
-            {filteredSkills.map((skill, index) => (
+            {filteredSuggestions.map((suggestion, index) => (
               <button
-                key={skill.id}
-                id={skillOptionID(skillMenuID, skill.id)}
+                key={`${suggestion.type}:${suggestion.id}`}
+                id={suggestionOptionID(skillMenuID, suggestion)}
                 data-testid="skill-option"
-                data-skill-id={skill.id}
-                data-active={index === activeSkillIndex ? 'true' : 'false'}
+                data-skill-id={suggestion.type === 'skill' ? suggestion.id : undefined}
+                data-command-id={suggestion.type === 'command' ? suggestion.id : undefined}
+                data-active={index === activeSuggestionIndex ? 'true' : 'false'}
                 role="option"
-                aria-selected={index === activeSkillIndex}
+                aria-selected={index === activeSuggestionIndex}
                 type="button"
                 onMouseDown={(event) => event.preventDefault()}
-                onClick={() => applySkill(skill)}
+                onClick={() => applySuggestion(suggestion)}
                 className={`flex w-full cursor-pointer items-start gap-3 rounded-md px-3 py-2 text-left transition ${
-                  index === activeSkillIndex ? 'bg-[var(--agenthub-primary-container)]' : 'hover:bg-[var(--agenthub-surface-2)]'
+                  index === activeSuggestionIndex ? 'bg-[var(--agenthub-primary-container)]' : 'hover:bg-[var(--agenthub-surface-2)]'
                 }`}
               >
-                <span className="shrink-0 font-mono text-sm text-[var(--agenthub-primary)]">/{skill.label}</span>
-                <span className="min-w-0 flex-1 truncate text-xs leading-5 text-[var(--agenthub-muted)]">{skill.description}</span>
+                <span className="shrink-0 font-mono text-sm text-[var(--agenthub-primary)]">
+                  {suggestion.trigger}
+                  {suggestion.label}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-xs leading-5 text-[var(--agenthub-muted)]">{suggestion.description}</span>
               </button>
             ))}
           </div>
@@ -293,7 +311,7 @@ export function Composer({
             onPaste={handlePaste}
             aria-controls={skillMenuVisible ? skillMenuID : undefined}
             aria-expanded={skillMenuVisible}
-            aria-activedescendant={skillMenuVisible && activeSkill ? skillOptionID(skillMenuID, activeSkill.id) : undefined}
+            aria-activedescendant={skillMenuVisible && activeSuggestion ? suggestionOptionID(skillMenuID, activeSuggestion) : undefined}
             aria-autocomplete="list"
             disabled={!selectedChat || connectionState !== 'open'}
             rows={1}
@@ -494,9 +512,34 @@ function boundedSkillIndex(index: number, count: number) {
   return index
 }
 
-// skillOptionID 使用 menuID 和 skillID 参数生成 skill 选项 DOM ID。
-function skillOptionID(menuID: string, skillID: string) {
-  return `${menuID}-skill-${encodeURIComponent(skillID)}`
+// buildComposerSuggestions 使用 value 和 agentSkills 参数生成输入框辅助提示列表。
+function buildComposerSuggestions(value: string, agentSkills: AgentSkillOption[]): ComposerSuggestion[] {
+  const trigger: '/' | '#' | '' = value.startsWith('/') ? '/' : value.startsWith('#') ? '#' : ''
+  if (!trigger || /\s/.test(value)) {
+    return []
+  }
+  const query = value.slice(1).toLowerCase()
+  const suggestions =
+    trigger === '/'
+      ? agentSkills.map((skill) => ({
+          type: 'skill' as const,
+          trigger,
+          id: skill.id,
+          label: skill.label,
+          description: skill.description,
+        }))
+      : composerCommandOptions
+  return suggestions
+    .filter((suggestion) => {
+      const haystack = `${suggestion.id} ${suggestion.label} ${suggestion.description}`.toLowerCase()
+      return haystack.includes(query)
+    })
+    .slice(0, 8)
+}
+
+// suggestionOptionID 使用 menuID 和 suggestion 参数生成辅助提示选项 DOM ID。
+function suggestionOptionID(menuID: string, suggestion: ComposerSuggestion) {
+  return `${menuID}-${suggestion.type}-${encodeURIComponent(suggestion.id)}`
 }
 
 // visualTextLength 使用 text 参数估算中英文混排文本的视觉宽度。

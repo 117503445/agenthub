@@ -133,6 +133,8 @@ export interface AgentSkillOption {
   label: string
   /** description 表示 skill 说明。 */
   description: string
+  /** path 表示 SKILL.md 文件路径。 */
+  path?: string
 }
 
 export interface LastAgentSelection {

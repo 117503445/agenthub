@@ -415,6 +415,9 @@ func (s *Server) handle(ctx context.Context, subscriberID string, outbound chan 
 			return err
 		}
 		s.setSubscriberActiveChat(subscriberID, payload.ChatID)
+		if isAgentSkillsCommand(payload.Prompt) {
+			return s.respondAgentSkillsCommand(ctx, payload.ChatID, payload.Prompt)
+		}
 		return s.startChatRun(ctx, payload.ChatID, payload.Prompt, payload.Images, payload.PlanMode)
 	case "chat.plan.execute":
 		var payload ChatPlanExecutePayload
@@ -433,6 +436,27 @@ func (s *Server) handle(ctx context.Context, subscriberID string, outbound chan 
 	default:
 		return fmt.Errorf("不支持的消息类型: %s", msg.Type)
 	}
+}
+
+// respondAgentSkillsCommand 使用 ctx、chatID 和 prompt 参数在聊天框本地回复 skills 列表。
+func (s *Server) respondAgentSkillsCommand(ctx context.Context, chatID string, prompt string) error {
+	skills := s.store.AgentSkills()
+	s.setLastAgentSkills(skills)
+	response := formatAgentSkillsMarkdown(skills)
+	chat, _, assistantMessage, err := s.store.AddLocalAssistantResponse(chatID, prompt, response)
+	if err != nil {
+		return err
+	}
+	log.Ctx(ctx).Info().
+		Str("chatID", chatID).
+		Int("skillCount", len(skills)).
+		Msg("已本地回复 skills 列表")
+	s.broadcast("agent.status", map[string]any{"chatId": chatID, "status": ChatStatusRunning})
+	s.broadcastChatChanged(chat)
+	s.broadcastChatDetailChanged(chatID, chat)
+	s.broadcastToActiveChat(chatID, "chat.message.done", map[string]any{"chatId": chatID, "message": assistantMessage})
+	s.broadcast("agent.status", map[string]any{"chatId": chatID, "status": ChatStatusIdle})
+	return nil
 }
 
 // startChatRun 使用 ctx、chatID 和 prompt 参数启动或替换聊天页 agent 输出。

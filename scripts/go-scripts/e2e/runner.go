@@ -149,6 +149,7 @@ func registeredCases() map[string]E2ECase {
 		"case_project_icon":             {Name: "case_project_icon", Run: runProjectIconCase},
 		"case_project_reorder":          {Name: "case_project_reorder", Run: runProjectReorderCase},
 		"case_settings_backend_version": {Name: "case_settings_backend_version", Run: runSettingsBackendVersionCase},
+		"case_skill_command":            {Name: "case_skill_command", Run: runSkillCommandCase},
 		"case_token_auth": {Name: "case_token_auth", Run: runTokenAuthCase, Env: map[string]string{
 			"AGENTHUB_TOKEN": e2eAgentHubToken,
 		}},
@@ -337,8 +338,14 @@ func prepareMockAgentCommands(rootDir string, serverPath string) (string, string
 func prepareE2EHome(rootDir string) (string, error) {
 	homeDir := filepath.Join(rootDir, "data", "e2e", "home")
 	skillsDir := filepath.Join(homeDir, ".codex", "skills")
-	if err := os.RemoveAll(skillsDir); err != nil {
-		return "", err
+	for _, dir := range []string{
+		skillsDir,
+		filepath.Join(homeDir, ".claude", "skills"),
+		filepath.Join(homeDir, ".agents", "skills"),
+	} {
+		if err := os.RemoveAll(dir); err != nil {
+			return "", err
+		}
 	}
 	if err := writeE2ESkill(skillsDir, "e2e-alpha", "E2E 键盘选择 Alpha。"); err != nil {
 		return "", err

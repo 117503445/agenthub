@@ -424,6 +424,37 @@ textarea {
   padding: 0;
 }
 
+.theme-material .markdown-body .markdown-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--agenthub-outline);
+  border-radius: 8px;
+}
+
+.theme-material .markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.theme-material .markdown-body th,
+.theme-material .markdown-body td {
+  border-bottom: 1px solid var(--agenthub-outline);
+  padding: 0.5rem 0.65rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.theme-material .markdown-body th {
+  background: var(--agenthub-surface-2);
+  font-weight: 600;
+}
+
+.theme-material .markdown-body tr:last-child td {
+  border-bottom: 0;
+}
+
 .theme-material .markdown-body a {
   color: var(--agenthub-primary);
   text-decoration: underline;

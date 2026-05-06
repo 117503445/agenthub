@@ -818,6 +818,57 @@ func (s *Store) AddRunMessages(chatID string, prompt string, images []MessageIma
 	return cloneChat(chat), userMessage, assistantMessage, nil
 }
 
+// AddLocalAssistantResponse 使用 chatID、prompt 和 response 参数追加本地命令的用户消息和 assistant 回复。
+func (s *Store) AddLocalAssistantResponse(chatID string, prompt string, response string) (Chat, ChatMessage, ChatMessage, error) {
+	trimmedPrompt := strings.TrimSpace(prompt)
+	trimmedResponse := strings.TrimSpace(response)
+	if trimmedPrompt == "" || trimmedResponse == "" {
+		return Chat{}, ChatMessage{}, ChatMessage{}, fmt.Errorf("%w: 本地命令和回复不能为空", ErrInvalidInput)
+	}
+
+	now := time.Now()
+	userMessage := ChatMessage{
+		ID:        newID("msg"),
+		ChatID:    chatID,
+		Role:      MessageRoleUser,
+		Text:      trimmedPrompt,
+		Status:    MessageStatusComplete,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	assistantMessage := ChatMessage{
+		ID:        newID("msg"),
+		ChatID:    chatID,
+		Role:      MessageRoleAssistant,
+		Text:      trimmedResponse,
+		Status:    MessageStatusComplete,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	var chat Chat
+	if err := s.commit(func(state *storeState) error {
+		var ok bool
+		chat, ok = state.chats[chatID]
+		if !ok {
+			return ErrNotFound
+		}
+		chat.Messages = append(chat.Messages, userMessage, assistantMessage)
+		if len(chat.Messages) == 2 {
+			if title := deriveChatTitleFromPrompt(trimmedPrompt); title != "" {
+				chat.Title = title
+			}
+		}
+		chat.Status = ChatStatusIdle
+		chat.DraftText = ""
+		chat.UpdatedAt = now
+		state.chats[chatID] = chat
+		return nil
+	}); err != nil {
+		return Chat{}, ChatMessage{}, ChatMessage{}, err
+	}
+	return cloneChat(chat), userMessage, assistantMessage, nil
+}
+
 // AppendAssistantDelta 使用 chatID、messageID 和 delta 参数追加 assistant 流式文本。
 func (s *Store) AppendAssistantDelta(chatID string, messageID string, delta string) (ChatMessage, bool) {
 	if delta == "" {

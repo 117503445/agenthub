@@ -3,6 +3,7 @@ package wsapp
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -20,10 +21,62 @@ func TestLoadAgentSkillOptions(t *testing.T) {
 	}
 
 	options := LoadAgentSkillOptions(nil)
-	if len(options) != 1 {
-		t.Fatalf("skill 数量不正确: %#v", options)
+	byID := agentSkillOptionsByID(options)
+	option, ok := byID["demo-skill"]
+	if !ok {
+		t.Fatalf("未找到 demo-skill: %#v", options)
 	}
-	if options[0].ID != "demo-skill" || options[0].Description != "演示 skill。" {
-		t.Fatalf("skill 解析不正确: %#v", options[0])
+	if option.Description != "演示 skill。" {
+		t.Fatalf("skill 解析不正确: %#v", option)
 	}
+	if !strings.HasSuffix(option.Path, filepath.Join(".codex", "skills", "demo-skill", "SKILL.md")) {
+		t.Fatalf("skill 路径不正确: %#v", option)
+	}
+}
+
+// TestLoadAgentSkillOptionsOfficialDirs 验证 Claude Code 和 Codex 官方 skill 目录会被扫描。
+func TestLoadAgentSkillOptionsOfficialDirs(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	projectDir := t.TempDir()
+	mustWriteTestSkill(t, filepath.Join(homeDir, ".claude", "skills"), "home-claude", "用户 Claude skill。")
+	mustWriteTestSkill(t, filepath.Join(homeDir, ".agents", "skills"), "home-agents", "用户 Agents skill。")
+	mustWriteTestSkill(t, filepath.Join(projectDir, ".claude", "skills"), "project-claude", "项目 Claude skill。")
+	mustWriteTestSkill(t, filepath.Join(projectDir, ".agents", "skills"), "project-agents", "项目 Agents skill。")
+
+	options := LoadAgentSkillOptions([]string{projectDir})
+	byID := agentSkillOptionsByID(options)
+	for _, id := range []string{"home-claude", "home-agents", "project-claude", "project-agents"} {
+		if _, ok := byID[id]; !ok {
+			t.Fatalf("未找到 skill %q: %#v", id, options)
+		}
+	}
+	if !strings.HasSuffix(byID["home-claude"].Path, filepath.Join(".claude", "skills", "home-claude", "SKILL.md")) {
+		t.Fatalf("Claude 用户 skill 路径不正确: %#v", byID["home-claude"])
+	}
+	if !strings.HasSuffix(byID["home-agents"].Path, filepath.Join(".agents", "skills", "home-agents", "SKILL.md")) {
+		t.Fatalf("Agents 用户 skill 路径不正确: %#v", byID["home-agents"])
+	}
+}
+
+// mustWriteTestSkill 使用 t、skillsDir、name 和 description 参数写入测试 SKILL.md。
+func mustWriteTestSkill(t *testing.T, skillsDir string, name string, description string) {
+	t.Helper()
+	skillDir := filepath.Join(skillsDir, name)
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatalf("创建 skill 目录失败: %v", err)
+	}
+	content := []byte("---\nname: " + name + "\ndescription: " + description + "\n---\n\n# " + name + "\n")
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), content, 0644); err != nil {
+		t.Fatalf("写入 SKILL.md 失败: %v", err)
+	}
+}
+
+// agentSkillOptionsByID 使用 options 参数按 ID 索引 skill。
+func agentSkillOptionsByID(options []AgentSkillOption) map[string]AgentSkillOption {
+	result := make(map[string]AgentSkillOption)
+	for _, option := range options {
+		result[option.ID] = option
+	}
+	return result
 }

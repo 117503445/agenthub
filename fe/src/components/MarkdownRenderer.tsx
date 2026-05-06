@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { resolveMarkdownFilesystemHref } from '../lib/filesystem'
 
-type MarkdownBlockType = 'heading' | 'paragraph' | 'list' | 'code'
+type MarkdownBlockType = 'heading' | 'paragraph' | 'list' | 'code' | 'table'
 
 interface MarkdownBlock {
   /** type 表示块类型。 */
@@ -16,6 +16,10 @@ interface MarkdownBlock {
   ordered?: boolean
   /** start 表示有序列表的起始编号。 */
   start?: number
+  /** headers 表示表格标题行。 */
+  headers?: string[]
+  /** rows 表示表格内容行。 */
+  rows?: string[][]
 }
 
 interface MarkdownListMarker {
@@ -85,6 +89,14 @@ function splitMarkdownBlocks(text: string) {
 
     if (line.trim() === '') {
       flushParagraph()
+      continue
+    }
+
+    if (isMarkdownTableStart(lines, index)) {
+      flushParagraph()
+      const parsedTable = parseMarkdownTable(lines, index)
+      blocks.push(parsedTable.block)
+      index = parsedTable.nextIndex - 1
       continue
     }
 
@@ -211,6 +223,74 @@ function isMarkdownBlockBoundary(line: string) {
   return /^```/.test(trimmed) || /^(#{1,6})\s+(.+)$/.test(line)
 }
 
+// isMarkdownTableStart 使用 lines 和 index 参数判断当前位置是否是 markdown 表格起点。
+function isMarkdownTableStart(lines: string[], index: number) {
+  return index + 1 < lines.length && isMarkdownTableRow(lines[index]) && isMarkdownTableSeparator(lines[index + 1])
+}
+
+// parseMarkdownTable 使用 lines 和 startIndex 参数解析 markdown 表格。
+function parseMarkdownTable(lines: string[], startIndex: number) {
+  const headers = splitMarkdownTableCells(lines[startIndex])
+  const rows: string[][] = []
+  let index = startIndex + 2
+  while (index < lines.length && isMarkdownTableRow(lines[index])) {
+    rows.push(splitMarkdownTableCells(lines[index]))
+    index += 1
+  }
+  return {
+    block: {
+      type: 'table' as const,
+      headers,
+      rows,
+    },
+    nextIndex: index,
+  }
+}
+
+// isMarkdownTableRow 使用 line 参数判断是否是 markdown 表格行。
+function isMarkdownTableRow(line: string) {
+  const trimmed = line.trim()
+  return trimmed.startsWith('|') && trimmed.endsWith('|') && splitMarkdownTableCells(trimmed).length > 1
+}
+
+// isMarkdownTableSeparator 使用 line 参数判断是否是 markdown 表格分隔行。
+function isMarkdownTableSeparator(line: string) {
+  if (!isMarkdownTableRow(line)) {
+    return false
+  }
+  return splitMarkdownTableCells(line).every((cell) => /^:?-{3,}:?$/.test(cell.trim()))
+}
+
+// splitMarkdownTableCells 使用 line 参数拆分 markdown 表格单元格。
+function splitMarkdownTableCells(line: string) {
+  const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '')
+  const cells: string[] = []
+  let current = ''
+  let escaped = false
+  for (const char of trimmed) {
+    if (escaped) {
+      current += char
+      escaped = false
+      continue
+    }
+    if (char === '\\') {
+      escaped = true
+      continue
+    }
+    if (char === '|') {
+      cells.push(current.trim())
+      current = ''
+      continue
+    }
+    current += char
+  }
+  if (escaped) {
+    current += '\\'
+  }
+  cells.push(current.trim())
+  return cells
+}
+
 // renderMarkdownBlock 使用 block、key 和 projectRoot 参数渲染 markdown 块。
 function renderMarkdownBlock(block: MarkdownBlock, key: string, projectRoot?: string) {
   if (block.type === 'heading') {
@@ -255,6 +335,32 @@ function renderMarkdownBlock(block: MarkdownBlock, key: string, projectRoot?: st
       <pre key={key}>
         <code>{block.text}</code>
       </pre>
+    )
+  }
+  if (block.type === 'table') {
+    return (
+      <div key={key} className="markdown-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              {(block.headers ?? []).map((header, index) => (
+                <th key={`${key}-head-${index}`}>{renderInlineMarkdown(header, `${key}-head-${index}`, projectRoot)}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {(block.rows ?? []).map((row, rowIndex) => (
+              <tr key={`${key}-row-${rowIndex}`}>
+                {(block.headers ?? row).map((_, cellIndex) => (
+                  <td key={`${key}-row-${rowIndex}-cell-${cellIndex}`}>
+                    {renderInlineMarkdown(row[cellIndex] ?? '', `${key}-row-${rowIndex}-cell-${cellIndex}`, projectRoot)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     )
   }
   return <p key={key}>{renderInlineMarkdown(block.text ?? '', key, projectRoot)}</p>
