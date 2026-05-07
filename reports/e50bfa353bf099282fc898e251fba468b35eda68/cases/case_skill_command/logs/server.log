@@ -1,0 +1,5 @@
+2026-05-07 15:27:52.479 INF cmd/web/main.go:53 > 构建信息 BuildDir=/src BuildTime=2026-05-07T15:26:17Z GitBranch=master GitCommit=40485817534874c0f012b57b54fcc6a88abed70c GitDirty=true GitTag= GitVersion=4048581
+2026-05-07 15:27:52.480 INF cmd/web/data_lock.go:44 > 已持有数据目录锁 dataDir=/src/data/e2e/case_skill_command/agenthub-data lockPath=/src/data/e2e/case_skill_command/agenthub-data/agenthub.lock
+2026-05-07 15:27:52.493 INF internal/wsapp/server.go:109 > 已自动添加后端工作目录 project chatID=chat_4408f0a842080d4a projectID=project_9f6185e867af90d6 workdir=/src
+2026-05-07 15:27:52.494 INF cmd/web/server.go:167 > Web 服务已启动 addr=[::]:37671 dataDir=/src/data/e2e/case_skill_command/agenthub-data
+2026-05-07 15:27:53.543 INF internal/wsapp/server.go:635 > agent skills 列表已更新 skillCount=5 skills=["e2e-agents-skill","e2e-alpha","e2e-beta","e2e-claude-skill","e2e-skill"]
