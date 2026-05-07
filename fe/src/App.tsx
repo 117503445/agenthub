@@ -49,6 +49,7 @@ import type {
   ProjectDeletedPayload,
   ProjectsReorderedPayload,
   SnapshotPayload,
+  TimelineCatchUpPayload,
   ToolCall,
 } from './types'
 
@@ -94,6 +95,10 @@ function App() {
   const chatDetailLoadedAtRef = useRef<Record<string, string>>({})
   const pendingChatDeltasRef = useRef<Record<string, ChatMessageDeltaPayload>>({})
   const chatDeltaFlushTimerRef = useRef<number | null>(null)
+  const timelineEpochRef = useRef('')
+  const timelineSeqRef = useRef(0)
+  const timelineCatchUpRequestedRef = useRef(false)
+  const timelineBufferedMessagesRef = useRef<Record<number, ServerMessage>>({})
   const pendingDraftValuesRef = useRef<Record<string, string>>({})
   const draftSaveTimersRef = useRef<Record<string, number>>({})
   const chatScrollMemoryRef = useRef<Record<string, ChatScrollMemory>>({})
@@ -860,8 +865,8 @@ function App() {
     new Notification(title, { body: body || '任务已结束' })
   }, [])
 
-  // handleServerMessage 使用 message 参数把服务端事件归并到前端状态。
-  const handleServerMessage = useCallback(
+  // applyServerMessage 使用 message 参数把已通过 timeline 游标校验的服务端事件归并到前端状态。
+  const applyServerMessage = useCallback(
     (message: ServerMessage) => {
       setHostname(message.hostname || window.location.hostname || 'unknown')
       setBackendVersion(message.version || '')
@@ -871,6 +876,14 @@ function App() {
         const nextProjects = sortProjects(payload.projects ?? [])
         const nextChats = sortByCreatedAt((payload.chats ?? []).map(normalizeChatSummary))
         const nextChatIds = new Set(nextChats.map((chat) => chat.id))
+        if (message.epoch) {
+          timelineEpochRef.current = message.epoch
+        }
+        if (typeof message.seq === 'number') {
+          timelineSeqRef.current = message.seq
+        }
+        timelineBufferedMessagesRef.current = {}
+        timelineCatchUpRequestedRef.current = false
         chatDetailLoadingAtRef.current = {}
         chatDetailLoadedAtRef.current = {}
         setAgentProviders(payload.agentProviders ?? fallbackAgentProviders)
@@ -1085,6 +1098,110 @@ function App() {
       removeComposerValues,
       resetProjectForm,
     ],
+  )
+
+  // requestTimelineCatchUp 使用 epoch 和 endSeq 参数请求服务端补齐 timeline 缺口。
+  const requestTimelineCatchUp = useCallback((epoch: string, endSeq: number) => {
+    if (!epoch || timelineCatchUpRequestedRef.current) {
+      return
+    }
+    timelineCatchUpRequestedRef.current = true
+    if (!sendClientMessage(wsRef.current, 'timeline.catch_up', { epoch, endSeq })) {
+      timelineCatchUpRequestedRef.current = false
+    }
+  }, [])
+
+  // applyBufferedTimelineMessages 按当前游标继续应用已经缓存的连续消息。
+  const applyBufferedTimelineMessages = useCallback(() => {
+    while (true) {
+      const nextSeq = timelineSeqRef.current + 1
+      const buffered = timelineBufferedMessagesRef.current[nextSeq]
+      if (!buffered) {
+        return
+      }
+      delete timelineBufferedMessagesRef.current[nextSeq]
+      timelineSeqRef.current = nextSeq
+      applyServerMessage(buffered)
+    }
+  }, [applyServerMessage])
+
+  // handleTimelineCatchUp 使用 message 参数应用后端返回的补齐窗口。
+  const handleTimelineCatchUp = useCallback(
+    (message: ServerMessage) => {
+      timelineCatchUpRequestedRef.current = false
+      const payload = message.payload as TimelineCatchUpPayload
+      if (payload.reset) {
+        timelineBufferedMessagesRef.current = {}
+        timelineEpochRef.current = payload.epoch
+        timelineSeqRef.current = payload.endSeq
+        if (payload.snapshot) {
+          applyServerMessage({
+            ...message,
+            type: 'state.snapshot',
+            payload: payload.snapshot,
+            epoch: payload.epoch,
+            seq: payload.endSeq,
+          })
+        }
+        return
+      }
+      const messages = [...(payload.messages ?? [])].sort((left, right) => (left.seq ?? 0) - (right.seq ?? 0))
+      for (const item of messages) {
+        const seq = item.seq ?? 0
+        if (!item.epoch || item.epoch !== timelineEpochRef.current || seq <= timelineSeqRef.current) {
+          continue
+        }
+        if (seq > timelineSeqRef.current + 1) {
+          timelineBufferedMessagesRef.current[seq] = item as ServerMessage
+          requestTimelineCatchUp(timelineEpochRef.current, timelineSeqRef.current)
+          return
+        }
+        timelineSeqRef.current = seq
+        applyServerMessage(item as ServerMessage)
+        applyBufferedTimelineMessages()
+      }
+    },
+    [applyBufferedTimelineMessages, applyServerMessage, requestTimelineCatchUp],
+  )
+
+  // handleServerMessage 使用 message 参数处理 timeline 去重、gap 检测和业务状态归并。
+  const handleServerMessage = useCallback(
+    (message: ServerMessage) => {
+      if (message.type === 'timeline.catch_up') {
+        handleTimelineCatchUp(message)
+        return
+      }
+      const epoch = message.epoch ?? ''
+      const seq = typeof message.seq === 'number' ? message.seq : 0
+      if (!epoch || seq <= 0) {
+        applyServerMessage(message)
+        return
+      }
+      if (message.type === 'state.snapshot' || !timelineEpochRef.current) {
+        timelineEpochRef.current = epoch
+        timelineSeqRef.current = seq
+        timelineBufferedMessagesRef.current = {}
+        timelineCatchUpRequestedRef.current = false
+        applyServerMessage(message)
+        return
+      }
+      if (epoch !== timelineEpochRef.current) {
+        requestTimelineCatchUp(timelineEpochRef.current, timelineSeqRef.current)
+        return
+      }
+      if (seq <= timelineSeqRef.current) {
+        return
+      }
+      if (seq > timelineSeqRef.current + 1) {
+        timelineBufferedMessagesRef.current[seq] = message
+        requestTimelineCatchUp(timelineEpochRef.current, timelineSeqRef.current)
+        return
+      }
+      timelineSeqRef.current = seq
+      applyServerMessage(message)
+      applyBufferedTimelineMessages()
+    },
+    [applyBufferedTimelineMessages, applyServerMessage, handleTimelineCatchUp, requestTimelineCatchUp],
   )
 
   useEffect(() => {
@@ -1409,6 +1526,7 @@ function App() {
       return
     }
     requestNotificationPermission()
+    updateSelectedPlanMode(false)
     sendClientMessage(wsRef.current, 'chat.plan.execute', { chatId: selectedChat.id, planId: plan.id })
   }
 

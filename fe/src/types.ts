@@ -389,6 +389,40 @@ export interface ChatMessageDonePayload {
   message: ChatMessage
 }
 
+export interface TimelineCatchUpPayload {
+  /** epoch 表示服务端当前 timeline 标识。 */
+  epoch: string
+  /** startSeq 表示补齐窗口起始序号。 */
+  startSeq: number
+  /** endSeq 表示补齐窗口结束序号。 */
+  endSeq: number
+  /** messages 表示按序返回的服务端历史消息。 */
+  messages?: ServerTimelineMessage[]
+  /** reset 表示前端应使用 snapshot 重建 canonical 状态。 */
+  reset: boolean
+  /** snapshot 表示 reset 时返回的权威状态快照。 */
+  snapshot?: SnapshotPayload
+}
+
+export interface ServerTimelineMessage {
+  /** type 表示服务端消息类型。 */
+  type: string
+  /** payload 表示服务端消息数据。 */
+  payload?: unknown
+  /** serverTime 表示服务端发送时间。 */
+  serverTime: string
+  /** version 表示服务端构建版本。 */
+  version: string
+  /** buildTime 表示后端构建时间。 */
+  buildTime: string
+  /** hostname 表示后端机器名。 */
+  hostname?: string
+  /** epoch 表示服务端本轮 timeline 标识。 */
+  epoch?: string
+  /** seq 表示服务端 timeline 单调递增序号。 */
+  seq?: number
+}
+
 export interface AgentStatusPayload {
   /** chatId 表示聊天页标识。 */
   chatId: string

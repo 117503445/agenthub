@@ -640,6 +640,9 @@ func runMockPlanFlow(page playwright.Page, provider string, planTitle string, ex
 	if err := clickTestID(page, "plan-execute-button"); err != nil {
 		return err
 	}
+	if err := expectTestIDAttributeValue(page, "plan-mode-toggle", "data-active", "false", 5*time.Second); err != nil {
+		return err
+	}
 	if err := expectTestIDText(page, "message-log", "开始执行已确认的 plan", 10*time.Second); err != nil {
 		return err
 	}

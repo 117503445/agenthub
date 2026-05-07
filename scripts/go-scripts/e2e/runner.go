@@ -163,6 +163,7 @@ func registeredCases() map[string]E2ECase {
 		"case_stream_coalescing": {Name: "case_stream_coalescing", Run: runStreamCoalescingCase, Env: map[string]string{
 			"MOCK_AGENT": "1",
 		}},
+		"case_timeline_reliability": {Name: "case_timeline_reliability", Run: runTimelineReliabilityCase},
 		"case_token_auth": {Name: "case_token_auth", Run: runTokenAuthCase, Env: map[string]string{
 			"AGENTHUB_TOKEN": e2eAgentHubToken,
 		}},

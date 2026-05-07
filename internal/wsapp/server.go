@@ -17,6 +17,11 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+const (
+	// serverTimelineLogLimit 表示服务端为断线补齐保留的消息数量。
+	serverTimelineLogLimit = 2048
+)
+
 // Server 提供项目、聊天和 agent 流式输出的 WebSocket 服务。
 type Server struct {
 	ctx             context.Context
@@ -30,6 +35,10 @@ type Server struct {
 	lastAgentSkills []AgentSkillOption
 	mu              sync.Mutex
 	skillsMu        sync.Mutex
+	timelineMu      sync.Mutex
+	timelineEpoch   string
+	timelineSeq     int64
+	timelineLog     []ServerMessage
 }
 
 // serverSubscriber 表示单个 WebSocket 连接的服务端订阅状态。
@@ -84,6 +93,8 @@ func newServerWithStore(ctx context.Context, version string, agentConfig AgentCo
 		agentConfig:     agentConfig,
 		subscribers:     make(map[string]*serverSubscriber),
 		lastAgentSkills: store.AgentSkills(),
+		timelineEpoch:   newID("epoch"),
+		timelineLog:     make([]ServerMessage, 0, serverTimelineLogLimit),
 	}
 }
 
@@ -188,6 +199,13 @@ func (s *Server) handle(ctx context.Context, subscriberID string, outbound chan 
 		return nil
 	case "agent.skills.refresh":
 		s.refreshAgentSkills(s.ctx)
+		return nil
+	case "timeline.catch_up":
+		var payload TimelineCatchUpPayload
+		if err := decodePayload(msg, &payload); err != nil {
+			return err
+		}
+		s.sendTimelineCatchUp(outbound, payload)
 		return nil
 	case "project.create":
 		var payload ProjectMutationPayload
@@ -803,13 +821,104 @@ func (s *Server) sendTo(ch chan ServerMessage, messageType string, payload any) 
 
 // message 使用 messageType 和 payload 参数构造统一服务端消息。
 func (s *Server) message(messageType string, payload any) ServerMessage {
-	return ServerMessage{
+	return s.buildMessage(messageType, payload, true)
+}
+
+// unloggedMessage 使用 messageType 和 payload 参数构造不进入 timeline 日志的服务端消息。
+func (s *Server) unloggedMessage(messageType string, payload any) ServerMessage {
+	return s.buildMessage(messageType, payload, false)
+}
+
+// buildMessage 使用 messageType、payload 和 record 参数构造带 timeline 游标的服务端消息。
+func (s *Server) buildMessage(messageType string, payload any, record bool) ServerMessage {
+	s.timelineMu.Lock()
+	if record {
+		s.timelineSeq++
+	}
+	message := ServerMessage{
 		Type:       messageType,
 		Payload:    payload,
 		ServerTime: time.Now().Format(time.RFC3339),
 		Version:    s.version,
 		BuildTime:  s.buildTime,
 		Hostname:   s.hostname,
+		Epoch:      s.timelineEpoch,
+		Seq:        s.timelineSeq,
+	}
+	if record {
+		s.timelineLog = append(s.timelineLog, message)
+		if len(s.timelineLog) > serverTimelineLogLimit {
+			copy(s.timelineLog, s.timelineLog[len(s.timelineLog)-serverTimelineLogLimit:])
+			s.timelineLog = s.timelineLog[:serverTimelineLogLimit]
+		}
+	}
+	s.timelineMu.Unlock()
+	return message
+}
+
+// sendTimelineCatchUp 使用 ch 和 payload 参数返回 timeline 补齐结果。
+func (s *Server) sendTimelineCatchUp(ch chan ServerMessage, payload TimelineCatchUpPayload) {
+	response := s.timelineCatchUp(payload)
+	message := s.unloggedMessage("timeline.catch_up", response)
+	select {
+	case ch <- message:
+	default:
+		log.Ctx(s.ctx).Warn().Msg("WebSocket timeline.catch_up 发送队列已满，丢弃消息")
+	}
+}
+
+// timelineCatchUp 使用 payload 参数从内存 timeline 日志生成补齐响应。
+func (s *Server) timelineCatchUp(payload TimelineCatchUpPayload) TimelineCatchUpResponse {
+	s.timelineMu.Lock()
+	epoch := s.timelineEpoch
+	currentSeq := s.timelineSeq
+	logCopy := append([]ServerMessage(nil), s.timelineLog...)
+	s.timelineMu.Unlock()
+
+	if payload.Epoch != epoch || payload.EndSeq < 0 {
+		snapshot := s.store.Snapshot()
+		return TimelineCatchUpResponse{
+			Epoch:    epoch,
+			StartSeq: currentSeq,
+			EndSeq:   currentSeq,
+			Reset:    true,
+			Snapshot: &snapshot,
+		}
+	}
+	if len(logCopy) == 0 || payload.EndSeq >= currentSeq {
+		return TimelineCatchUpResponse{
+			Epoch:    epoch,
+			StartSeq: payload.EndSeq + 1,
+			EndSeq:   currentSeq,
+			Messages: []ServerMessage{},
+		}
+	}
+	firstSeq := logCopy[0].Seq
+	if payload.EndSeq+1 < firstSeq {
+		snapshot := s.store.Snapshot()
+		return TimelineCatchUpResponse{
+			Epoch:    epoch,
+			StartSeq: firstSeq,
+			EndSeq:   currentSeq,
+			Reset:    true,
+			Snapshot: &snapshot,
+		}
+	}
+	messages := make([]ServerMessage, 0, len(logCopy))
+	for _, message := range logCopy {
+		if message.Seq > payload.EndSeq {
+			messages = append(messages, message)
+		}
+	}
+	startSeq := payload.EndSeq + 1
+	if len(messages) > 0 {
+		startSeq = messages[0].Seq
+	}
+	return TimelineCatchUpResponse{
+		Epoch:    epoch,
+		StartSeq: startSeq,
+		EndSeq:   currentSeq,
+		Messages: messages,
 	}
 }
 
