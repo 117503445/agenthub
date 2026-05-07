@@ -1,0 +1,117 @@
+{
+  "sha": "f86e2f68de83b9f1f93579f933a7ef4be3696f01",
+  "shortSHA": "f86e2f68de83",
+  "refName": "master",
+  "runURL": "https://github.com/117503445/agenthub/actions/runs/25471983058",
+  "pagesURL": "https://117503445.github.io/agenthub/reports/f86e2f68de83b9f1f93579f933a7ef4be3696f01/",
+  "passed": true,
+  "exitCode": 0,
+  "createdAt": "2026-05-07T02:10:23Z",
+  "cases": [
+    {
+      "name": "case_agent_chat",
+      "passed": true,
+      "reportURL": "cases/case_agent_chat/report.html"
+    },
+    {
+      "name": "case_agent_profile",
+      "passed": true,
+      "reportURL": "cases/case_agent_profile/report.html"
+    },
+    {
+      "name": "case_agent_provider_empty_profile",
+      "passed": true,
+      "reportURL": "cases/case_agent_provider_empty_profile/report.html"
+    },
+    {
+      "name": "case_chat_detail_lazy_load",
+      "passed": true,
+      "reportURL": "cases/case_chat_detail_lazy_load/report.html"
+    },
+    {
+      "name": "case_chat_send_feedback",
+      "passed": true,
+      "reportURL": "cases/case_chat_send_feedback/report.html"
+    },
+    {
+      "name": "case_codex_dash_prompt",
+      "passed": true,
+      "reportURL": "cases/case_codex_dash_prompt/report.html"
+    },
+    {
+      "name": "case_context_window_meter",
+      "passed": true,
+      "reportURL": "cases/case_context_window_meter/report.html"
+    },
+    {
+      "name": "case_manual_stop_notification",
+      "passed": true,
+      "reportURL": "cases/case_manual_stop_notification/report.html"
+    },
+    {
+      "name": "case_markdown_filesystem_links",
+      "passed": true,
+      "reportURL": "cases/case_markdown_filesystem_links/report.html"
+    },
+    {
+      "name": "case_markdown_ordered_list",
+      "passed": true,
+      "reportURL": "cases/case_markdown_ordered_list/report.html"
+    },
+    {
+      "name": "case_material_theme",
+      "passed": true,
+      "reportURL": "cases/case_material_theme/report.html"
+    },
+    {
+      "name": "case_mock_agent_gate",
+      "passed": true,
+      "reportURL": "cases/case_mock_agent_gate/report.html"
+    },
+    {
+      "name": "case_persistence",
+      "passed": true,
+      "reportURL": "cases/case_persistence/report.html"
+    },
+    {
+      "name": "case_project_chat_tab_memory",
+      "passed": true,
+      "reportURL": "cases/case_project_chat_tab_memory/report.html"
+    },
+    {
+      "name": "case_project_icon",
+      "passed": true,
+      "reportURL": "cases/case_project_icon/report.html"
+    },
+    {
+      "name": "case_project_reorder",
+      "passed": true,
+      "reportURL": "cases/case_project_reorder/report.html"
+    },
+    {
+      "name": "case_settings_backend_version",
+      "passed": true,
+      "reportURL": "cases/case_settings_backend_version/report.html"
+    },
+    {
+      "name": "case_skill_command",
+      "passed": true,
+      "reportURL": "cases/case_skill_command/report.html"
+    },
+    {
+      "name": "case_token_auth",
+      "passed": true,
+      "reportURL": "cases/case_token_auth/report.html"
+    },
+    {
+      "name": "case_token_cli_auth",
+      "passed": true,
+      "reportURL": "cases/case_token_cli_auth/report.html"
+    },
+    {
+      "name": "case_ws",
+      "passed": true,
+      "reportURL": "cases/case_ws/report.html"
+    }
+  ]
+}

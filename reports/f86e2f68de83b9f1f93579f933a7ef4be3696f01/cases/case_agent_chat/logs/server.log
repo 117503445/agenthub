@@ -1,0 +1,6 @@
+2026-05-07 02:09:33.124 INF cmd/web/main.go:53 > 构建信息 BuildDir=/src BuildTime=2026-05-07T02:08:35Z GitBranch=master GitCommit=2bffec138d3839821b627b914515a7fc81874d1a GitDirty=true GitTag= GitVersion=2bffec1
+2026-05-07 02:09:33.125 INF cmd/web/data_lock.go:44 > 已持有数据目录锁 dataDir=/src/data/e2e/case_agent_chat/agenthub-data lockPath=/src/data/e2e/case_agent_chat/agenthub-data/agenthub.lock
+2026-05-07 02:09:33.140 INF internal/wsapp/server.go:109 > 已自动添加后端工作目录 project chatID=chat_c270f3d6eafb4d0a projectID=project_dd7ba4123879127d workdir=/src
+2026-05-07 02:09:33.141 INF cmd/web/server.go:167 > Web 服务已启动 addr=[::]:42355 dataDir=/src/data/e2e/case_agent_chat/agenthub-data
+2026-05-07 02:09:34.889 INF internal/wsapp/server.go:634 > agent skills 列表已更新 skillCount=4 skills=["e2e-alpha","e2e-beta","e2e-dynamic","e2e-skill"]
+2026-05-07 02:09:46.883 ERR internal/wsapp/agent.go:661 > agent stderr chatID=chat_2ad832ca90117fa5 provider=mock-codex stderr="mock codex error: forced failure"
