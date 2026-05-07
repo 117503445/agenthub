@@ -13,7 +13,6 @@ import {
 } from 'react'
 import { ArrowUp, Bot, Brain, ChevronDown, ClipboardList, Loader2, MessageSquare, Square, X } from 'lucide-react'
 import imagePlusLogo from '../assets/image-plus-logo.svg'
-import { ContextWindowMeter } from './ContextWindowMeter'
 import { Button } from './ui/button'
 import { Select } from './ui/select'
 import { Textarea } from './ui/textarea'
@@ -444,7 +443,6 @@ export function Composer({
             </div>
           ) : null}
           <span className="min-w-4 flex-1" />
-          <ContextWindowMeter usage={selectedChat?.contextWindow} />
           {hasComposerPayload || isRunning || isSending ? (
             <Button
               data-testid="send-button"

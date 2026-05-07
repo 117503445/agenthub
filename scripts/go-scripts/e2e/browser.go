@@ -694,38 +694,6 @@ func expectTestIDNonEmpty(page playwright.Page, id string, timeout time.Duration
 	return fmt.Errorf("等待元素 %q 文本非空超时，实际文本: %s", id, lastText)
 }
 
-// expectContextWindowMeter 使用 page 和 timeout 参数等待 context window 图标展示有效百分比。
-func expectContextWindowMeter(page playwright.Page, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastState string
-	var lastErr error
-	for time.Now().Before(deadline) {
-		value, err := getByTestID(page, "context-window-meter").First().Evaluate(`(element) => {
-			const percent = Number.parseFloat(element.getAttribute('data-percent') || '');
-			const label = element.textContent || '';
-			if (Number.isFinite(percent) && percent >= 0 && percent <= 100 && label.includes('Context window')) {
-				return '';
-			}
-			return 'percent=' + element.getAttribute('data-percent') + ', text=' + label;
-		}`, nil)
-		if err == nil {
-			if text, ok := value.(string); ok {
-				lastState = text
-				if text == "" {
-					return nil
-				}
-			}
-		} else {
-			lastErr = err
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待 context window 图标超时，最后错误: %w", lastErr)
-	}
-	return fmt.Errorf("等待 context window 图标超时，最后状态: %s", lastState)
-}
-
 // expectNotificationCount 使用 page、minimum 和 timeout 参数等待桌面通知数量达到下限。
 func expectNotificationCount(page playwright.Page, minimum int, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)

@@ -511,12 +511,6 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string,
 			s.broadcastChatChanged(updatedChat)
 			s.broadcastChatDetailChanged(chatID, updatedChat)
 		},
-		OnUsage: func(usage ContextWindowUsage) {
-			updatedChat, ok := s.store.UpdateContextWindowUsage(chatID, usage)
-			if ok {
-				s.broadcastChatChanged(updatedChat)
-			}
-		},
 		OnDone: func() {
 			updatedChat, message, ok := s.store.FinishAssistantMessage(chatID, assistantMessage.ID, MessageStatusComplete)
 			if !ok {

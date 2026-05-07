@@ -59,7 +59,6 @@ export function normalizeChat(chat: Chat) {
     agentReasoning: chat.agentReasoning ?? '',
     agentLocked: chat.agentLocked ?? (chat.messages?.length ?? 0) > 0,
     agentProfile: chat.agentProfile,
-    contextWindow: chat.contextWindow,
     plan: chat.plan,
     messages: chat.messages ?? [],
   }

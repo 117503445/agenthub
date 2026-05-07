@@ -43,12 +43,11 @@ type AgentConfig struct {
 
 // AgentRunCallbacks 表示一次 agent 运行中的回调。
 type AgentRunCallbacks struct {
-	OnSessionID func(sessionID string)         // OnSessionID 使用 sessionID 参数记录 Claude 会话标识。
-	OnDelta     func(delta string)             // OnDelta 使用 delta 参数追加 assistant 流式文本。
-	OnToolCall  func(tool ToolCall)            // OnToolCall 使用 tool 参数报告工具调用状态。
-	OnUsage     func(usage ContextWindowUsage) // OnUsage 使用 usage 参数报告上下文窗口使用量。
-	OnDone      func()                         // OnDone 表示当前轮次完成。
-	OnError     func(message string)           // OnError 使用 message 参数报告当前轮次失败。
+	OnSessionID func(sessionID string) // OnSessionID 使用 sessionID 参数记录 Claude 会话标识。
+	OnDelta     func(delta string)     // OnDelta 使用 delta 参数追加 assistant 流式文本。
+	OnToolCall  func(tool ToolCall)    // OnToolCall 使用 tool 参数报告工具调用状态。
+	OnDone      func()                 // OnDone 表示当前轮次完成。
+	OnError     func(message string)   // OnError 使用 message 参数报告当前轮次失败。
 }
 
 // AgentRunInput 表示发送 prompt 到 agent 的参数。
@@ -226,22 +225,9 @@ func (m *AgentManager) sendClaude(ctx context.Context, input AgentRunInput) erro
 	return nil
 }
 
-// sendCodex 使用 ctx 和 input 参数启动 Codex CLI 单轮运行。
+// sendCodex 使用 ctx 和 input 参数启动 Codex app-server 单轮运行。
 func (m *AgentManager) sendCodex(ctx context.Context, input AgentRunInput) error {
-	if input.PlanMode {
-		return m.sendCodexApp(ctx, input)
-	}
-	m.stopIdleCodexAppRuntime(input.ChatID)
-	runtime, err := m.registerEphemeralRuntime(input)
-	if err != nil {
-		return err
-	}
-	if err := runtime.startCodex(ctx, agentPrompt(input.Prompt, input.Images), input.Images); err != nil {
-		runtime.failCurrentRun(err.Error())
-		m.removeRuntime(input.ChatID, runtime)
-		return err
-	}
-	return nil
+	return m.sendCodexApp(ctx, input)
 }
 
 // Stop 使用 chatID 参数停止聊天页当前 agent runtime。
@@ -802,13 +788,11 @@ func (r *AgentRuntime) consumeOutputEvent(event ClaudeOutputEvent) {
 	var onSessionID func(string)
 	var onDelta func(string)
 	var onToolCall func(ToolCall)
-	var onUsage func(ContextWindowUsage)
 	var onDone func()
 	var onError func(string)
 	var sessionID string
 	var delta string
 	var toolCalls []ToolCall
-	var usage ContextWindowUsage
 	var done bool
 	var errorMessage string
 
@@ -839,10 +823,6 @@ func (r *AgentRuntime) consumeOutputEvent(event ClaudeOutputEvent) {
 			toolCalls = append([]ToolCall(nil), event.ToolCalls...)
 			onToolCall = r.callbacks.OnToolCall
 		}
-		if event.ContextWindow.MaxTokens > 0 || event.ContextWindow.UsedTokens > 0 {
-			usage = event.ContextWindow
-			onUsage = r.callbacks.OnUsage
-		}
 		if event.Done {
 			r.running = false
 			done = true
@@ -867,9 +847,6 @@ func (r *AgentRuntime) consumeOutputEvent(event ClaudeOutputEvent) {
 			onToolCall(tool)
 		}
 	}
-	if onUsage != nil {
-		onUsage(usage)
-	}
 	if onError != nil && errorMessage != "" {
 		onError(errorMessage)
 		return
@@ -881,13 +858,12 @@ func (r *AgentRuntime) consumeOutputEvent(event ClaudeOutputEvent) {
 
 // ClaudeOutputEvent 表示从 Claude JSON 行中提取出的 UI 事件。
 type ClaudeOutputEvent struct {
-	SessionID     string             // SessionID 表示 Claude 会话标识。
-	Delta         string             // Delta 表示增量 assistant 文本。
-	AssistantText string             // AssistantText 表示当前 assistant 完整文本。
-	ToolCalls     []ToolCall         // ToolCalls 表示本行携带的工具调用更新。
-	ContextWindow ContextWindowUsage // ContextWindow 表示本行携带的上下文窗口使用量。
-	Done          bool               // Done 表示当前轮次完成。
-	Error         string             // Error 表示当前轮次错误。
+	SessionID     string     // SessionID 表示 Claude 会话标识。
+	Delta         string     // Delta 表示增量 assistant 文本。
+	AssistantText string     // AssistantText 表示当前 assistant 完整文本。
+	ToolCalls     []ToolCall // ToolCalls 表示本行携带的工具调用更新。
+	Done          bool       // Done 表示当前轮次完成。
+	Error         string     // Error 表示当前轮次错误。
 }
 
 // parseClaudeOutputLine 使用 line 参数解析 Claude JSON 行。
@@ -1026,9 +1002,6 @@ func parseCodexOutputLine(line []byte) (ClaudeOutputEvent, error) {
 	if strings.Contains(method, "turn/completed") || strings.Contains(method, "turn_completed") || method == "turn.completed" || method == "done" {
 		event.Done = true
 	}
-	if usage, ok := extractContextWindowUsage(firstNonNil(params["tokenUsage"], params["token_usage"], raw["tokenUsage"], raw["token_usage"], raw["usage"])); ok {
-		event.ContextWindow = usage
-	}
 	if errText := firstNonEmpty(codexErrorText(raw["error"]), codexErrorText(params["error"]), stringValue(raw["message"]), stringValue(params["message"])); errText != "" {
 		event.Error = errText
 	}
@@ -1044,70 +1017,6 @@ func codexErrorText(value any) string {
 		return firstNonEmpty(stringValue(block["message"]), stringValue(block["error"]))
 	}
 	return ""
-}
-
-// extractContextWindowUsage 使用 value 参数提取上下文窗口使用量。
-func extractContextWindowUsage(value any) (ContextWindowUsage, bool) {
-	usage := mapValue(value)
-	if usage == nil {
-		return ContextWindowUsage{}, false
-	}
-	lastUsage := mapValue(firstNonNil(usage["last"], usage["lastTokenUsage"], usage["last_token_usage"]))
-	maxTokens := firstPositiveInt(
-		usage["contextWindowMaxTokens"],
-		usage["context_window_max_tokens"],
-		usage["modelContextWindow"],
-		usage["model_context_window"],
-		usage["maxTokens"],
-	)
-	usedTokens := firstPositiveInt(
-		usage["contextWindowUsedTokens"],
-		usage["context_window_used_tokens"],
-		usage["usedTokens"],
-		usage["totalTokens"],
-		usage["total_tokens"],
-	)
-	if usedTokens <= 0 && lastUsage != nil {
-		usedTokens = firstPositiveInt(
-			lastUsage["contextWindowUsedTokens"],
-			lastUsage["context_window_used_tokens"],
-			lastUsage["usedTokens"],
-			lastUsage["totalTokens"],
-			lastUsage["total_tokens"],
-		)
-	}
-	if usedTokens <= 0 {
-		inputTokens := firstPositiveInt(usage["inputTokens"], usage["input_tokens"])
-		outputTokens := firstPositiveInt(usage["outputTokens"], usage["output_tokens"])
-		if inputTokens > 0 || outputTokens > 0 {
-			usedTokens = inputTokens + outputTokens
-		}
-	}
-	if maxTokens <= 0 && usedTokens <= 0 {
-		return ContextWindowUsage{}, false
-	}
-	return ContextWindowUsage{MaxTokens: maxTokens, UsedTokens: usedTokens, Reported: true}, true
-}
-
-// firstPositiveInt 使用 values 参数返回第一个正整数。
-func firstPositiveInt(values ...any) int {
-	for _, value := range values {
-		switch typed := value.(type) {
-		case int:
-			if typed > 0 {
-				return typed
-			}
-		case int64:
-			if typed > 0 {
-				return int(typed)
-			}
-		case float64:
-			if typed > 0 {
-				return int(typed)
-			}
-		}
-	}
-	return 0
 }
 
 // extractStreamEventDelta 使用 value 参数提取 Claude stream_event 文本增量。

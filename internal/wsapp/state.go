@@ -134,13 +134,6 @@ type UserInputRequest struct {
 	UpdatedAt time.Time           `json:"updatedAt,omitempty"` // UpdatedAt 表示更新时间。
 }
 
-// ContextWindowUsage 表示聊天页上下文窗口使用情况。
-type ContextWindowUsage struct {
-	MaxTokens  int  `json:"maxTokens"`          // MaxTokens 表示当前模型上下文窗口上限。
-	UsedTokens int  `json:"usedTokens"`         // UsedTokens 表示 agent 真实上报的已用 token 数。
-	Reported   bool `json:"reported,omitempty"` // Reported 表示当前数据是否来自 agent 真实上报。
-}
-
 // MessageImage 表示用户消息携带的一张图片附件。
 type MessageImage struct {
 	ID        string    `json:"id"`        // ID 表示图片附件唯一标识。
@@ -187,22 +180,21 @@ type PlanApproval struct {
 
 // Chat 表示 project 下的一个聊天页。
 type Chat struct {
-	ID             string             `json:"id"`                       // ID 表示聊天页唯一标识。
-	ProjectID      string             `json:"projectId"`                // ProjectID 表示聊天页所属 project。
-	Title          string             `json:"title"`                    // Title 表示聊天页标题。
-	Status         string             `json:"status"`                   // Status 表示聊天页运行状态。
-	AgentProvider  string             `json:"agentProvider"`            // AgentProvider 表示当前聊天页使用的 Profile 标识。
-	AgentModel     string             `json:"agentModel"`               // AgentModel 表示当前聊天页使用的模型。
-	AgentReasoning string             `json:"agentReasoning,omitempty"` // AgentReasoning 表示当前聊天页使用的推理级别。
-	AgentLocked    bool               `json:"agentLocked"`              // AgentLocked 表示会话开始后 agent 配置是否锁定。
-	AgentSessionID string             `json:"agentSessionId,omitempty"` // AgentSessionID 表示 agent 会话标识。
-	AgentProfile   AgentProfile       `json:"agentProfile,omitempty"`   // AgentProfile 表示聊天页绑定的 Profile 快照。
-	ContextWindow  ContextWindowUsage `json:"contextWindow"`            // ContextWindow 表示当前上下文窗口使用情况。
-	Plan           *PlanApproval      `json:"plan,omitempty"`           // Plan 表示当前待确认或执行中的 plan。
-	DraftText      string             `json:"draftText,omitempty"`      // DraftText 表示聊天输入框尚未发送的文字草稿。
-	Messages       []ChatMessage      `json:"messages"`                 // Messages 表示聊天消息列表。
-	CreatedAt      time.Time          `json:"createdAt"`                // CreatedAt 表示创建时间。
-	UpdatedAt      time.Time          `json:"updatedAt"`                // UpdatedAt 表示更新时间。
+	ID             string        `json:"id"`                       // ID 表示聊天页唯一标识。
+	ProjectID      string        `json:"projectId"`                // ProjectID 表示聊天页所属 project。
+	Title          string        `json:"title"`                    // Title 表示聊天页标题。
+	Status         string        `json:"status"`                   // Status 表示聊天页运行状态。
+	AgentProvider  string        `json:"agentProvider"`            // AgentProvider 表示当前聊天页使用的 Profile 标识。
+	AgentModel     string        `json:"agentModel"`               // AgentModel 表示当前聊天页使用的模型。
+	AgentReasoning string        `json:"agentReasoning,omitempty"` // AgentReasoning 表示当前聊天页使用的推理级别。
+	AgentLocked    bool          `json:"agentLocked"`              // AgentLocked 表示会话开始后 agent 配置是否锁定。
+	AgentSessionID string        `json:"agentSessionId,omitempty"` // AgentSessionID 表示 agent 会话标识。
+	AgentProfile   AgentProfile  `json:"agentProfile,omitempty"`   // AgentProfile 表示聊天页绑定的 Profile 快照。
+	Plan           *PlanApproval `json:"plan,omitempty"`           // Plan 表示当前待确认或执行中的 plan。
+	DraftText      string        `json:"draftText,omitempty"`      // DraftText 表示聊天输入框尚未发送的文字草稿。
+	Messages       []ChatMessage `json:"messages"`                 // Messages 表示聊天消息列表。
+	CreatedAt      time.Time     `json:"createdAt"`                // CreatedAt 表示创建时间。
+	UpdatedAt      time.Time     `json:"updatedAt"`                // UpdatedAt 表示更新时间。
 }
 
 // LastAgentSelection 表示新聊天页默认继承的 agent 配置。
@@ -542,7 +534,6 @@ func (s *Store) DeleteAgentProfile(profileID string) ([]AgentProfile, error) {
 			chat.AgentModel = defaultAgent.Model
 			chat.AgentReasoning = defaultAgent.Reasoning
 			chat.AgentProfile = AgentProfile{}
-			chat.ContextWindow = ContextWindowUsage{}
 			chat.UpdatedAt = time.Now()
 			state.chats[chatID] = chat
 		}
@@ -702,7 +693,6 @@ func (s *Store) UpdateChatAgent(chatID string, provider string, model string, re
 		chat.AgentProvider = normalizedProvider
 		chat.AgentModel = normalizedModel
 		chat.AgentReasoning = normalizedReasoning
-		chat.ContextWindow = ContextWindowUsage{}
 		chat.UpdatedAt = time.Now()
 		state.chats[chatID] = chat
 		state.lastAgent = LastAgentSelection{
@@ -1187,42 +1177,6 @@ func (s *Store) MarkPlanExecuting(chatID string, planID string) (Chat, PlanAppro
 	return cloneChat(chat), plan, nil
 }
 
-// UpdateContextWindowUsage 使用 chatID 和 usage 参数更新 agent 上报的上下文窗口使用量。
-func (s *Store) UpdateContextWindowUsage(chatID string, usage ContextWindowUsage) (Chat, bool) {
-	var chat Chat
-	err := s.commit(func(state *storeState) error {
-		var ok bool
-		chat, ok = state.chats[chatID]
-		if !ok {
-			return errStoreUnchanged
-		}
-		if usage.MaxTokens <= 0 {
-			usage.MaxTokens = chat.ContextWindow.MaxTokens
-		}
-		if usage.MaxTokens <= 0 {
-			usage.MaxTokens = contextWindowMaxTokens(chat.AgentProvider, chat.AgentModel)
-		}
-		if usage.UsedTokens < 0 {
-			usage.UsedTokens = 0
-		}
-		if usage.UsedTokens > usage.MaxTokens {
-			usage.UsedTokens = usage.MaxTokens
-		}
-		usage.Reported = true
-		if chat.ContextWindow == usage {
-			return errStoreUnchanged
-		}
-		chat.ContextWindow = usage
-		chat.UpdatedAt = time.Now()
-		state.chats[chatID] = chat
-		return nil
-	})
-	if err != nil {
-		return Chat{}, false
-	}
-	return cloneChat(chat), true
-}
-
 // SetChatSessionID 使用 chatID 和 sessionID 参数记录 Claude 会话标识。
 func (s *Store) SetChatSessionID(chatID string, sessionID string) (Chat, bool) {
 	if strings.TrimSpace(sessionID) == "" {
@@ -1495,21 +1449,6 @@ func normalizeMessageImages(images []MessageImagePayload) ([]MessageImage, error
 		})
 	}
 	return result, nil
-}
-
-// contextWindowMaxTokens 使用 provider 和 model 参数返回模型上下文窗口上限。
-func contextWindowMaxTokens(provider string, model string) int {
-	normalized := strings.ToLower(strings.TrimSpace(model))
-	switch {
-	case strings.Contains(normalized, "opus"):
-		return 1_000_000
-	case strings.Contains(normalized, "gpt-5.5"), strings.Contains(normalized, "mock-codex"):
-		return 258_000
-	case strings.Contains(provider, "codex"):
-		return 200_000
-	default:
-		return 200_000
-	}
 }
 
 // upsertMessageToolPart 使用 message、tool 和 now 参数更新消息中的工具调用片段。

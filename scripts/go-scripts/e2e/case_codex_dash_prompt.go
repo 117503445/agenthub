@@ -52,6 +52,9 @@ func runCodexDashPromptCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDCount(page, "send-button", 0, 30*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := expectFileText(filepath.Join(ctx.DataDir, "state.json"), "mock-codex-app-thread", 10*time.Second); err != nil {
+		return fail(err)
+	}
 
 	prompt := "--tag latest 是默认值吗"
 	if err := fillTestID(page, "message-input", prompt); err != nil {

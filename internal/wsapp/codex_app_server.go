@@ -46,7 +46,7 @@ type codexAppPendingUserInput struct {
 	Input     string              // Input 表示展示用问题摘要。
 }
 
-// sendCodexApp 使用 ctx 和 input 参数通过 Codex app-server 启动 plan 模式单轮运行。
+// sendCodexApp 使用 ctx 和 input 参数通过 Codex app-server 启动单轮运行。
 func (m *AgentManager) sendCodexApp(ctx context.Context, input AgentRunInput) error {
 	runtime, err := m.ensureCodexAppRuntime(ctx, input)
 	if err != nil {
@@ -60,6 +60,7 @@ func (m *AgentManager) sendCodexApp(ctx context.Context, input AgentRunInput) er
 	}
 	runtime.running = true
 	runtime.stopping = false
+	runtime.planMode = input.PlanMode
 	runtime.currentMessageID = input.AssistantMessageID
 	runtime.emittedAssistantText = ""
 	runtime.callbacks = input.Callbacks
@@ -110,7 +111,7 @@ func (m *AgentManager) ensureCodexAppRuntime(ctx context.Context, input AgentRun
 		profile:              input.Profile,
 		model:                input.Model,
 		reasoning:            input.Reasoning,
-		planMode:             true,
+		planMode:             input.PlanMode,
 		projectPath:          input.ProjectPath,
 		sessionID:            input.SessionID,
 		appServer:            true,
@@ -238,7 +239,7 @@ func (r *AgentRuntime) startCodexAppServer(ctx context.Context) error {
 		"model":          r.model,
 		"cwd":            r.projectPath,
 		"approvalPolicy": "never",
-		"sandbox":        "read-only",
+		"sandbox":        "danger-full-access",
 	})
 	if err != nil {
 		return err
@@ -253,7 +254,7 @@ func (r *AgentRuntime) startCodexAppServer(ctx context.Context) error {
 	return nil
 }
 
-// startCodexAppTurn 使用 ctx、prompt 和 images 参数启动 Codex app-server 单轮 plan 运行。
+// startCodexAppTurn 使用 ctx、prompt 和 images 参数启动 Codex app-server 单轮运行。
 func (r *AgentRuntime) startCodexAppTurn(ctx context.Context, prompt string, images []MessageImage) error {
 	imagePaths, err := r.prepareImageFiles(images)
 	if err != nil {
@@ -274,22 +275,30 @@ func (r *AgentRuntime) startCodexAppTurn(ctx context.Context, prompt string, ima
 		})
 	}
 	effort := codexAppReasoningEffort(r.reasoning)
-	settings := map[string]any{
-		"model":                  r.model,
-		"reasoning_effort":       nil,
-		"developer_instructions": nil,
-	}
-	if effort != "" {
-		settings["reasoning_effort"] = effort
-	}
+	r.mu.Lock()
+	planMode := r.planMode
+	r.mu.Unlock()
 	params := map[string]any{
-		"threadId": r.sessionID,
-		"input":    inputItems,
-		"model":    r.model,
-		"collaborationMode": map[string]any{
+		"threadId":       r.sessionID,
+		"input":          inputItems,
+		"cwd":            r.projectPath,
+		"approvalPolicy": "never",
+		"sandboxPolicy":  codexAppSandboxPolicy(planMode),
+		"model":          r.model,
+	}
+	if planMode {
+		settings := map[string]any{
+			"model":                  r.model,
+			"reasoning_effort":       nil,
+			"developer_instructions": nil,
+		}
+		if effort != "" {
+			settings["reasoning_effort"] = effort
+		}
+		params["collaborationMode"] = map[string]any{
 			"mode":     "plan",
 			"settings": settings,
-		},
+		}
 	}
 	if effort != "" {
 		params["effort"] = effort
@@ -301,7 +310,7 @@ func (r *AgentRuntime) startCodexAppTurn(ctx context.Context, prompt string, ima
 		return err
 	}
 	if turnID := codexAppTurnID(result); turnID != "" {
-		log.Ctx(ctx).Info().Str("chatID", r.chatID).Str("turnID", turnID).Msg("Codex app-server plan turn 已启动")
+		log.Ctx(ctx).Info().Str("chatID", r.chatID).Str("turnID", turnID).Bool("planMode", planMode).Msg("Codex app-server turn 已启动")
 	}
 	return nil
 }
@@ -438,13 +447,9 @@ func (r *AgentRuntime) handleCodexAppNotification(method string, params json.Raw
 		event.Delta = stringFromJSON(params, "delta")
 	case "item/started", "item/completed", "item/updated":
 		event = codexAppEventFromItem(method, params)
-	case "item/commandExecution/outputDelta":
+	case "item/commandExecution/outputDelta", "command/exec/outputDelta":
 		if tool := codexAppCommandOutputDelta(params); tool.ID != "" {
 			event.ToolCalls = append(event.ToolCalls, tool)
-		}
-	case "thread/tokenUsage/updated":
-		if usage, ok := extractContextWindowUsage(firstNonNil(mapValueFromJSON(params, "tokenUsage"), mapValueFromJSON(params, "token_usage"))); ok {
-			event.ContextWindow = usage
 		}
 	case "turn/completed":
 		event = codexAppTurnCompletedEvent(params)
@@ -454,8 +459,6 @@ func (r *AgentRuntime) handleCodexAppNotification(method string, params json.Raw
 	if event.Delta == "" &&
 		event.AssistantText == "" &&
 		len(event.ToolCalls) == 0 &&
-		event.ContextWindow.MaxTokens <= 0 &&
-		event.ContextWindow.UsedTokens <= 0 &&
 		!event.Done &&
 		event.Error == "" {
 		return
@@ -789,6 +792,18 @@ func codexAppReasoningEffort(reasoning string) string {
 		return strings.ToLower(strings.TrimSpace(reasoning))
 	default:
 		return ""
+	}
+}
+
+// codexAppSandboxPolicy 使用 planMode 参数返回当前 turn 的沙箱策略。
+func codexAppSandboxPolicy(planMode bool) map[string]any {
+	if !planMode {
+		return map[string]any{"type": "dangerFullAccess"}
+	}
+	return map[string]any{
+		"type":          "readOnly",
+		"access":        map[string]any{"type": "fullAccess"},
+		"networkAccess": false,
 	}
 }
 

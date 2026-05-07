@@ -34,9 +34,6 @@ func TestStoreProjectChatLifecycle(t *testing.T) {
 	if chat.AgentProvider != AgentProviderClaudeCode || chat.AgentModel != "sonnet" {
 		t.Fatalf("新聊天页 agent 默认值不正确: %#v", chat)
 	}
-	if chat.ContextWindow.Reported || chat.ContextWindow.MaxTokens != 0 || chat.ContextWindow.UsedTokens != 0 {
-		t.Fatalf("新聊天页不应预估 context window: %#v", chat.ContextWindow)
-	}
 	chat, err = store.UpdateChatAgent(chat.ID, AgentProviderCodex, "gpt-5.5", "xhigh")
 	if err != nil {
 		t.Fatalf("更新聊天页 agent 失败: %v", err)
@@ -62,9 +59,6 @@ func TestStoreProjectChatLifecycle(t *testing.T) {
 	if chat.Title != "第一条 prompt" {
 		t.Fatalf("聊天页标题未从首条 prompt 派生: %q", chat.Title)
 	}
-	if chat.ContextWindow.Reported || chat.ContextWindow.UsedTokens != 0 {
-		t.Fatalf("发送消息后不应预估 context window: %#v", chat.ContextWindow)
-	}
 	if chat.DraftText != "" {
 		t.Fatalf("发送消息后应清空草稿: %q", chat.DraftText)
 	}
@@ -87,11 +81,6 @@ func TestStoreProjectChatLifecycle(t *testing.T) {
 	if chat.AgentModel != "gpt-5.4" {
 		t.Fatalf("锁定后的模型未更新: %#v", chat)
 	}
-	chat, ok := store.UpdateContextWindowUsage(chat.ID, ContextWindowUsage{UsedTokens: 50})
-	if !ok || !chat.ContextWindow.Reported || chat.ContextWindow.UsedTokens != 50 || chat.ContextWindow.MaxTokens != 200000 {
-		t.Fatalf("真实上报 context window 未保存: ok=%v usage=%#v", ok, chat.ContextWindow)
-	}
-
 	if _, ok := store.AppendAssistantDelta(chat.ID, assistantMessage.ID, "Mock "); !ok {
 		t.Fatal("追加第一段 assistant 增量失败")
 	}

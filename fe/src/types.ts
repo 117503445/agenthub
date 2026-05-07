@@ -8,15 +8,6 @@ export type AgentProvider = string
 export type AgentProfileType = 'claude_code' | 'codex'
 export type AgentBuiltinProfileKind = 'claude_code' | 'codex' | 'mock_claude_code' | 'mock_codex'
 
-export interface ContextWindowUsage {
-  /** maxTokens 表示当前模型上下文窗口上限。 */
-  maxTokens: number
-  /** usedTokens 表示 agent 真实上报的已用 token 数。 */
-  usedTokens: number
-  /** reported 表示当前数据是否来自 agent 真实上报。 */
-  reported?: boolean
-}
-
 export interface MessageImage {
   /** id 表示图片附件唯一标识。 */
   id: string
@@ -287,8 +278,6 @@ export interface Chat {
   agentSessionId?: string
   /** agentProfile 表示聊天页绑定的 Profile 快照。 */
   agentProfile?: AgentProfile
-  /** contextWindow 表示当前聊天的上下文窗口使用情况。 */
-  contextWindow?: ContextWindowUsage
   /** plan 表示当前待确认或执行中的 plan。 */
   plan?: PlanApproval
   /** draftText 表示输入框尚未发送的文字草稿。 */

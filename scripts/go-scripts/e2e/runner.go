@@ -125,7 +125,7 @@ func registeredCases() map[string]E2ECase {
 		"case_codex_dash_prompt": {Name: "case_codex_dash_prompt", Run: runCodexDashPromptCase, Env: map[string]string{
 			"MOCK_AGENT": "1",
 		}},
-		"case_context_window_meter": {Name: "case_context_window_meter", Run: runContextWindowMeterCase, Env: map[string]string{
+		"case_no_context_window": {Name: "case_no_context_window", Run: runNoContextWindowCase, Env: map[string]string{
 			"MOCK_AGENT": "1",
 		}},
 		"case_manual_stop_notification": {Name: "case_manual_stop_notification", Run: runManualStopNotificationCase, Env: map[string]string{
