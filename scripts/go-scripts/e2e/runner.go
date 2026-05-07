@@ -147,7 +147,10 @@ func registeredCases() map[string]E2ECase {
 			"AGENTHUB_PROFILE_E2E_UNSET":  "backend-unset-value",
 			"MOCK_AGENT":                  "1",
 		}},
-		"case_material_theme":          {Name: "case_material_theme", Run: runMaterialThemeCase},
+		"case_material_theme": {Name: "case_material_theme", Run: runMaterialThemeCase},
+		"case_performance_hot_path": {Name: "case_performance_hot_path", Run: runPerformanceHotPathCase, Env: map[string]string{
+			"MOCK_AGENT": "1",
+		}},
 		"case_project_chat_tab_memory": {Name: "case_project_chat_tab_memory", Run: runProjectChatTabMemoryCase},
 		"case_project_icon":            {Name: "case_project_icon", Run: runProjectIconCase},
 		"case_project_reorder":         {Name: "case_project_reorder", Run: runProjectReorderCase},

@@ -91,6 +91,7 @@ func (m *AgentManager) ensureCodexAppRuntime(ctx context.Context, input AgentRun
 		existing.profileSignature() == agentProfileSignature(input.Profile) &&
 		existing.model == input.Model &&
 		existing.reasoning == input.Reasoning &&
+		existing.planMode == input.PlanMode &&
 		existing.projectPath == input.ProjectPath &&
 		existing.isAlive() {
 		m.mu.Unlock()

@@ -812,14 +812,13 @@ func (r *AgentRuntime) consumeOutputEvent(event ClaudeOutputEvent) {
 			delta = event.Delta
 		}
 		if event.AssistantText != "" {
-			if strings.HasPrefix(event.AssistantText, r.emittedAssistantText) {
-				delta = event.AssistantText[len(r.emittedAssistantText):]
-			} else if event.AssistantText != r.emittedAssistantText {
-				delta = event.AssistantText
-			}
-			if delta != "" {
-				r.emittedAssistantText = event.AssistantText
+			fullDelta, emittedText := assistantTextDelta(r.emittedAssistantText, event.AssistantText)
+			if fullDelta != "" {
+				delta = fullDelta
+				r.emittedAssistantText = emittedText
 				onDelta = r.callbacks.OnDelta
+			} else {
+				r.emittedAssistantText = emittedText
 			}
 		}
 		if len(event.ToolCalls) > 0 {
@@ -865,6 +864,20 @@ func (r *AgentRuntime) consumeOutputEvent(event ClaudeOutputEvent) {
 	if onDone != nil && done {
 		onDone()
 	}
+}
+
+// assistantTextDelta 使用 emitted 和 fullText 参数计算完整文本事件仍需追加的增量。
+func assistantTextDelta(emitted string, fullText string) (string, string) {
+	if fullText == "" {
+		return "", emitted
+	}
+	if strings.HasPrefix(fullText, emitted) {
+		return fullText[len(emitted):], fullText
+	}
+	if strings.TrimSpace(fullText) == strings.TrimSpace(emitted) || strings.HasPrefix(emitted, fullText) || strings.HasSuffix(emitted, fullText) {
+		return "", emitted
+	}
+	return fullText, fullText
 }
 
 // ClaudeOutputEvent 表示从 Claude JSON 行中提取出的 UI 事件。

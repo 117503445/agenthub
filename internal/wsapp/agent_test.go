@@ -135,6 +135,16 @@ func TestParseCodexOutputLine(t *testing.T) {
 	}
 }
 
+// TestAssistantTextDeltaSkipsDuplicateFullText 验证 Codex 完整文本事件不会把已流式输出的内容重复追加。
+func TestAssistantTextDeltaSkipsDuplicateFullText(t *testing.T) {
+	if delta, emitted := assistantTextDelta("你好\n", "你好"); delta != "" || emitted != "你好\n" {
+		t.Fatalf("完整文本去重失败: delta=%q emitted=%q", delta, emitted)
+	}
+	if delta, emitted := assistantTextDelta("你好", "你好，世界"); delta != "，世界" || emitted != "你好，世界" {
+		t.Fatalf("完整文本增量计算失败: delta=%q emitted=%q", delta, emitted)
+	}
+}
+
 // TestBuildClaudeUserMessage 验证发送给 Claude stdin 的用户消息结构。
 func TestBuildClaudeUserMessage(t *testing.T) {
 	line, err := buildClaudeUserMessage("测试 prompt", nil, "session-1")
