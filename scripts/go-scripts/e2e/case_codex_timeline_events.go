@@ -49,9 +49,11 @@ func runCodexTimelineEventsCase(ctx E2EContext) (success bool) {
 	for _, expected := range []string{
 		"command_approval",
 		"file_approval",
+		"Reasoning",
 		"terminal",
 		"apply_patch",
 		"file_change",
+		"sub_agent",
 		"Timeline events complete",
 	} {
 		if err := expectTestIDText(page, "message-log", expected, 30*time.Second); err != nil {

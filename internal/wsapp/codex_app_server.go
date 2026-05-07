@@ -63,6 +63,7 @@ func (m *AgentManager) sendCodexApp(ctx context.Context, input AgentRunInput) er
 	runtime.planMode = input.PlanMode
 	runtime.currentMessageID = input.AssistantMessageID
 	runtime.emittedAssistantText = ""
+	runtime.appReasoningByItem = make(map[string]string)
 	runtime.callbacks = input.Callbacks
 	sessionID := runtime.sessionID
 	runtime.mu.Unlock()
@@ -118,6 +119,7 @@ func (m *AgentManager) ensureCodexAppRuntime(ctx context.Context, input AgentRun
 		appServer:            true,
 		appPendingResponses:  make(map[string]chan codexAppRPCMessage),
 		appPendingUserInputs: make(map[string]codexAppPendingUserInput),
+		appReasoningByItem:   make(map[string]string),
 	}
 	m.runtimes[input.ChatID] = runtime
 	m.mu.Unlock()
@@ -201,6 +203,9 @@ func (r *AgentRuntime) startCodexAppServer(ctx context.Context) error {
 	}
 	if r.appPendingUserInputs == nil {
 		r.appPendingUserInputs = make(map[string]codexAppPendingUserInput)
+	}
+	if r.appReasoningByItem == nil {
+		r.appReasoningByItem = make(map[string]string)
 	}
 	stderrDone := r.stderrDone
 	r.mu.Unlock()
@@ -501,6 +506,10 @@ func (r *AgentRuntime) handleCodexAppNotification(method string, params json.Raw
 	switch method {
 	case "item/agentMessage/delta", "item/plan/delta":
 		event.Delta = stringFromJSON(params, "delta")
+	case "item/reasoning/summaryTextDelta":
+		if tool := r.codexAppReasoningDelta(params); tool.ID != "" {
+			event.ToolCalls = append(event.ToolCalls, tool)
+		}
 	case "item/started", "item/completed", "item/updated":
 		event = codexAppEventFromItem(method, params)
 	case "item/commandExecution/outputDelta", "command/exec/outputDelta":
@@ -748,8 +757,28 @@ func codexAppEventFromItem(method string, params json.RawMessage) ClaudeOutputEv
 			Input:  jsonString(item["arguments"]),
 			Output: firstNonEmpty(jsonString(item["result"]), stringFromJSON(mapValue(item["error"]), "message")),
 		})
+	case "collabAgentToolCall", "subAgent", "sub_agent":
+		status := ToolCallStatusRunning
+		switch stringValue(item["status"]) {
+		case "completed":
+			status = ToolCallStatusComplete
+		case "failed":
+			status = ToolCallStatusError
+		}
+		event.ToolCalls = append(event.ToolCalls, ToolCall{
+			ID:     firstNonEmpty(stringValue(item["id"]), "codex-sub-agent"),
+			Name:   "sub_agent",
+			Status: status,
+			Input: firstNonEmpty(
+				stringValue(item["prompt"]),
+				stringValue(item["task"]),
+				stringValue(item["description"]),
+				jsonString(firstNonNil(item["input"], item["arguments"])),
+			),
+			Output: firstNonEmpty(stringValue(item["aggregatedOutput"]), stringValue(item["output"]), jsonString(item["result"])),
+		})
 	case "reasoning":
-		if text := strings.Join(stringSliceValue(item["summary"]), "\n"); text != "" {
+		if text := codexAppReasoningText(item); text != "" {
 			event.ToolCalls = append(event.ToolCalls, ToolCall{
 				ID:     firstNonEmpty(stringValue(item["id"]), "codex-reasoning"),
 				Name:   "thinking",
@@ -764,6 +793,28 @@ func codexAppEventFromItem(method string, params json.RawMessage) ClaudeOutputEv
 		}
 	}
 	return event
+}
+
+// codexAppReasoningDelta 使用 params 参数累加 reasoning 摘要增量。
+func (r *AgentRuntime) codexAppReasoningDelta(params json.RawMessage) ToolCall {
+	itemID := stringFromJSON(params, "itemId")
+	delta := stringFromJSON(params, "delta")
+	if itemID == "" || delta == "" {
+		return ToolCall{}
+	}
+	r.mu.Lock()
+	if r.appReasoningByItem == nil {
+		r.appReasoningByItem = make(map[string]string)
+	}
+	text := r.appReasoningByItem[itemID] + delta
+	r.appReasoningByItem[itemID] = text
+	r.mu.Unlock()
+	return ToolCall{
+		ID:     itemID,
+		Name:   "thinking",
+		Status: ToolCallStatusRunning,
+		Input:  text,
+	}
 }
 
 // codexAppCommandOutputDelta 使用 params 参数提取命令输出增量。
@@ -879,6 +930,17 @@ func codexAppTurnCompletedEvent(params json.RawMessage) ClaudeOutputEvent {
 		return ClaudeOutputEvent{Error: firstNonEmpty(stringFromJSON(mapValue(turn["error"]), "message"), "Codex app-server 运行失败")}
 	}
 	return ClaudeOutputEvent{Done: true}
+}
+
+// codexAppReasoningText 使用 item 参数提取 reasoning 摘要文本。
+func codexAppReasoningText(item map[string]any) string {
+	return firstNonEmpty(
+		strings.Join(stringSliceValue(item["summary"]), "\n"),
+		strings.Join(stringSliceValue(item["content"]), "\n"),
+		stringValue(item["summary"]),
+		stringValue(item["text"]),
+		stringValue(item["content"]),
+	)
 }
 
 // normalizeUserInputQuestions 使用 questions 参数清理 request_user_input 问题。

@@ -74,6 +74,9 @@ function compactToolInput(input = '') {
 
 // toolCommandTitle 使用 tool 参数返回折叠状态可见的工具调用标题。
 export function toolCommandTitle(tool: ToolCall) {
+  if (tool.name === 'thinking') {
+    return 'Reasoning'
+  }
   const command = compactToolInput(tool.input)
   if (!command) {
     return tool.name

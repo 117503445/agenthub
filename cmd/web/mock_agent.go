@@ -427,6 +427,21 @@ func writeMockCodexAppTimelineEvents(writer *bufio.Writer, threadID string, turn
 		"itemId":   "mock-file-approval",
 		"reason":   "timeline e2e file approval",
 	})
+	writeMockCodexAppNotify(writer, "item/reasoning/summaryTextDelta", map[string]any{
+		"threadId": threadID,
+		"turnId":   turnID,
+		"itemId":   "mock-reasoning",
+		"delta":    "分析 timeline 事件顺序。",
+	})
+	writeMockCodexAppNotify(writer, "item/completed", map[string]any{
+		"threadId": threadID,
+		"turnId":   turnID,
+		"item": map[string]any{
+			"id":      "mock-reasoning",
+			"type":    "reasoning",
+			"summary": []string{"分析 timeline 事件顺序。"},
+		},
+	})
 	writeMockCodexAppCommand(writer, threadID, turnID, "completed", ".")
 	writeMockCodexAppNotify(writer, "item/commandExecution/terminalInteraction", map[string]any{
 		"threadId":  threadID,
@@ -470,6 +485,17 @@ func writeMockCodexAppTimelineEvents(writer *bufio.Writer, threadID string, turn
 			"changes": map[string]any{
 				"files": []map[string]string{{"path": "timeline.txt"}},
 			},
+		},
+	})
+	writeMockCodexAppNotify(writer, "item/completed", map[string]any{
+		"threadId": threadID,
+		"turnId":   turnID,
+		"item": map[string]any{
+			"id":               "mock-sub-agent",
+			"type":             "collabAgentToolCall",
+			"status":           "completed",
+			"task":             "汇总子 agent 活动",
+			"aggregatedOutput": "sub agent activity complete",
 		},
 	})
 	writeMockCodexAppNotify(writer, "item/completed", map[string]any{

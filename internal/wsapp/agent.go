@@ -103,6 +103,7 @@ type AgentRuntime struct {
 	appNextRequestID     int64
 	appPendingResponses  map[string]chan codexAppRPCMessage
 	appPendingUserInputs map[string]codexAppPendingUserInput
+	appReasoningByItem   map[string]string
 	appWriteMu           sync.Mutex
 }
 
