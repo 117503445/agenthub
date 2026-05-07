@@ -346,6 +346,10 @@ func mockCodexAppFinishTurn(writer *bufio.Writer, pending mockCodexAppPendingTur
 		})
 		return
 	}
+	if !pending.PlanMode && strings.Contains(prompt, "MOCK_CODEX_TIMELINE_EVENTS") {
+		writeMockCodexAppTimelineEvents(writer, pending.ThreadID, pending.TurnID)
+		return
+	}
 	text, err := requestMockCodexText(pending.Model, prompt)
 	if err != nil {
 		writeMockCodexAppNotify(writer, "turn/completed", map[string]any{
@@ -381,6 +385,86 @@ func mockCodexAppFinishTurn(writer *bufio.Writer, pending mockCodexAppPendingTur
 		"threadId": pending.ThreadID,
 		"turn": map[string]any{
 			"id":     pending.TurnID,
+			"status": "completed",
+		},
+	})
+}
+
+// writeMockCodexAppTimelineEvents 使用 writer、threadID 和 turnID 参数输出 timeline 覆盖事件。
+func writeMockCodexAppTimelineEvents(writer *bufio.Writer, threadID string, turnID string) {
+	writeMockCodexAppRequest(writer, "mock-command-approval", "item/commandExecution/requestApproval", map[string]any{
+		"threadId": threadID,
+		"turnId":   turnID,
+		"itemId":   "mock-command-approval",
+		"command":  "go test ./...",
+		"cwd":      ".",
+		"reason":   "timeline e2e command approval",
+	})
+	writeMockCodexAppRequest(writer, "mock-file-approval", "item/fileChange/requestApproval", map[string]any{
+		"threadId": threadID,
+		"turnId":   turnID,
+		"itemId":   "mock-file-approval",
+		"reason":   "timeline e2e file approval",
+	})
+	writeMockCodexAppCommand(writer, threadID, turnID, "completed", ".")
+	writeMockCodexAppNotify(writer, "item/commandExecution/terminalInteraction", map[string]any{
+		"threadId":  threadID,
+		"turnId":    turnID,
+		"itemId":    "mock-terminal",
+		"processId": 42,
+		"stdin":     "y\n",
+	})
+	writeMockCodexAppNotify(writer, "codex/event/patch_apply_begin", map[string]any{
+		"msg": map[string]any{
+			"call_id": "mock-apply-patch",
+			"changes": map[string]any{
+				"files": []map[string]string{{"path": "timeline.txt", "content": "+ok"}},
+			},
+		},
+	})
+	writeMockCodexAppNotify(writer, "codex/event/patch_apply_end", map[string]any{
+		"msg": map[string]any{
+			"call_id": "mock-apply-patch",
+			"changes": map[string]any{
+				"files": []map[string]string{{"path": "timeline.txt", "content": "+ok"}},
+			},
+			"stdout":  "patched",
+			"success": true,
+		},
+	})
+	writeMockCodexAppNotify(writer, "item/fileChange/outputDelta", map[string]any{
+		"threadId": threadID,
+		"turnId":   turnID,
+		"itemId":   "mock-file-change",
+		"delta":    "writing timeline.txt",
+	})
+	writeMockCodexAppNotify(writer, "item/completed", map[string]any{
+		"threadId": threadID,
+		"turnId":   turnID,
+		"item": map[string]any{
+			"id":               "mock-file-change",
+			"type":             "fileChange",
+			"status":           "completed",
+			"aggregatedOutput": "file changed",
+			"changes": map[string]any{
+				"files": []map[string]string{{"path": "timeline.txt"}},
+			},
+		},
+	})
+	writeMockCodexAppNotify(writer, "item/completed", map[string]any{
+		"threadId": threadID,
+		"turnId":   turnID,
+		"item": map[string]any{
+			"id":   "mock-timeline-message",
+			"type": "agentMessage",
+			"text": "Timeline events complete",
+		},
+	})
+	writeMockCodexAppUsage(writer, threadID)
+	writeMockCodexAppNotify(writer, "turn/completed", map[string]any{
+		"threadId": threadID,
+		"turn": map[string]any{
+			"id":     turnID,
 			"status": "completed",
 		},
 	})

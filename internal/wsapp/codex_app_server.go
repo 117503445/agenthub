@@ -402,6 +402,14 @@ func (r *AgentRuntime) handleCodexAppRequest(message codexAppRPCMessage) {
 		if err := r.handleCodexAppUserInputRequest(message); err != nil {
 			_ = r.codexAppError(message.ID, -32602, err.Error())
 		}
+	case "item/commandExecution/requestApproval":
+		if err := r.handleCodexAppApprovalRequest(message, "command_approval"); err != nil {
+			_ = r.codexAppError(message.ID, -32602, err.Error())
+		}
+	case "item/fileChange/requestApproval":
+		if err := r.handleCodexAppApprovalRequest(message, "file_approval"); err != nil {
+			_ = r.codexAppError(message.ID, -32602, err.Error())
+		}
 	default:
 		_ = r.codexAppError(message.ID, -32601, fmt.Sprintf("AgentHub 暂不支持 Codex app-server 请求: %s", message.Method))
 	}
@@ -466,6 +474,26 @@ func (r *AgentRuntime) handleCodexAppUserInputRequest(message codexAppRPCMessage
 	return nil
 }
 
+// handleCodexAppApprovalRequest 使用 message 和 toolName 参数自动批准权限请求。
+func (r *AgentRuntime) handleCodexAppApprovalRequest(message codexAppRPCMessage, toolName string) error {
+	params := mapValueFromJSON(message.Params, "")
+	itemID := firstNonEmpty(stringValue(params["itemId"]), stringValue(params["item_id"]), "approval-"+codexAppRPCIDKey(message.ID))
+	tool := ToolCall{
+		ID:     "approval-" + itemID,
+		Name:   toolName,
+		Status: ToolCallStatusComplete,
+		Input:  codexAppApprovalInput(params),
+		Output: "已自动批准",
+	}
+	r.mu.Lock()
+	callbacks := r.callbacks
+	r.mu.Unlock()
+	if callbacks.OnToolCall != nil {
+		callbacks.OnToolCall(tool)
+	}
+	return r.codexAppResponse(message.ID, map[string]any{"decision": "accept"})
+}
+
 // handleCodexAppNotification 使用 method 和 params 参数消费 Codex app-server 通知。
 func (r *AgentRuntime) handleCodexAppNotification(method string, params json.RawMessage) {
 	event := ClaudeOutputEvent{}
@@ -481,6 +509,22 @@ func (r *AgentRuntime) handleCodexAppNotification(method string, params json.Raw
 	case "thread/tokenUsage/updated":
 		if usage := codexAppUsageFromTokenUsage(params); usage != nil {
 			event.Usage = usage
+		}
+	case "item/commandExecution/terminalInteraction", "codex/event/terminal_interaction":
+		if tool := codexAppTerminalInteraction(method, params); tool.ID != "" {
+			event.ToolCalls = append(event.ToolCalls, tool)
+		}
+	case "codex/event/patch_apply_begin":
+		if tool := codexAppPatchApply(params, true); tool.ID != "" {
+			event.ToolCalls = append(event.ToolCalls, tool)
+		}
+	case "codex/event/patch_apply_end":
+		if tool := codexAppPatchApply(params, false); tool.ID != "" {
+			event.ToolCalls = append(event.ToolCalls, tool)
+		}
+	case "item/fileChange/outputDelta":
+		if tool := codexAppFileChangeOutputDelta(params); tool.ID != "" {
+			event.ToolCalls = append(event.ToolCalls, tool)
 		}
 	case "turn/completed":
 		event = codexAppTurnCompletedEvent(params)
@@ -673,6 +717,21 @@ func codexAppEventFromItem(method string, params json.RawMessage) ClaudeOutputEv
 			Input:  stringValue(item["command"]),
 			Output: stringValue(item["aggregatedOutput"]),
 		})
+	case "fileChange":
+		status := ToolCallStatusRunning
+		switch stringValue(item["status"]) {
+		case "completed":
+			status = ToolCallStatusComplete
+		case "failed", "declined":
+			status = ToolCallStatusError
+		}
+		event.ToolCalls = append(event.ToolCalls, ToolCall{
+			ID:     firstNonEmpty(stringValue(item["id"]), "codex-file-change"),
+			Name:   "file_change",
+			Status: status,
+			Input:  jsonString(firstNonNil(item["changes"], item["files"], item["path"])),
+			Output: firstNonEmpty(stringValue(item["aggregatedOutput"]), stringValue(item["output"])),
+		})
 	case "mcpToolCall":
 		status := ToolCallStatusRunning
 		switch stringValue(item["status"]) {
@@ -718,6 +777,72 @@ func codexAppCommandOutputDelta(params json.RawMessage) ToolCall {
 		Name:   "exec_command",
 		Status: ToolCallStatusRunning,
 		Output: delta,
+	}
+}
+
+// codexAppFileChangeOutputDelta 使用 params 参数提取文件变更输出增量。
+func codexAppFileChangeOutputDelta(params json.RawMessage) ToolCall {
+	itemID := stringFromJSON(params, "itemId")
+	delta := firstNonEmpty(stringFromJSON(params, "delta"), stringFromJSON(params, "chunk"))
+	if itemID == "" || delta == "" {
+		return ToolCall{}
+	}
+	return ToolCall{
+		ID:     itemID,
+		Name:   "file_change",
+		Status: ToolCallStatusRunning,
+		Output: delta,
+	}
+}
+
+// codexAppApprovalInput 使用 params 参数生成权限请求摘要。
+func codexAppApprovalInput(params map[string]any) string {
+	return jsonString(map[string]any{
+		"command": firstNonEmpty(stringValue(params["command"]), stringValue(params["cmd"])),
+		"cwd":     stringValue(params["cwd"]),
+		"reason":  stringValue(params["reason"]),
+	})
+}
+
+// codexAppTerminalInteraction 使用 method 和 params 参数提取终端交互事件。
+func codexAppTerminalInteraction(method string, params json.RawMessage) ToolCall {
+	payload := mapValueFromJSON(params, "")
+	source := payload
+	if method == "codex/event/terminal_interaction" {
+		source = mapValue(payload["msg"])
+	}
+	callID := firstNonEmpty(stringValue(source["call_id"]), stringValue(source["callId"]), stringValue(payload["itemId"]), "terminal-"+codexAppRPCIDKey(firstNonNil(source["process_id"], payload["processId"])))
+	if callID == "" {
+		return ToolCall{}
+	}
+	return ToolCall{
+		ID:     callID,
+		Name:   "terminal",
+		Status: ToolCallStatusComplete,
+		Input: jsonString(map[string]any{
+			"processId": firstNonEmpty(codexAppRPCIDKey(source["process_id"]), codexAppRPCIDKey(payload["processId"])),
+			"stdin":     firstNonEmpty(stringValue(source["stdin"]), stringValue(payload["stdin"])),
+		}),
+	}
+}
+
+// codexAppPatchApply 使用 params 和 running 参数提取 apply_patch 事件。
+func codexAppPatchApply(params json.RawMessage, running bool) ToolCall {
+	payload := mapValueFromJSON(params, "")
+	msg := mapValue(payload["msg"])
+	callID := firstNonEmpty(stringValue(msg["call_id"]), stringValue(msg["callId"]), "codex-apply-patch")
+	status := ToolCallStatusComplete
+	if running {
+		status = ToolCallStatusRunning
+	} else if success, ok := msg["success"].(bool); ok && !success {
+		status = ToolCallStatusError
+	}
+	return ToolCall{
+		ID:     callID,
+		Name:   "apply_patch",
+		Status: status,
+		Input:  jsonString(msg["changes"]),
+		Output: firstNonEmpty(stringValue(msg["stdout"]), stringValue(msg["stderr"])),
 	}
 }
 

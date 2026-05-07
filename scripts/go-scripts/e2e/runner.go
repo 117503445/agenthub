@@ -125,6 +125,9 @@ func registeredCases() map[string]E2ECase {
 		"case_codex_resume_context": {Name: "case_codex_resume_context", Run: runCodexResumeContextCase, Env: map[string]string{
 			"MOCK_AGENT": "1",
 		}},
+		"case_codex_timeline_events": {Name: "case_codex_timeline_events", Run: runCodexTimelineEventsCase, Env: map[string]string{
+			"MOCK_AGENT": "1",
+		}},
 		"case_codex_dash_prompt": {Name: "case_codex_dash_prompt", Run: runCodexDashPromptCase, Env: map[string]string{
 			"MOCK_AGENT": "1",
 		}},
