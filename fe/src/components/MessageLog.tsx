@@ -122,7 +122,7 @@ export function MessageLog({
       return
     }
     const memory = onReadScrollMemory(chat.id)
-    const restoreSavedPosition = memory?.signature === scrollSignatureRef.current
+    const restoreSavedPosition = memory?.signature === scrollSignature
     const frame = window.requestAnimationFrame(() => {
       const nextElement = logRef.current
       if (!nextElement) {
@@ -135,7 +135,7 @@ export function MessageLog({
       window.cancelAnimationFrame(frame)
       saveCurrentScroll(element)
     }
-  }, [chat.id, onReadScrollMemory, saveCurrentScroll])
+  }, [chat.id, onReadScrollMemory, saveCurrentScroll, scrollSignature])
 
   useLayoutEffect(() => {
     if (scrollToBottomSignal <= 0) {

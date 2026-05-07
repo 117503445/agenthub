@@ -57,7 +57,8 @@ func runChatDetailLazyLoadCase(ctx E2EContext) (success bool) {
 	if err != nil {
 		return fail(err)
 	}
-	const prompt = "聊天详情懒加载测试"
+	const promptTitle = "聊天详情默认底部滚动测试"
+	prompt := promptTitle + "\n" + strings.Repeat("历史消息应默认展示底部。\n", 120)
 	if err := prepareChatDetailLazyHistory(conn, chat.ID, prompt); err != nil {
 		return fail(err)
 	}
@@ -89,7 +90,7 @@ func runChatDetailLazyLoadCase(ctx E2EContext) (success bool) {
 	}
 	events = append(events, reportStep("重新连接后的 state.snapshot 只返回聊天页摘要，不携带历史消息和 plan 详情。"))
 
-	if err := assertChatDetailLazyPersistence(ctx.DataDir, chat.ID, prompt); err != nil {
+	if err := assertChatDetailLazyPersistence(ctx.DataDir, chat.ID, promptTitle); err != nil {
 		return fail(err)
 	}
 	events = append(events, reportStep("AGENTHUB_DATA/state.json 只保存聊天摘要，聊天详情写入 chats/<chatID>.json。"))
@@ -105,15 +106,15 @@ func runChatDetailLazyLoadCase(ctx E2EContext) (success bool) {
 	if err != nil {
 		return fail(err)
 	}
-	if !chatDetailContainsPrompt(detail.Chat, prompt) {
+	if !chatDetailContainsPrompt(detail.Chat, promptTitle) {
 		return fail(fmt.Errorf("chat.detail 未返回目标聊天历史: chatID=%s", chat.ID))
 	}
 	events = append(events, reportStep("前端请求 chat.detail.get 后，后端才返回该聊天页的完整消息详情。"))
 
-	if err := assertChatDetailLazyLoadUI(ctx, snapshot.Projects[0].ID, chat.ID, prompt); err != nil {
+	if err := assertChatDetailLazyLoadUI(ctx, snapshot.Projects[0].ID, chat.ID, promptTitle); err != nil {
 		return fail(err)
 	}
-	events = append(events, reportStep("浏览器直接进入聊天页 hash 路由后，前端请求详情并渲染历史消息。"))
+	events = append(events, reportStep("浏览器直接进入聊天页 hash 路由后，前端请求详情并渲染历史消息；没有滚动记录时默认停在底部。"))
 	return true
 }
 
@@ -261,6 +262,14 @@ func assertChatDetailLazyLoadUI(ctx E2EContext, projectID string, chatID string,
 	}
 	if err := expectTestIDText(page, "message-log", prompt, 10*time.Second); err != nil {
 		screenshot(page, filepath.Join(ctx.ScreenshotsDir, "failed-ui.png"), true)
+		return err
+	}
+	if err := expectMessageLogScrollable(page, 48, 5*time.Second); err != nil {
+		screenshot(page, filepath.Join(ctx.ScreenshotsDir, "failed-scrollable.png"), true)
+		return err
+	}
+	if err := expectMessageLogScrolledToBottom(page, 8, 5*time.Second); err != nil {
+		screenshot(page, filepath.Join(ctx.ScreenshotsDir, "failed-scroll-bottom.png"), true)
 		return err
 	}
 	screenshot(page, filepath.Join(ctx.ScreenshotsDir, "01-chat-detail-lazy-load.png"), true)
