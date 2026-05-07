@@ -46,6 +46,7 @@ type AgentRunCallbacks struct {
 	OnSessionID func(sessionID string) // OnSessionID 使用 sessionID 参数记录 Claude 会话标识。
 	OnDelta     func(delta string)     // OnDelta 使用 delta 参数追加 assistant 流式文本。
 	OnToolCall  func(tool ToolCall)    // OnToolCall 使用 tool 参数报告工具调用状态。
+	OnUsage     func(usage AgentUsage) // OnUsage 使用 usage 参数报告最近一次用量。
 	OnDone      func()                 // OnDone 表示当前轮次完成。
 	OnError     func(message string)   // OnError 使用 message 参数报告当前轮次失败。
 }
@@ -788,11 +789,13 @@ func (r *AgentRuntime) consumeOutputEvent(event ClaudeOutputEvent) {
 	var onSessionID func(string)
 	var onDelta func(string)
 	var onToolCall func(ToolCall)
+	var onUsage func(AgentUsage)
 	var onDone func()
 	var onError func(string)
 	var sessionID string
 	var delta string
 	var toolCalls []ToolCall
+	var usage *AgentUsage
 	var done bool
 	var errorMessage string
 
@@ -823,6 +826,11 @@ func (r *AgentRuntime) consumeOutputEvent(event ClaudeOutputEvent) {
 			toolCalls = append([]ToolCall(nil), event.ToolCalls...)
 			onToolCall = r.callbacks.OnToolCall
 		}
+		if event.Usage != nil {
+			usageCopy := *event.Usage
+			usage = &usageCopy
+			onUsage = r.callbacks.OnUsage
+		}
 		if event.Done {
 			r.running = false
 			done = true
@@ -847,6 +855,9 @@ func (r *AgentRuntime) consumeOutputEvent(event ClaudeOutputEvent) {
 			onToolCall(tool)
 		}
 	}
+	if onUsage != nil && usage != nil {
+		onUsage(*usage)
+	}
 	if onError != nil && errorMessage != "" {
 		onError(errorMessage)
 		return
@@ -858,12 +869,13 @@ func (r *AgentRuntime) consumeOutputEvent(event ClaudeOutputEvent) {
 
 // ClaudeOutputEvent 表示从 Claude JSON 行中提取出的 UI 事件。
 type ClaudeOutputEvent struct {
-	SessionID     string     // SessionID 表示 Claude 会话标识。
-	Delta         string     // Delta 表示增量 assistant 文本。
-	AssistantText string     // AssistantText 表示当前 assistant 完整文本。
-	ToolCalls     []ToolCall // ToolCalls 表示本行携带的工具调用更新。
-	Done          bool       // Done 表示当前轮次完成。
-	Error         string     // Error 表示当前轮次错误。
+	SessionID     string      // SessionID 表示 Claude 会话标识。
+	Delta         string      // Delta 表示增量 assistant 文本。
+	AssistantText string      // AssistantText 表示当前 assistant 完整文本。
+	ToolCalls     []ToolCall  // ToolCalls 表示本行携带的工具调用更新。
+	Usage         *AgentUsage // Usage 表示本行携带的 token 和上下文窗口用量。
+	Done          bool        // Done 表示当前轮次完成。
+	Error         string      // Error 表示当前轮次错误。
 }
 
 // parseClaudeOutputLine 使用 line 参数解析 Claude JSON 行。

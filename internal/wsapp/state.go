@@ -109,6 +109,16 @@ type ToolCall struct {
 	UpdatedAt        time.Time         `json:"updatedAt"`                  // UpdatedAt 表示更新时间。
 }
 
+// AgentUsage 表示 agent 最近一次用量和上下文窗口信息。
+type AgentUsage struct {
+	InputTokens                 int `json:"inputTokens,omitempty"`                 // InputTokens 表示输入 token 数。
+	CachedInputTokens           int `json:"cachedInputTokens,omitempty"`           // CachedInputTokens 表示缓存命中的输入 token 数。
+	OutputTokens                int `json:"outputTokens,omitempty"`                // OutputTokens 表示输出 token 数。
+	ContextWindowMaxTokens      int `json:"contextWindowMaxTokens,omitempty"`      // ContextWindowMaxTokens 表示模型上下文窗口上限。
+	ContextWindowUsedTokens     int `json:"contextWindowUsedTokens,omitempty"`     // ContextWindowUsedTokens 表示当前已使用上下文 token 数。
+	ContextWindowPercentRounded int `json:"contextWindowPercentRounded,omitempty"` // ContextWindowPercentRounded 表示上下文窗口使用率整数百分比。
+}
+
 // UserInputOption 表示 request_user_input 问题的一个可选答案。
 type UserInputOption struct {
 	Label       string `json:"label"`                 // Label 表示选项文案。
@@ -190,6 +200,7 @@ type Chat struct {
 	AgentLocked    bool          `json:"agentLocked"`              // AgentLocked 表示会话开始后 agent 配置是否锁定。
 	AgentSessionID string        `json:"agentSessionId,omitempty"` // AgentSessionID 表示 agent 会话标识。
 	AgentProfile   AgentProfile  `json:"agentProfile,omitempty"`   // AgentProfile 表示聊天页绑定的 Profile 快照。
+	Usage          *AgentUsage   `json:"usage,omitempty"`          // Usage 表示最近一次 agent 用量和上下文窗口。
 	Plan           *PlanApproval `json:"plan,omitempty"`           // Plan 表示当前待确认或执行中的 plan。
 	DraftText      string        `json:"draftText,omitempty"`      // DraftText 表示聊天输入框尚未发送的文字草稿。
 	Messages       []ChatMessage `json:"messages"`                 // Messages 表示聊天消息列表。
@@ -1200,6 +1211,37 @@ func (s *Store) SetChatSessionID(chatID string, sessionID string) (Chat, bool) {
 	return cloneChat(chat), true
 }
 
+// SetChatUsage 使用 chatID 和 usage 参数记录聊天页最近一次用量。
+func (s *Store) SetChatUsage(chatID string, usage AgentUsage) (Chat, bool) {
+	if usage.ContextWindowMaxTokens <= 0 && usage.ContextWindowUsedTokens <= 0 &&
+		usage.InputTokens <= 0 && usage.OutputTokens <= 0 && usage.CachedInputTokens <= 0 {
+		return Chat{}, false
+	}
+	if usage.ContextWindowMaxTokens > 0 && usage.ContextWindowUsedTokens > 0 {
+		usage.ContextWindowPercentRounded = int(float64(usage.ContextWindowUsedTokens)/float64(usage.ContextWindowMaxTokens)*100 + 0.5)
+	}
+	var chat Chat
+	err := s.commit(func(state *storeState) error {
+		var ok bool
+		chat, ok = state.chats[chatID]
+		if !ok {
+			return errStoreUnchanged
+		}
+		next := usage
+		if chat.Usage != nil && *chat.Usage == next {
+			return errStoreUnchanged
+		}
+		chat.Usage = &next
+		chat.UpdatedAt = time.Now()
+		state.chats[chatID] = chat
+		return nil
+	})
+	if err != nil {
+		return Chat{}, false
+	}
+	return cloneChat(chat), true
+}
+
 // Snapshot 返回当前内存状态的稳定排序副本。
 func (s *Store) Snapshot() Snapshot {
 	s.mu.RLock()
@@ -1312,6 +1354,10 @@ func cloneChat(chat Chat) Chat {
 	if chat.Plan != nil {
 		plan := *chat.Plan
 		chat.Plan = &plan
+	}
+	if chat.Usage != nil {
+		usage := *chat.Usage
+		chat.Usage = &usage
 	}
 	chat.Messages = cloneChatMessages(chat.Messages)
 	if chat.Messages == nil {

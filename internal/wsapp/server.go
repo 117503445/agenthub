@@ -515,6 +515,12 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string,
 			s.broadcastChatChanged(updatedChat)
 			s.broadcastChatDetailChanged(chatID, updatedChat)
 		},
+		OnUsage: func(usage AgentUsage) {
+			if updatedChat, ok := s.store.SetChatUsage(chatID, usage); ok {
+				s.broadcastChatChanged(updatedChat)
+				s.broadcastChatDetailChanged(chatID, updatedChat)
+			}
+		},
 		OnDone: func() {
 			deltaCoalescer.Close()
 			updatedChat, message, ok := s.store.FinishAssistantMessage(chatID, assistantMessage.ID, MessageStatusComplete)

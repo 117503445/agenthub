@@ -235,6 +235,14 @@ func (r *AgentRuntime) startCodexAppServer(ctx context.Context) error {
 	if err := r.codexAppNotify("initialized", nil); err != nil {
 		return err
 	}
+	resumeSessionID := strings.TrimSpace(r.sessionID)
+	if resumeSessionID != "" {
+		if err := r.resumeCodexAppThread(requestCtx, resumeSessionID); err == nil {
+			return nil
+		} else {
+			log.Ctx(ctx).Warn().Err(err).Str("chatID", r.chatID).Str("threadID", resumeSessionID).Msg("恢复 Codex app-server thread 失败，将创建新 thread")
+		}
+	}
 	result, err := r.codexAppRequest(requestCtx, "thread/start", map[string]any{
 		"model":          r.model,
 		"cwd":            r.projectPath,
@@ -247,6 +255,25 @@ func (r *AgentRuntime) startCodexAppServer(ctx context.Context) error {
 	sessionID := codexAppThreadID(result)
 	if sessionID == "" {
 		return fmt.Errorf("Codex app-server thread/start 未返回 thread id")
+	}
+	r.mu.Lock()
+	r.sessionID = sessionID
+	r.mu.Unlock()
+	return nil
+}
+
+// resumeCodexAppThread 使用 ctx 和 sessionID 参数恢复 Codex app-server thread。
+func (r *AgentRuntime) resumeCodexAppThread(ctx context.Context, sessionID string) error {
+	if strings.TrimSpace(sessionID) == "" {
+		return fmt.Errorf("Codex app-server resume 缺少 thread id")
+	}
+	params := map[string]any{
+		"threadId": sessionID,
+		"model":    r.model,
+		"cwd":      r.projectPath,
+	}
+	if _, err := r.codexAppRequest(ctx, "thread/resume", params); err != nil {
+		return err
 	}
 	r.mu.Lock()
 	r.sessionID = sessionID
@@ -451,6 +478,10 @@ func (r *AgentRuntime) handleCodexAppNotification(method string, params json.Raw
 		if tool := codexAppCommandOutputDelta(params); tool.ID != "" {
 			event.ToolCalls = append(event.ToolCalls, tool)
 		}
+	case "thread/tokenUsage/updated":
+		if usage := codexAppUsageFromTokenUsage(params); usage != nil {
+			event.Usage = usage
+		}
 	case "turn/completed":
 		event = codexAppTurnCompletedEvent(params)
 	case "error":
@@ -459,6 +490,7 @@ func (r *AgentRuntime) handleCodexAppNotification(method string, params json.Raw
 	if event.Delta == "" &&
 		event.AssistantText == "" &&
 		len(event.ToolCalls) == 0 &&
+		event.Usage == nil &&
 		!event.Done &&
 		event.Error == "" {
 		return
@@ -689,6 +721,30 @@ func codexAppCommandOutputDelta(params json.RawMessage) ToolCall {
 	}
 }
 
+// codexAppUsageFromTokenUsage 使用 params 参数提取 Codex token 和上下文窗口用量。
+func codexAppUsageFromTokenUsage(params json.RawMessage) *AgentUsage {
+	tokenUsage := mapValueFromJSON(params, "tokenUsage")
+	if tokenUsage == nil {
+		return nil
+	}
+	last := mapValue(tokenUsage["last"])
+	usage := AgentUsage{
+		InputTokens:             firstPositiveInt(last["inputTokens"], last["input_tokens"]),
+		CachedInputTokens:       firstPositiveInt(last["cachedInputTokens"], last["cached_input_tokens"]),
+		OutputTokens:            firstPositiveInt(last["outputTokens"], last["output_tokens"]),
+		ContextWindowMaxTokens:  firstPositiveInt(tokenUsage["model_context_window"], tokenUsage["modelContextWindow"]),
+		ContextWindowUsedTokens: firstPositiveInt(last["total_tokens"], last["totalTokens"]),
+	}
+	if usage.InputTokens <= 0 &&
+		usage.CachedInputTokens <= 0 &&
+		usage.OutputTokens <= 0 &&
+		usage.ContextWindowMaxTokens <= 0 &&
+		usage.ContextWindowUsedTokens <= 0 {
+		return nil
+	}
+	return &usage
+}
+
 // codexAppTurnCompletedEvent 使用 params 参数提取 turn 完成或失败事件。
 func codexAppTurnCompletedEvent(params json.RawMessage) ClaudeOutputEvent {
 	turn := mapValueFromJSON(params, "turn")
@@ -793,6 +849,36 @@ func codexAppReasoningEffort(reasoning string) string {
 	default:
 		return ""
 	}
+}
+
+// firstPositiveInt 返回 values 参数中的第一个正整数。
+func firstPositiveInt(values ...any) int {
+	for _, value := range values {
+		if number := intValue(value); number > 0 {
+			return number
+		}
+	}
+	return 0
+}
+
+// intValue 使用 value 参数转换整数。
+func intValue(value any) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	case json.Number:
+		if number, err := typed.Int64(); err == nil {
+			return int(number)
+		}
+		if number, err := typed.Float64(); err == nil {
+			return int(number)
+		}
+	}
+	return 0
 }
 
 // codexAppSandboxPolicy 使用 planMode 参数返回当前 turn 的沙箱策略。

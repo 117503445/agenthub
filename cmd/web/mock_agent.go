@@ -198,7 +198,15 @@ func runMockCodexAppServerCLI(args []string, stdin io.Reader, stdout io.Writer, 
 			})
 		case "initialized":
 			// initialized 是客户端通知，不需要响应。
+			_ = message.Method
 		case "thread/start":
+			writeMockCodexAppResponse(writer, message.ID, map[string]any{
+				"thread": map[string]any{"id": threadID},
+			})
+		case "thread/resume":
+			if resumedThreadID := mockCodexAppResumeThreadID(message.Params); resumedThreadID != "" {
+				threadID = resumedThreadID
+			}
 			writeMockCodexAppResponse(writer, message.ID, map[string]any{
 				"thread": map[string]any{"id": threadID},
 			})
@@ -307,6 +315,28 @@ func mockCodexAppFinishTurn(writer *bufio.Writer, pending mockCodexAppPendingTur
 	if !pending.PlanMode && strings.Contains(prompt, "MOCK_CODEX_DELTA_BURST") {
 		writeMockCodexAppCommand(writer, pending.ThreadID, pending.TurnID, "completed", ".")
 		writeMockCodexAppBurstDeltas(writer, pending.ThreadID, pending.TurnID)
+		writeMockCodexAppUsage(writer, pending.ThreadID)
+		writeMockCodexAppNotify(writer, "turn/completed", map[string]any{
+			"threadId": pending.ThreadID,
+			"turn": map[string]any{
+				"id":     pending.TurnID,
+				"status": "completed",
+			},
+		})
+		return
+	}
+	if !pending.PlanMode && strings.Contains(prompt, "MOCK_CODEX_RESUME_CONTEXT") {
+		writeMockCodexAppCommand(writer, pending.ThreadID, pending.TurnID, "completed", ".")
+		writeMockCodexAppNotify(writer, "item/completed", map[string]any{
+			"threadId": pending.ThreadID,
+			"turnId":   pending.TurnID,
+			"item": map[string]any{
+				"id":   "mock-codex-app-resume-message",
+				"type": "agentMessage",
+				"text": "已恢复 Codex thread " + pending.ThreadID,
+			},
+		})
+		writeMockCodexAppUsage(writer, pending.ThreadID)
 		writeMockCodexAppNotify(writer, "turn/completed", map[string]any{
 			"threadId": pending.ThreadID,
 			"turn": map[string]any{
@@ -346,6 +376,7 @@ func mockCodexAppFinishTurn(writer *bufio.Writer, pending mockCodexAppPendingTur
 			"text": text,
 		},
 	})
+	writeMockCodexAppUsage(writer, pending.ThreadID)
 	writeMockCodexAppNotify(writer, "turn/completed", map[string]any{
 		"threadId": pending.ThreadID,
 		"turn": map[string]any{
@@ -353,6 +384,17 @@ func mockCodexAppFinishTurn(writer *bufio.Writer, pending mockCodexAppPendingTur
 			"status": "completed",
 		},
 	})
+}
+
+// mockCodexAppResumeThreadID 使用 params 参数提取待恢复的 thread ID。
+func mockCodexAppResumeThreadID(params json.RawMessage) string {
+	var payload struct {
+		ThreadID string `json:"threadId"` // ThreadID 表示待恢复的 thread ID。
+	}
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.ThreadID)
 }
 
 // writeMockCodexAppBurstDeltas 使用 writer、threadID 和 turnID 参数输出高频文本 delta。
@@ -369,6 +411,22 @@ func writeMockCodexAppBurstDeltas(writer *bufio.Writer, threadID string, turnID 
 			"delta":    chunk,
 		})
 	}
+}
+
+// writeMockCodexAppUsage 使用 writer 和 threadID 参数输出 context window 用量。
+func writeMockCodexAppUsage(writer *bufio.Writer, threadID string) {
+	writeMockCodexAppNotify(writer, "thread/tokenUsage/updated", map[string]any{
+		"threadId": threadID,
+		"tokenUsage": map[string]any{
+			"model_context_window": 128000,
+			"last": map[string]any{
+				"inputTokens":       2048,
+				"cachedInputTokens": 512,
+				"outputTokens":      1024,
+				"total_tokens":      4096,
+			},
+		},
+	})
 }
 
 // mockCodexAppTurnInput 使用 params 参数提取模型、用户输入和 plan 模式标记。

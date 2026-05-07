@@ -11,7 +11,7 @@ import {
   useRef,
   useState,
 } from 'react'
-import { ArrowUp, Bot, Brain, ChevronDown, ClipboardList, Loader2, MessageSquare, Square, X } from 'lucide-react'
+import { ArrowUp, Bot, Brain, ChevronDown, ClipboardList, Gauge, Loader2, MessageSquare, Square, X } from 'lucide-react'
 import imagePlusLogo from '../assets/image-plus-logo.svg'
 import { Button } from './ui/button'
 import { Select } from './ui/select'
@@ -21,6 +21,7 @@ import type {
   AgentProvider,
   AgentProviderOption,
   AgentSkillOption,
+  AgentUsage,
   Chat,
   ComposerImageAttachment,
   ConnectionState,
@@ -150,6 +151,7 @@ export function Composer({
   const selectedModelValue = selectedAgentModels.find((model) => model.id === selectedAgentModel)?.id ?? selectedAgentModel
   const selectedReasoningLabel =
     selectedAgentModelOption?.reasoningLevels?.find((level) => level.id === selectedAgentReasoning)?.label ?? selectedAgentReasoning
+  const contextWindow = buildContextWindowMeter(selectedChat?.usage)
 
   // resizeTextarea 根据当前内容调整输入框高度，并限制最大高度。
   const resizeTextarea = useCallback(() => {
@@ -442,6 +444,20 @@ export function Composer({
               <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--agenthub-muted)]" />
             </div>
           ) : null}
+          {contextWindow ? (
+            <div
+              data-testid="context-window-meter"
+              className="inline-flex h-8 min-w-[11rem] items-center gap-2 rounded-full bg-[var(--agenthub-surface-2)] px-3 text-xs text-[var(--agenthub-muted)]"
+              title={`上下文 ${contextWindow.label}`}
+            >
+              <Gauge className="h-4 w-4 shrink-0" />
+              <span className="shrink-0">上下文</span>
+              <span className="shrink-0 font-mono text-[var(--agenthub-foreground)]">{contextWindow.label}</span>
+              <span className="h-1.5 w-12 overflow-hidden rounded-full bg-[var(--agenthub-outline)]">
+                <span className="block h-full rounded-full bg-[var(--agenthub-primary)]" style={{ width: `${contextWindow.percent}%` }} />
+              </span>
+            </div>
+          ) : null}
           <span className="min-w-4 flex-1" />
           {hasComposerPayload || isRunning || isSending ? (
             <Button
@@ -500,6 +516,35 @@ function readFileAsDataURL(file: File) {
 function composerSelectWidthStyle(label: string, minCh: number, maxCh: number): CSSProperties {
   const contentWidth = Math.min(Math.max(visualTextLength(label), minCh), maxCh)
   return { maxWidth: '100%', width: `calc(${contentWidth}ch + 4.5rem)` }
+}
+
+// buildContextWindowMeter 使用 usage 参数生成上下文窗口展示值。
+function buildContextWindowMeter(usage?: AgentUsage) {
+  const maxTokens = usage?.contextWindowMaxTokens ?? 0
+  const usedTokens = usage?.contextWindowUsedTokens ?? 0
+  if (maxTokens <= 0 || usedTokens <= 0) {
+    return null
+  }
+  const percent = Math.max(1, Math.min(100, Math.round((usedTokens / maxTokens) * 100)))
+  return {
+    label: `${formatTokenCount(usedTokens)} / ${formatTokenCount(maxTokens)}`,
+    percent,
+  }
+}
+
+// formatTokenCount 使用 value 参数格式化 token 数。
+function formatTokenCount(value: number) {
+  if (value >= 1_000_000) {
+    const count = value / 1_000_000
+    return `${Number.isInteger(count) ? count.toFixed(0) : count.toFixed(1)}M`
+  }
+  if (value >= 10_000) {
+    return `${Math.round(value / 1_000)}K`
+  }
+  if (value >= 1_000) {
+    return `${(value / 1_000).toFixed(1)}K`
+  }
+  return String(Math.max(0, Math.round(value)))
 }
 
 // boundedSkillIndex 使用 index 和 count 参数返回可见 skill 列表中的有效下标。

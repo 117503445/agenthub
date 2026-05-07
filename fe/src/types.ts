@@ -257,6 +257,21 @@ export interface ChatMessage {
   updatedAt: string
 }
 
+export interface AgentUsage {
+  /** inputTokens 表示输入 token 数。 */
+  inputTokens?: number
+  /** cachedInputTokens 表示缓存命中的输入 token 数。 */
+  cachedInputTokens?: number
+  /** outputTokens 表示输出 token 数。 */
+  outputTokens?: number
+  /** contextWindowMaxTokens 表示模型上下文窗口上限。 */
+  contextWindowMaxTokens?: number
+  /** contextWindowUsedTokens 表示当前已使用上下文 token 数。 */
+  contextWindowUsedTokens?: number
+  /** contextWindowPercentRounded 表示上下文窗口使用率整数百分比。 */
+  contextWindowPercentRounded?: number
+}
+
 export interface Chat {
   /** id 表示聊天页唯一标识。 */
   id: string
@@ -278,6 +293,8 @@ export interface Chat {
   agentSessionId?: string
   /** agentProfile 表示聊天页绑定的 Profile 快照。 */
   agentProfile?: AgentProfile
+  /** usage 表示最近一次 agent 用量和上下文窗口。 */
+  usage?: AgentUsage
   /** plan 表示当前待确认或执行中的 plan。 */
   plan?: PlanApproval
   /** draftText 表示输入框尚未发送的文字草稿。 */
