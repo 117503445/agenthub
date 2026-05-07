@@ -304,6 +304,18 @@ func mockCodexAppFinishTurn(writer *bufio.Writer, pending mockCodexAppPendingTur
 	if pending.PlanMode {
 		prompt = mockPlanModePrompt(prompt)
 	}
+	if !pending.PlanMode && strings.Contains(prompt, "MOCK_CODEX_DELTA_BURST") {
+		writeMockCodexAppCommand(writer, pending.ThreadID, pending.TurnID, "completed", ".")
+		writeMockCodexAppBurstDeltas(writer, pending.ThreadID, pending.TurnID)
+		writeMockCodexAppNotify(writer, "turn/completed", map[string]any{
+			"threadId": pending.ThreadID,
+			"turn": map[string]any{
+				"id":     pending.TurnID,
+				"status": "completed",
+			},
+		})
+		return
+	}
 	text, err := requestMockCodexText(pending.Model, prompt)
 	if err != nil {
 		writeMockCodexAppNotify(writer, "turn/completed", map[string]any{
@@ -341,6 +353,22 @@ func mockCodexAppFinishTurn(writer *bufio.Writer, pending mockCodexAppPendingTur
 			"status": "completed",
 		},
 	})
+}
+
+// writeMockCodexAppBurstDeltas 使用 writer、threadID 和 turnID 参数输出高频文本 delta。
+func writeMockCodexAppBurstDeltas(writer *bufio.Writer, threadID string, turnID string) {
+	chunks := []string{
+		"Codex ", "流式", "合并", "输出", "完成", "：",
+		"这", "些", "碎片", "会", "被", "后端", "合并", "后", "再", "推送", "到", "前端", "。",
+	}
+	for _, chunk := range chunks {
+		writeMockCodexAppNotify(writer, "item/agentMessage/delta", map[string]any{
+			"threadId": threadID,
+			"turnId":   turnID,
+			"itemId":   "mock-codex-app-burst-message",
+			"delta":    chunk,
+		})
+	}
 }
 
 // mockCodexAppTurnInput 使用 params 参数提取模型、用户输入和 plan 模式标记。

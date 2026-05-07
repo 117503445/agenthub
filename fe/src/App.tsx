@@ -54,6 +54,7 @@ import type {
 } from './types'
 
 const minimumSendPendingMs = 800
+const chatDeltaFlushDelayMs = 48
 
 // normalizeChatSummary 使用 chat 参数生成前端摘要状态。
 function normalizeChatSummary(chat: Chat) {
@@ -91,6 +92,8 @@ function App() {
   const chatsRef = useRef<Chat[]>([])
   const chatDetailLoadingAtRef = useRef<Record<string, string>>({})
   const chatDetailLoadedAtRef = useRef<Record<string, string>>({})
+  const pendingChatDeltasRef = useRef<Record<string, ChatMessageDeltaPayload>>({})
+  const chatDeltaFlushTimerRef = useRef<number | null>(null)
   const chatScrollMemoryRef = useRef<Record<string, ChatScrollMemory>>({})
   const projectSelectedChatIdsRef = useRef<Record<string, string>>({})
   const [authChecked, setAuthChecked] = useState(false)
@@ -146,6 +149,44 @@ function App() {
       null,
     [projectChats, rememberedProjectChatId, selectedChatId],
   )
+  // flushPendingChatDeltas 批量应用后端推送的聊天文本 delta。
+  const flushPendingChatDeltas = useCallback(() => {
+    if (chatDeltaFlushTimerRef.current !== null) {
+      window.clearTimeout(chatDeltaFlushTimerRef.current)
+      chatDeltaFlushTimerRef.current = null
+    }
+    const deltas = Object.values(pendingChatDeltasRef.current)
+    pendingChatDeltasRef.current = {}
+    if (deltas.length === 0) {
+      return
+    }
+    setChats((current) =>
+      current.map((chat) => {
+        const chatDeltas = deltas.filter((item) => item.chatId === chat.id)
+        if (chatDeltas.length === 0) {
+          return chat
+        }
+        return {
+          ...chat,
+          messages: chat.messages.map((message) => {
+            const delta = chatDeltas.find((item) => item.messageId === message.id)
+            return delta ? { ...(delta.message ?? message), text: delta.text, status: 'streaming' } : message
+          }),
+        }
+      }),
+    )
+  }, [])
+  // enqueueChatDelta 使用 payload 参数把聊天文本 delta 放入短延迟队列。
+  const enqueueChatDelta = useCallback(
+    (payload: ChatMessageDeltaPayload) => {
+      pendingChatDeltasRef.current[payload.messageId] = payload
+      if (chatDeltaFlushTimerRef.current !== null) {
+        return
+      }
+      chatDeltaFlushTimerRef.current = window.setTimeout(flushPendingChatDeltas, chatDeltaFlushDelayMs)
+    },
+    [flushPendingChatDeltas],
+  )
   const selectedComposerValue = selectedChat ? (composerValues[selectedChat.id] ?? selectedChat.draftText ?? '') : ''
   const selectedComposerImages = selectedChat ? (composerImages[selectedChat.id] ?? []) : []
   const selectedPlanMode = selectedChat ? (planModes[selectedChat.id] ?? false) : false
@@ -193,6 +234,11 @@ function App() {
         window.clearTimeout(timer)
       }
       sendPendingTimersRef.current = {}
+      if (chatDeltaFlushTimerRef.current !== null) {
+        window.clearTimeout(chatDeltaFlushTimerRef.current)
+        chatDeltaFlushTimerRef.current = null
+      }
+      pendingChatDeltasRef.current = {}
     }
   }, [])
 
@@ -821,6 +867,7 @@ function App() {
         return
       }
       if (message.type === 'chat.detail' || message.type === 'chat.detail.changed') {
+        flushPendingChatDeltas()
         const payload = message.payload as ChatDetailPayload
         const chat = normalizeChatDetail(payload.chat)
         delete chatDetailLoadingAtRef.current[chat.id]
@@ -830,22 +877,11 @@ function App() {
       }
       if (message.type === 'chat.message.delta') {
         const payload = message.payload as ChatMessageDeltaPayload
-        setChats((current) =>
-          current.map((chat) => {
-            if (chat.id !== payload.chatId) {
-              return chat
-            }
-            return {
-              ...chat,
-              messages: chat.messages.map((item) =>
-                item.id === payload.messageId ? { ...(payload.message ?? item), text: payload.text, status: 'streaming' } : item,
-              ),
-            }
-          }),
-        )
+        enqueueChatDelta(payload)
         return
       }
       if (message.type === 'chat.message.done') {
+        flushPendingChatDeltas()
         const payload = message.payload as ChatMessageDonePayload
         if (payload.message.status === 'complete') {
           markChatIndicator(payload.chatId, 'success')
@@ -910,6 +946,8 @@ function App() {
       clearChatIndicator,
       failPendingChatSends,
       finishChatSendSuccess,
+      flushPendingChatDeltas,
+      enqueueChatDelta,
       markChatIndicator,
       notifyAgentCompletion,
       pruneChatScrollMemory,

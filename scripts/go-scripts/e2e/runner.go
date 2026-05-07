@@ -153,6 +153,9 @@ func registeredCases() map[string]E2ECase {
 		}},
 		"case_settings_backend_version": {Name: "case_settings_backend_version", Run: runSettingsBackendVersionCase},
 		"case_skill_command":            {Name: "case_skill_command", Run: runSkillCommandCase},
+		"case_stream_coalescing": {Name: "case_stream_coalescing", Run: runStreamCoalescingCase, Env: map[string]string{
+			"MOCK_AGENT": "1",
+		}},
 		"case_token_auth": {Name: "case_token_auth", Run: runTokenAuthCase, Env: map[string]string{
 			"AGENTHUB_TOKEN": e2eAgentHubToken,
 		}},

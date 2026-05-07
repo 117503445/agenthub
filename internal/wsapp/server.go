@@ -484,6 +484,19 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string,
 	s.broadcastChatDetailChanged(chatID, chat)
 	s.broadcast("agent.status", map[string]any{"chatId": chatID, "status": ChatStatusRunning})
 
+	deltaCoalescer := newAssistantDeltaCoalescer(60*time.Millisecond, func(delta string) {
+		message, ok := s.store.AppendAssistantDelta(chatID, assistantMessage.ID, delta)
+		if !ok {
+			return
+		}
+		s.broadcastToActiveChat(chatID, "chat.message.delta", map[string]any{
+			"chatId":    chatID,
+			"messageId": message.ID,
+			"delta":     delta,
+			"text":      message.Text,
+			"message":   message,
+		})
+	})
 	callbacks := AgentRunCallbacks{
 		OnSessionID: func(sessionID string) {
 			if updatedChat, ok := s.store.SetChatSessionID(chatID, sessionID); ok {
@@ -491,19 +504,10 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string,
 			}
 		},
 		OnDelta: func(delta string) {
-			message, ok := s.store.AppendAssistantDelta(chatID, assistantMessage.ID, delta)
-			if !ok {
-				return
-			}
-			s.broadcastToActiveChat(chatID, "chat.message.delta", map[string]any{
-				"chatId":    chatID,
-				"messageId": message.ID,
-				"delta":     delta,
-				"text":      message.Text,
-				"message":   message,
-			})
+			deltaCoalescer.Add(delta)
 		},
 		OnToolCall: func(tool ToolCall) {
+			deltaCoalescer.Flush()
 			updatedChat, _, ok := s.store.UpsertToolCall(chatID, assistantMessage.ID, tool)
 			if !ok {
 				return
@@ -512,6 +516,7 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string,
 			s.broadcastChatDetailChanged(chatID, updatedChat)
 		},
 		OnDone: func() {
+			deltaCoalescer.Close()
 			updatedChat, message, ok := s.store.FinishAssistantMessage(chatID, assistantMessage.ID, MessageStatusComplete)
 			if !ok {
 				return
@@ -527,6 +532,7 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string,
 			s.broadcast("agent.status", map[string]any{"chatId": chatID, "status": ChatStatusIdle})
 		},
 		OnError: func(message string) {
+			deltaCoalescer.Close()
 			updatedChat, assistant, ok := s.store.FinishAssistantMessage(chatID, assistantMessage.ID, MessageStatusError)
 			if ok {
 				s.broadcastToActiveChat(chatID, "chat.message.done", map[string]any{"chatId": chatID, "message": assistant})
