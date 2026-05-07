@@ -68,6 +68,8 @@ interface ComposerProps {
   modelControlsDisabled: boolean
   /** onComposerValueChange 使用 value 参数更新输入框内容。 */
   onComposerValueChange: (value: string) => void
+  /** onComposerDraftFlush 提交当前输入框草稿。 */
+  onComposerDraftFlush: () => void
   /** onComposerImagesChange 使用 images 参数更新图片附件草稿。 */
   onComposerImagesChange: (images: ComposerImageAttachment[]) => void
   /** onRefreshAgentSkills 请求后端刷新最新 skills。 */
@@ -136,6 +138,7 @@ export function Composer({
   onChangeAgentProvider,
   onChangeAgentModel,
   onChangeAgentReasoning,
+  onComposerDraftFlush,
 }: ComposerProps) {
   const skillMenuID = useId()
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -308,6 +311,7 @@ export function Composer({
             data-testid="message-input"
             value={composerValue}
             onChange={(event) => handleComposerValueChange(event.target.value)}
+            onBlur={onComposerDraftFlush}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             aria-controls={skillMenuVisible ? skillMenuID : undefined}

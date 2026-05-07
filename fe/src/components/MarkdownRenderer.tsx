@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { memo, useMemo, type ReactNode } from 'react'
 import { resolveMarkdownFilesystemHref } from '../lib/filesystem'
 
 type MarkdownBlockType = 'heading' | 'paragraph' | 'list' | 'code' | 'table'
@@ -41,8 +41,8 @@ interface MarkdownRendererProps {
 }
 
 // MarkdownRenderer 使用 text 和 projectRoot 参数渲染安全的轻量 markdown 内容。
-export function MarkdownRenderer({ text, projectRoot }: MarkdownRendererProps) {
-  const blocks = splitMarkdownBlocks(text)
+export const MarkdownRenderer = memo(function MarkdownRenderer({ text, projectRoot }: MarkdownRendererProps) {
+  const blocks = useMemo(() => splitMarkdownBlocks(text), [text])
   if (blocks.length === 0) {
     return null
   }
@@ -51,7 +51,7 @@ export function MarkdownRenderer({ text, projectRoot }: MarkdownRendererProps) {
       {blocks.map((block, index) => renderMarkdownBlock(block, `block-${index}`, projectRoot))}
     </div>
   )
-}
+})
 
 // splitMarkdownBlocks 使用 text 参数拆分 markdown 块。
 function splitMarkdownBlocks(text: string) {

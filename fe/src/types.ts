@@ -394,6 +394,8 @@ export interface AgentStatusPayload {
   chatId: string
   /** status 表示聊天页运行状态。 */
   status: ChatStatus
+  /** terminalStatus 表示本次运行结束后需要展示的终态提示。 */
+  terminalStatus?: ChatTerminalIndicator
 }
 
 export interface AgentProvidersChangedPayload {

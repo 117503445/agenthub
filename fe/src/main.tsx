@@ -8,3 +8,16 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </StrictMode>,
 )
+
+// registerServiceWorker 注册 PWA service worker。
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) {
+    return
+  }
+  window.addEventListener('load', () => {
+    const scriptURL = new URL('./sw.js', window.location.href).toString()
+    void navigator.serviceWorker.register(scriptURL, { scope: './' })
+  })
+}
+
+registerServiceWorker()

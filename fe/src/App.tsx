@@ -1,5 +1,4 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { flushSync } from 'react-dom'
 import { Loader2, LockKeyhole, Wifi, WifiOff } from 'lucide-react'
 import { getWebSocketUrl, sendClientMessage, type ServerMessage } from './lib/ws'
 import {
@@ -55,6 +54,7 @@ import type {
 
 const minimumSendPendingMs = 800
 const chatDeltaFlushDelayMs = 48
+const draftSaveDebounceMs = 400
 
 // normalizeChatSummary 使用 chat 参数生成前端摘要状态。
 function normalizeChatSummary(chat: Chat) {
@@ -94,6 +94,8 @@ function App() {
   const chatDetailLoadedAtRef = useRef<Record<string, string>>({})
   const pendingChatDeltasRef = useRef<Record<string, ChatMessageDeltaPayload>>({})
   const chatDeltaFlushTimerRef = useRef<number | null>(null)
+  const pendingDraftValuesRef = useRef<Record<string, string>>({})
+  const draftSaveTimersRef = useRef<Record<string, number>>({})
   const chatScrollMemoryRef = useRef<Record<string, ChatScrollMemory>>({})
   const projectSelectedChatIdsRef = useRef<Record<string, string>>({})
   const [authChecked, setAuthChecked] = useState(false)
@@ -123,6 +125,7 @@ function App() {
   const [composerValues, setComposerValues] = useState<Record<string, string>>({})
   const [composerImages, setComposerImages] = useState<Record<string, ComposerImageAttachment[]>>({})
   const [planModes, setPlanModes] = useState<Record<string, boolean>>({})
+  const [projectSelectedChatIds, setProjectSelectedChatIds] = useState<Record<string, string>>({})
   const [pendingSendChatIds, setPendingSendChatIds] = useState<Record<string, number>>({})
   const [awaitingSendChatIds, setAwaitingSendChatIds] = useState<Record<string, true>>({})
   const [chatSubmitErrors, setChatSubmitErrors] = useState<Record<string, string>>({})
@@ -140,7 +143,7 @@ function App() {
     () => sortByCreatedAt(chats.filter((chat) => chat.projectId === activeProjectId)),
     [activeProjectId, chats],
   )
-  const rememberedProjectChatId = activeProjectId ? (projectSelectedChatIdsRef.current[activeProjectId] ?? '') : ''
+  const rememberedProjectChatId = activeProjectId ? (projectSelectedChatIds[activeProjectId] ?? '') : ''
   const selectedChat = useMemo(
     () =>
       projectChats.find((chat) => chat.id === selectedChatId) ??
@@ -160,16 +163,22 @@ function App() {
     if (deltas.length === 0) {
       return
     }
+    const deltasByChatId = new Map<string, Map<string, ChatMessageDeltaPayload>>()
+    for (const delta of deltas) {
+      const chatDeltas = deltasByChatId.get(delta.chatId) ?? new Map<string, ChatMessageDeltaPayload>()
+      chatDeltas.set(delta.messageId, delta)
+      deltasByChatId.set(delta.chatId, chatDeltas)
+    }
     setChats((current) =>
       current.map((chat) => {
-        const chatDeltas = deltas.filter((item) => item.chatId === chat.id)
-        if (chatDeltas.length === 0) {
+        const chatDeltas = deltasByChatId.get(chat.id)
+        if (!chatDeltas) {
           return chat
         }
         return {
           ...chat,
           messages: chat.messages.map((message) => {
-            const delta = chatDeltas.find((item) => item.messageId === message.id)
+            const delta = chatDeltas.get(message.id)
             return delta ? { ...(delta.message ?? message), text: delta.text, status: 'streaming' } : message
           }),
         }
@@ -179,7 +188,7 @@ function App() {
   // enqueueChatDelta 使用 payload 参数把聊天文本 delta 放入短延迟队列。
   const enqueueChatDelta = useCallback(
     (payload: ChatMessageDeltaPayload) => {
-      pendingChatDeltasRef.current[payload.messageId] = payload
+      pendingChatDeltasRef.current[`${payload.chatId}:${payload.messageId}`] = payload
       if (chatDeltaFlushTimerRef.current !== null) {
         return
       }
@@ -234,6 +243,11 @@ function App() {
         window.clearTimeout(timer)
       }
       sendPendingTimersRef.current = {}
+      for (const timer of Object.values(draftSaveTimersRef.current)) {
+        window.clearTimeout(timer)
+      }
+      draftSaveTimersRef.current = {}
+      pendingDraftValuesRef.current = {}
       if (chatDeltaFlushTimerRef.current !== null) {
         window.clearTimeout(chatDeltaFlushTimerRef.current)
         chatDeltaFlushTimerRef.current = null
@@ -311,6 +325,16 @@ function App() {
 
   // pruneComposerValues 使用 chatIds 参数移除已经不存在的聊天页草稿。
   const pruneComposerValues = useCallback((chatIds: Set<string>) => {
+    for (const chatId of Object.keys(pendingDraftValuesRef.current)) {
+      if (chatIds.has(chatId)) {
+        continue
+      }
+      if (draftSaveTimersRef.current[chatId]) {
+        window.clearTimeout(draftSaveTimersRef.current[chatId])
+        delete draftSaveTimersRef.current[chatId]
+      }
+      delete pendingDraftValuesRef.current[chatId]
+    }
     setComposerValues((current) => {
       const next: Record<string, string> = {}
       for (const [chatId, value] of Object.entries(current)) {
@@ -342,6 +366,13 @@ function App() {
 
   // removeComposerValues 使用 chatIds 参数清理指定聊天页草稿。
   const removeComposerValues = useCallback((chatIds: string[]) => {
+    for (const chatId of chatIds) {
+      if (draftSaveTimersRef.current[chatId]) {
+        window.clearTimeout(draftSaveTimersRef.current[chatId])
+        delete draftSaveTimersRef.current[chatId]
+      }
+      delete pendingDraftValuesRef.current[chatId]
+    }
     setComposerValues((current) => {
       let changed = false
       const next = { ...current }
@@ -409,6 +440,12 @@ function App() {
       return
     }
     projectSelectedChatIdsRef.current[projectId] = chatId
+    setProjectSelectedChatIds((current) => {
+      if (current[projectId] === chatId) {
+        return current
+      }
+      return { ...current, [projectId]: chatId }
+    })
   }, [])
 
   // findRememberedProjectChatId 使用 projectId 参数查找 project 应恢复的聊天页。
@@ -439,6 +476,7 @@ function App() {
       }
     }
     projectSelectedChatIdsRef.current = next
+    setProjectSelectedChatIds(next)
   }, [])
 
   // forgetProjectSelectedChat 使用 projectId 和 chatId 参数移除被删除聊天页的记忆。
@@ -448,6 +486,14 @@ function App() {
     }
     if (projectSelectedChatIdsRef.current[projectId] === chatId) {
       delete projectSelectedChatIdsRef.current[projectId]
+      setProjectSelectedChatIds((current) => {
+        if (current[projectId] !== chatId) {
+          return current
+        }
+        const next = { ...current }
+        delete next[projectId]
+        return next
+      })
     }
   }, [])
 
@@ -455,7 +501,10 @@ function App() {
     if (!selectedChat) {
       return
     }
-    rememberProjectSelectedChat(selectedChat.projectId, selectedChat.id)
+    const timer = window.setTimeout(() => {
+      rememberProjectSelectedChat(selectedChat.projectId, selectedChat.id)
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [rememberProjectSelectedChat, selectedChat])
 
   // readChatScrollMemory 使用 chatId 参数读取聊天页滚动位置。
@@ -555,11 +604,60 @@ function App() {
     }))
   }, [])
 
+  // sendChatDraft 使用 chatId 和 text 参数向后端保存草稿。
+  const sendChatDraft = useCallback((chatId: string, text: string) => sendClientMessage(wsRef.current, 'chat.draft.update', { chatId, text }), [])
+
+  // cancelChatDraftSave 使用 chatId 参数取消指定聊天页待发送草稿。
+  const cancelChatDraftSave = useCallback((chatId: string) => {
+    if (draftSaveTimersRef.current[chatId]) {
+      window.clearTimeout(draftSaveTimersRef.current[chatId])
+      delete draftSaveTimersRef.current[chatId]
+    }
+    delete pendingDraftValuesRef.current[chatId]
+  }, [])
+
+  // flushChatDraft 使用 chatId 参数立即发送待保存草稿，未传入时发送全部待保存草稿。
+  const flushChatDraft = useCallback(
+    (chatId?: string) => {
+      const chatIds = chatId ? [chatId] : Object.keys(pendingDraftValuesRef.current)
+      for (const id of chatIds) {
+        if (draftSaveTimersRef.current[id]) {
+          window.clearTimeout(draftSaveTimersRef.current[id])
+          delete draftSaveTimersRef.current[id]
+        }
+        if (!(id in pendingDraftValuesRef.current)) {
+          continue
+        }
+        const text = pendingDraftValuesRef.current[id]
+        if (sendChatDraft(id, text)) {
+          delete pendingDraftValuesRef.current[id]
+        }
+      }
+    },
+    [sendChatDraft],
+  )
+
+  // scheduleChatDraftSave 使用 chatId 和 text 参数延迟保存聊天页草稿。
+  const scheduleChatDraftSave = useCallback(
+    (chatId: string, text: string) => {
+      pendingDraftValuesRef.current[chatId] = text
+      if (draftSaveTimersRef.current[chatId]) {
+        window.clearTimeout(draftSaveTimersRef.current[chatId])
+      }
+      draftSaveTimersRef.current[chatId] = window.setTimeout(() => {
+        delete draftSaveTimersRef.current[chatId]
+        flushChatDraft(chatId)
+      }, draftSaveDebounceMs)
+    },
+    [flushChatDraft],
+  )
+
   // clearChatComposerDraft 使用 chatId 参数清空指定聊天页输入草稿。
   const clearChatComposerDraft = useCallback((chatId: string) => {
     if (!chatId) {
       return
     }
+    cancelChatDraftSave(chatId)
     setComposerValues((current) => {
       if (current[chatId] === '') {
         return current
@@ -574,7 +672,7 @@ function App() {
       delete next[chatId]
       return next
     })
-  }, [])
+  }, [cancelChatDraftSave])
 
   // finishChatSendSuccess 使用 chatId 参数处理聊天输入提交成功。
   const finishChatSendSuccess = useCallback(
@@ -611,16 +709,14 @@ function App() {
       return
     }
     setChatSubmitError(chatId, '')
-    flushSync(() => {
-      setComposerValues((current) => {
-        if (current[chatId] === value) {
-          return current
-        }
-        return { ...current, [chatId]: value }
-      })
+    setComposerValues((current) => {
+      if (current[chatId] === value) {
+        return current
+      }
+      return { ...current, [chatId]: value }
     })
-    sendClientMessage(wsRef.current, 'chat.draft.update', { chatId, text: value })
-  }, [selectedChat?.id, setChatSubmitError])
+    scheduleChatDraftSave(chatId, value)
+  }, [scheduleChatDraftSave, selectedChat?.id, setChatSubmitError])
 
   // updateSelectedComposerImages 使用 images 参数更新当前聊天页图片附件草稿。
   const updateSelectedComposerImages = useCallback(
@@ -666,6 +762,20 @@ function App() {
     },
     [selectedChat?.id],
   )
+
+  useEffect(() => {
+    return () => {
+      if (selectedChat?.id) {
+        flushChatDraft(selectedChat.id)
+      }
+    }
+  }, [flushChatDraft, selectedChat?.id])
+
+  useEffect(() => {
+    const flushBeforeUnload = () => flushChatDraft()
+    window.addEventListener('beforeunload', flushBeforeUnload)
+    return () => window.removeEventListener('beforeunload', flushBeforeUnload)
+  }, [flushChatDraft])
 
   useEffect(() => {
     // syncFromHash 从当前 hash 路由恢复选中的 project 和聊天页。
@@ -812,6 +922,14 @@ function App() {
       if (message.type === 'project.deleted') {
         const payload = message.payload as ProjectDeletedPayload
         delete projectSelectedChatIdsRef.current[payload.id]
+        setProjectSelectedChatIds((current) => {
+          if (!(payload.id in current)) {
+            return current
+          }
+          const next = { ...current }
+          delete next[payload.id]
+          return next
+        })
         setProjects((current) => current.filter((project) => project.id !== payload.id))
         setChats((current) => current.filter((chat) => !payload.chatIds.includes(chat.id)))
         setChatIndicators((current) => {
@@ -836,12 +954,17 @@ function App() {
         if (chat.status === 'running') {
           finishChatSendSuccess(chat.id)
         }
+        const shouldSelectCreatedChat =
+          pendingCreatedChatProjectIdRef.current === payload.chat.projectId &&
+          !chatsRef.current.some((existingChat) => existingChat.id === payload.chat.id)
+        if (shouldSelectCreatedChat) {
+          pendingCreatedChatProjectIdRef.current = ''
+          rememberProjectSelectedChat(payload.chat.projectId, payload.chat.id)
+        }
         setChats((current) => sortByCreatedAt(upsertById(current, mergeChatSummary(current, chat), (item) => item.id)))
         setSelectedProjectId((current) => current || payload.chat.projectId)
         setSelectedChatId((current) => {
-          if (pendingCreatedChatProjectIdRef.current === payload.chat.projectId) {
-            pendingCreatedChatProjectIdRef.current = ''
-            rememberProjectSelectedChat(payload.chat.projectId, payload.chat.id)
+          if (shouldSelectCreatedChat) {
             return payload.chat.id
           }
           return current || payload.chat.id
@@ -909,6 +1032,8 @@ function App() {
           clearChatIndicator(payload.chatId)
         } else if (payload.status === 'error') {
           markChatIndicator(payload.chatId, 'error')
+        } else if (payload.terminalStatus) {
+          markChatIndicator(payload.chatId, payload.terminalStatus)
         }
         setChats((current) =>
           current.map((chat) => (chat.id === payload.chatId ? { ...chat, status: payload.status } : chat)),
@@ -992,6 +1117,7 @@ function App() {
         heartbeatTimer = window.setInterval(() => {
           sendClientMessage(ws, 'ping')
         }, 8000)
+        flushChatDraft()
       }
 
       ws.onmessage = (event) => {
@@ -1037,7 +1163,7 @@ function App() {
       window.clearTimeout(retryTimer)
       wsRef.current?.close()
     }
-  }, [authChecked, authRequired, authToken, handleServerMessage])
+  }, [authChecked, authRequired, authToken, flushChatDraft, handleServerMessage])
 
   // submitAgentHubToken 处理 event 参数对应的 token 提交。
   const submitAgentHubToken = (event: FormEvent<HTMLFormElement>) => {
@@ -1231,6 +1357,9 @@ function App() {
 
   // selectProject 使用 project 参数切换当前 project 并写入 hash 路由。
   const selectProject = (project: Project) => {
+    if (selectedChat?.id) {
+      flushChatDraft(selectedChat.id)
+    }
     const chatId = findRememberedProjectChatId(project.id)
     setRouteView('chat')
     setSelectedProjectId(project.id)
@@ -1240,6 +1369,9 @@ function App() {
 
   // selectChat 使用 chat 参数切换当前聊天页并写入 hash 路由。
   const selectChat = (chat: Chat) => {
+    if (selectedChat?.id && selectedChat.id !== chat.id) {
+      flushChatDraft(selectedChat.id)
+    }
     setRouteView('chat')
     setSelectedProjectId(chat.projectId)
     setSelectedChatId(chat.id)
@@ -1313,6 +1445,7 @@ function App() {
     if (!hasPayload) {
       return
     }
+    cancelChatDraftSave(selectedChat.id)
     setChatSubmitError(selectedChat.id, '')
     setChatSendPending(selectedChat.id)
     requestNotificationPermission()
@@ -1465,6 +1598,7 @@ function App() {
             onReadChatScrollMemory={readChatScrollMemory}
             onSaveChatScrollMemory={saveChatScrollMemory}
             onComposerValueChange={updateSelectedComposerValue}
+            onComposerDraftFlush={() => selectedChat?.id && flushChatDraft(selectedChat.id)}
             onComposerImagesChange={updateSelectedComposerImages}
             onRefreshAgentSkills={refreshAgentSkills}
             onPlanModeChange={updateSelectedPlanMode}

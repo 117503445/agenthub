@@ -93,6 +93,8 @@ interface ChatWorkspaceProps {
   onSaveChatScrollMemory: (chatId: string, memory: ChatScrollMemory) => void
   /** onComposerValueChange 使用 value 参数更新输入框内容。 */
   onComposerValueChange: (value: string) => void
+  /** onComposerDraftFlush 提交当前输入框草稿。 */
+  onComposerDraftFlush: () => void
   /** onComposerImagesChange 使用 images 参数更新图片附件草稿。 */
   onComposerImagesChange: (images: ComposerImageAttachment[]) => void
   /** onRefreshAgentSkills 请求后端刷新最新 skills。 */
@@ -146,6 +148,7 @@ export function ChatWorkspace({
   onReadChatScrollMemory,
   onSaveChatScrollMemory,
   onComposerValueChange,
+  onComposerDraftFlush,
   onComposerImagesChange,
   onRefreshAgentSkills,
   onPlanModeChange,
@@ -276,6 +279,7 @@ export function ChatWorkspace({
               providerLocked={providerLocked}
               modelControlsDisabled={modelControlsDisabled}
               onComposerValueChange={onComposerValueChange}
+              onComposerDraftFlush={onComposerDraftFlush}
               onComposerImagesChange={onComposerImagesChange}
               onRefreshAgentSkills={onRefreshAgentSkills}
               onPlanModeChange={onPlanModeChange}

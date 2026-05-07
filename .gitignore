@@ -31,6 +31,10 @@ go.work.sum
 node_modules/
 fe/node_modules/
 fe/dist/
+cmd/web/dist/assets/
+cmd/web/dist/agenthub-icon.svg
+cmd/web/dist/manifest.webmanifest
+cmd/web/dist/sw.js
 
 # Python 环境
 .venv/

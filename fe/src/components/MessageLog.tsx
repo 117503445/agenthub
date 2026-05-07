@@ -1,4 +1,5 @@
-import { useCallback, useLayoutEffect, useMemo, useRef } from 'react'
+import { memo, useCallback, useLayoutEffect, useMemo, useRef } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { Check, Copy, Loader2, Wrench } from 'lucide-react'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { PlanCard } from './PlanCard'
@@ -29,48 +30,75 @@ interface MessageLogProps {
 
 // buildChatScrollSignature 使用 chat 参数生成用于判断内容是否变化的签名。
 function buildChatScrollSignature(chat: Chat) {
-  return chat.messages
-    .map((message) => {
-      const toolState =
-        message.toolCalls?.map((tool) => `${tool.id}:${tool.updatedAt}:${tool.status}:${tool.input?.length ?? 0}:${tool.output?.length ?? 0}`).join(',') ?? ''
-      const partState =
-        message.parts
-          ?.map((part) => `${part.id}:${part.updatedAt}:${part.text?.length ?? 0}:${part.toolCall?.status ?? ''}:${part.toolCall?.output?.length ?? 0}`)
-          .join(',') ?? ''
-      return [
-        message.id,
-        message.role,
-        message.status,
-        message.updatedAt,
-        message.text.length,
-        message.images?.length ?? 0,
-        message.toolCalls?.length ?? 0,
-        toolState,
-        partState,
-      ].join(':')
-    })
-    .join('|')
+  const lastMessage = chat.messages.at(-1)
+  if (!lastMessage) {
+    return 'empty'
+  }
+  const latestPartUpdatedAt = latestMessagePartUpdatedAt(lastMessage)
+  return [
+    chat.messages.length,
+    lastMessage.id,
+    lastMessage.role,
+    lastMessage.status,
+    lastMessage.updatedAt,
+    lastMessage.text.length,
+    lastMessage.images?.length ?? 0,
+    lastMessage.toolCalls?.length ?? 0,
+    latestPartUpdatedAt,
+    chat.plan?.id ?? '',
+    chat.plan?.status ?? '',
+    chat.plan?.updatedAt ?? '',
+  ].join(':')
 }
 
-// MessageLog 使用 props 参数渲染聊天消息列表。
-export function MessageLog({
-  chat,
+// latestMessagePartUpdatedAt 使用 message 参数返回消息中最新片段更新时间。
+function latestMessagePartUpdatedAt(message: ChatMessage) {
+  let latest = ''
+  for (const part of message.parts ?? []) {
+    if (part.updatedAt > latest) {
+      latest = part.updatedAt
+    }
+    if (part.toolCall?.updatedAt && part.toolCall.updatedAt > latest) {
+      latest = part.toolCall.updatedAt
+    }
+  }
+  for (const tool of message.toolCalls ?? []) {
+    if (tool.updatedAt > latest) {
+      latest = tool.updatedAt
+    }
+  }
+  return latest
+}
+
+interface MessageRowProps {
+  /** message 表示当前消息。 */
+  message: ChatMessage
+  /** plan 表示当前消息对应的 plan。 */
+  plan: PlanApproval | null
+  /** projectRoot 表示当前 project 根目录。 */
+  projectRoot?: string
+  /** copiedMessageId 表示刚复制成功的消息标识。 */
+  copiedMessageId: string
+  /** onCopyMessage 使用 message 参数复制消息。 */
+  onCopyMessage: (message: ChatMessage) => void
+  /** onExecutePlan 使用 plan 参数执行已确认 plan。 */
+  onExecutePlan: (plan: PlanApproval) => void
+  /** onRespondUserInput 使用 toolCall 和 answers 参数提交 agent 用户输入请求。 */
+  onRespondUserInput: (toolCall: ToolCall, answers: Record<string, string[]>) => void
+}
+
+// MessageRow 使用 props 参数渲染单条聊天消息。
+const MessageRow = memo(function MessageRow({
+  message,
+  plan,
   projectRoot,
   copiedMessageId,
-  scrollToBottomSignal,
   onCopyMessage,
   onExecutePlan,
   onRespondUserInput,
-  onReadScrollMemory,
-  onSaveScrollMemory,
-}: MessageLogProps) {
-  const logRef = useRef<HTMLDivElement | null>(null)
-  const scrollSignature = useMemo(() => buildChatScrollSignature(chat), [chat])
-  const scrollSignatureRef = useRef(scrollSignature)
-
-  useLayoutEffect(() => {
-    scrollSignatureRef.current = scrollSignature
-  }, [scrollSignature])
+}: MessageRowProps) {
+  const timePosition = message.role === 'user' ? '-top-5 right-0' : '-top-5 left-0'
+  const messageParts = messagePartsForRender(message)
 
   // renderMessagePart 使用 part 参数渲染 assistant 消息片段。
   const renderMessagePart = (part: MessagePart) =>
@@ -101,6 +129,102 @@ export function MessageLog({
     ) : (
       <MarkdownRenderer key={part.id} text={part.text ?? ''} projectRoot={projectRoot} />
     )
+
+  return (
+    <article
+      className={`message-card message-${message.role} group/message relative mt-5 rounded-md border p-4 ${
+        message.role === 'user'
+          ? 'mb-8 border-[var(--agenthub-secondary)] bg-[var(--agenthub-primary-container)]'
+          : message.role === 'system'
+            ? 'border-[var(--agenthub-danger)] bg-[var(--agenthub-danger-muted)]'
+            : 'border-transparent bg-transparent'
+      }`}
+    >
+      <span data-testid="message-time" className={`absolute ${timePosition} inline-flex items-center gap-2 text-xs text-[var(--agenthub-muted)]`}>
+        {message.status === 'streaming' ? <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--agenthub-warning)]" /> : null}
+        {message.status === 'stopped' ? '已停止' : message.status === 'error' ? '失败' : formatTime(message.updatedAt)}
+      </span>
+      {message.role === 'assistant' ? (
+        <div className="space-y-2">
+          {plan ? (
+            <>
+              {messageParts.filter((part) => part.type === 'tool_call').map(renderMessagePart)}
+              <PlanCard plan={plan} projectRoot={projectRoot} onExecute={onExecutePlan} />
+            </>
+          ) : (
+            messageParts.map(renderMessagePart)
+          )}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <pre className="whitespace-pre-wrap break-words font-sans text-base leading-7 text-[var(--agenthub-foreground)]">{message.text}</pre>
+          {message.images?.length ? (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {message.images.map((image) => (
+                <figure key={image.id} data-testid="message-image" className="overflow-hidden rounded-md border border-[var(--agenthub-outline)] bg-[var(--agenthub-surface-0)]">
+                  <img src={`data:${image.mimeType};base64,${image.data}`} alt={image.fileName} className="h-28 w-full object-cover" />
+                  <figcaption className="truncate px-2 py-1 text-xs text-[var(--agenthub-muted)]">{image.fileName}</figcaption>
+                </figure>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      )}
+      {message.role === 'user' ? (
+        <button
+          data-testid="user-copy-button"
+          type="button"
+          onClick={() => onCopyMessage(message)}
+          className="absolute -bottom-8 right-0 inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-[var(--agenthub-muted)] opacity-0 transition hover:bg-[var(--agenthub-surface-2)] hover:text-[var(--agenthub-foreground)] focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-[var(--agenthub-primary)]/20 group-hover/message:opacity-100"
+          aria-label="复制消息"
+          title="复制"
+        >
+          {copiedMessageId === message.id ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+        </button>
+      ) : null}
+      {message.role === 'assistant' ? (
+        <div className="mt-2 flex justify-start">
+          <button
+            data-testid="assistant-copy-button"
+            type="button"
+            onClick={() => onCopyMessage(message)}
+            className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-[var(--agenthub-muted)] transition hover:bg-[var(--agenthub-surface-2)] hover:text-[var(--agenthub-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--agenthub-primary)]/20"
+            aria-label="复制回复"
+            title="复制"
+          >
+            {copiedMessageId === message.id ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+          </button>
+        </div>
+      ) : null}
+    </article>
+  )
+})
+
+// MessageLog 使用 props 参数渲染聊天消息列表。
+export function MessageLog({
+  chat,
+  projectRoot,
+  copiedMessageId,
+  scrollToBottomSignal,
+  onCopyMessage,
+  onExecutePlan,
+  onRespondUserInput,
+  onReadScrollMemory,
+  onSaveScrollMemory,
+}: MessageLogProps) {
+  const logRef = useRef<HTMLDivElement | null>(null)
+  const scrollSignature = useMemo(() => buildChatScrollSignature(chat), [chat])
+  const scrollSignatureRef = useRef(scrollSignature)
+  const rowVirtualizer = useVirtualizer({
+    count: chat.messages.length,
+    getScrollElement: () => logRef.current,
+    estimateSize: () => 176,
+    overscan: 8,
+  })
+
+  useLayoutEffect(() => {
+    scrollSignatureRef.current = scrollSignature
+  }, [scrollSignature])
 
   // saveCurrentScroll 使用 element 参数保存当前聊天页滚动位置。
   const saveCurrentScroll = useCallback(
@@ -161,85 +285,34 @@ export function MessageLog({
       onScroll={(event) => saveCurrentScroll(event.currentTarget)}
     >
       {chat.messages.length > 0 ? (
-        <div className="mx-auto flex max-w-4xl flex-col gap-3">
-          {chat.messages.map((message) => {
-            const timePosition = message.role === 'user' ? '-top-5 right-0' : '-top-5 left-0'
-            const plan = chat.plan?.messageId === message.id ? chat.plan : null
-            const messageParts = messagePartsForRender(message)
-            return (
-              <article
-                key={message.id}
-                className={`message-card message-${message.role} group/message relative mt-5 rounded-md border p-4 ${
-                  message.role === 'user'
-                    ? 'mb-8 border-[var(--agenthub-secondary)] bg-[var(--agenthub-primary-container)]'
-                    : message.role === 'system'
-                      ? 'border-[var(--agenthub-danger)] bg-[var(--agenthub-danger-muted)]'
-                      : 'border-transparent bg-transparent'
-                }`}
-              >
-                <span data-testid="message-time" className={`absolute ${timePosition} inline-flex items-center gap-2 text-xs text-[var(--agenthub-muted)]`}>
-                  {message.status === 'streaming' ? <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--agenthub-warning)]" /> : null}
-                  {message.status === 'stopped' ? '已停止' : message.status === 'error' ? '失败' : formatTime(message.updatedAt)}
-                </span>
-                {message.role === 'assistant' ? (
-                  <div className="space-y-2">
-                    {plan ? (
-                      <>
-                        {messageParts.filter((part) => part.type === 'tool_call').map(renderMessagePart)}
-                        <PlanCard plan={plan} projectRoot={projectRoot} onExecute={onExecutePlan} />
-                      </>
-                    ) : (
-                      messageParts.map(renderMessagePart)
-                    )}
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <pre className="whitespace-pre-wrap break-words font-sans text-base leading-7 text-[var(--agenthub-foreground)]">{message.text}</pre>
-                    {message.images?.length ? (
-                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                        {message.images.map((image) => (
-                          <figure
-                            key={image.id}
-                            data-testid="message-image"
-                            className="overflow-hidden rounded-md border border-[var(--agenthub-outline)] bg-[var(--agenthub-surface-0)]"
-                          >
-                            <img src={`data:${image.mimeType};base64,${image.data}`} alt={image.fileName} className="h-28 w-full object-cover" />
-                            <figcaption className="truncate px-2 py-1 text-xs text-[var(--agenthub-muted)]">{image.fileName}</figcaption>
-                          </figure>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                )}
-                {message.role === 'user' ? (
-                  <button
-                    data-testid="user-copy-button"
-                    type="button"
-                    onClick={() => onCopyMessage(message)}
-                    className="absolute -bottom-8 right-0 inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-[var(--agenthub-muted)] opacity-0 transition hover:bg-[var(--agenthub-surface-2)] hover:text-[var(--agenthub-foreground)] focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-[var(--agenthub-primary)]/20 group-hover/message:opacity-100"
-                    aria-label="复制消息"
-                    title="复制"
-                  >
-                    {copiedMessageId === message.id ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                  </button>
-                ) : null}
-                {message.role === 'assistant' ? (
-                  <div className="mt-2 flex justify-start">
-                    <button
-                      data-testid="assistant-copy-button"
-                      type="button"
-                      onClick={() => onCopyMessage(message)}
-                      className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-[var(--agenthub-muted)] transition hover:bg-[var(--agenthub-surface-2)] hover:text-[var(--agenthub-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--agenthub-primary)]/20"
-                      aria-label="复制回复"
-                      title="复制"
-                    >
-                      {copiedMessageId === message.id ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                    </button>
-                  </div>
-                ) : null}
-              </article>
-            )
-          })}
+        <div className="mx-auto max-w-4xl">
+          <div className="relative w-full" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
+            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+              const message = chat.messages[virtualRow.index]
+              if (!message) {
+                return null
+              }
+              return (
+                <div
+                  key={message.id}
+                  data-index={virtualRow.index}
+                  ref={rowVirtualizer.measureElement}
+                  className="absolute left-0 top-0 w-full"
+                  style={{ transform: `translateY(${virtualRow.start}px)` }}
+                >
+                  <MessageRow
+                    message={message}
+                    plan={chat.plan?.messageId === message.id ? chat.plan : null}
+                    projectRoot={projectRoot}
+                    copiedMessageId={copiedMessageId}
+                    onCopyMessage={onCopyMessage}
+                    onExecutePlan={onExecutePlan}
+                    onRespondUserInput={onRespondUserInput}
+                  />
+                </div>
+              )
+            })}
+          </div>
         </div>
       ) : null}
     </div>
