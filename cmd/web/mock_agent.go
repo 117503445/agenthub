@@ -56,7 +56,7 @@ func runMockAgentCLIIfRequested(args []string) bool {
 	mode := mockAgentMode(args)
 	switch mode {
 	case "mock-codex":
-		os.Exit(runMockCodexCLI(os.Args[1:], os.Stdout, os.Stderr))
+		os.Exit(runMockCodexCLI(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 	case "mock-claude":
 		os.Exit(runMockClaudeCLI(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 	default:
@@ -77,8 +77,28 @@ func mockAgentMode(args []string) string {
 	return ""
 }
 
-// runMockCodexCLI 使用 args、stdout 和 stderr 参数运行 Codex JSONL mock。
-func runMockCodexCLI(args []string, stdout io.Writer, stderr io.Writer) int {
+// mockCodexAppRPCMessage 表示 mock Codex app-server JSON-RPC 消息。
+type mockCodexAppRPCMessage struct {
+	ID     any             `json:"id,omitempty"`     // ID 表示请求或响应标识。
+	Method string          `json:"method,omitempty"` // Method 表示 JSON-RPC 方法名。
+	Params json.RawMessage `json:"params,omitempty"` // Params 表示请求参数。
+	Result json.RawMessage `json:"result,omitempty"` // Result 表示响应结果。
+	Error  any             `json:"error,omitempty"`  // Error 表示响应错误。
+}
+
+// mockCodexAppPendingTurn 表示等待用户输入响应的 mock Codex turn。
+type mockCodexAppPendingTurn struct {
+	ThreadID string // ThreadID 表示 Codex thread 标识。
+	TurnID   string // TurnID 表示 Codex turn 标识。
+	Model    string // Model 表示本轮模型。
+	Prompt   string // Prompt 表示本轮用户输入。
+}
+
+// runMockCodexCLI 使用 args、stdin、stdout 和 stderr 参数运行 Codex mock。
+func runMockCodexCLI(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
+	if mockCodexAppServerArgs(args) {
+		return runMockCodexAppServerCLI(args, stdin, stdout, stderr)
+	}
 	model := mockCLIModelFromArgs(args)
 	if mockCodexDashPromptWithoutSeparator(args) {
 		_, _ = fmt.Fprintf(stderr, "error: unexpected argument %q found\n", mockCLIRawLastArg(args))
@@ -136,6 +156,232 @@ func runMockCodexCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 	// 让父进程先消费 stdout，避免极快退出时先收到进程完成回调。
 	time.Sleep(300 * time.Millisecond)
 	return 0
+}
+
+// mockCodexAppServerArgs 使用 args 参数判断是否启动 app-server mock。
+func mockCodexAppServerArgs(args []string) bool {
+	for _, arg := range args {
+		if arg == "app-server" {
+			return true
+		}
+	}
+	return false
+}
+
+// runMockCodexAppServerCLI 使用 args、stdin、stdout 和 stderr 参数运行 Codex app-server mock。
+func runMockCodexAppServerCLI(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
+	writer := bufio.NewWriter(stdout)
+	scanner := bufio.NewScanner(stdin)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	threadID := fmt.Sprintf("mock-codex-app-thread-%d", time.Now().UnixNano())
+	pendingTurns := map[string]mockCodexAppPendingTurn{}
+	for scanner.Scan() {
+		var message mockCodexAppRPCMessage
+		decoder := json.NewDecoder(bytes.NewReader(scanner.Bytes()))
+		decoder.UseNumber()
+		if err := decoder.Decode(&message); err != nil {
+			continue
+		}
+		if message.Method == "" && message.ID != nil {
+			mockCodexAppHandleClientResponse(writer, pendingTurns, message)
+			_ = writer.Flush()
+			continue
+		}
+		switch message.Method {
+		case "initialize":
+			writeMockCodexAppResponse(writer, message.ID, map[string]any{
+				"userAgent":      "mock-codex-app-server",
+				"codexHome":      ".",
+				"platformFamily": "unix",
+				"platformOs":     "linux",
+			})
+		case "initialized":
+			// initialized 是客户端通知，不需要响应。
+		case "thread/start":
+			writeMockCodexAppResponse(writer, message.ID, map[string]any{
+				"thread": map[string]any{"id": threadID},
+			})
+		case "turn/start":
+			mockCodexAppStartTurn(writer, pendingTurns, threadID, message)
+		default:
+			if message.ID != nil {
+				writeMockCodexAppError(writer, message.ID, -32601, "mock Codex app-server 不支持该方法")
+			}
+		}
+		_ = writer.Flush()
+	}
+	if err := scanner.Err(); err != nil {
+		_, _ = fmt.Fprintf(stderr, "mock codex app-server stdin failed: %v\n", err)
+		return 1
+	}
+	_ = args
+	return 0
+}
+
+// mockCodexAppStartTurn 使用 writer、pendingTurns、threadID 和 message 参数启动一个 mock turn。
+func mockCodexAppStartTurn(writer *bufio.Writer, pendingTurns map[string]mockCodexAppPendingTurn, threadID string, message mockCodexAppRPCMessage) {
+	model, prompt := mockCodexAppTurnInput(message.Params)
+	turnID := fmt.Sprintf("mock-codex-app-turn-%d", time.Now().UnixNano())
+	writeMockCodexAppResponse(writer, message.ID, map[string]any{
+		"turn": map[string]any{
+			"id":     turnID,
+			"status": "inProgress",
+		},
+	})
+	if strings.Contains(prompt, "MOCK_AGENT_ERROR") {
+		writeMockCodexAppNotify(writer, "turn/completed", map[string]any{
+			"threadId": threadID,
+			"turn": map[string]any{
+				"id":     turnID,
+				"status": "failed",
+				"error":  map[string]string{"message": "mock codex error: forced failure"},
+			},
+		})
+		return
+	}
+	if strings.Contains(prompt, "request_user_input") {
+		requestID := fmt.Sprintf("mock-request-user-input-%d", time.Now().UnixNano())
+		pendingTurns[requestID] = mockCodexAppPendingTurn{
+			ThreadID: threadID,
+			TurnID:   turnID,
+			Model:    model,
+			Prompt:   prompt,
+		}
+		writeMockCodexAppRequest(writer, requestID, "item/tool/requestUserInput", map[string]any{
+			"threadId": threadID,
+			"turnId":   turnID,
+			"itemId":   "call_mock_user_input",
+			"questions": []map[string]any{{
+				"id":       "confirm_path",
+				"header":   "Confirm",
+				"question": "Proceed with the plan?",
+				"options": []map[string]string{{
+					"label":       "Yes (Recommended)",
+					"description": "Continue generating the mock plan.",
+				}, {
+					"label":       "No",
+					"description": "Stop this mock plan turn.",
+				}},
+			}},
+		})
+		return
+	}
+	mockCodexAppFinishTurn(writer, mockCodexAppPendingTurn{
+		ThreadID: threadID,
+		TurnID:   turnID,
+		Model:    model,
+		Prompt:   prompt,
+	})
+}
+
+// mockCodexAppHandleClientResponse 使用 writer、pendingTurns 和 message 参数处理客户端响应。
+func mockCodexAppHandleClientResponse(writer *bufio.Writer, pendingTurns map[string]mockCodexAppPendingTurn, message mockCodexAppRPCMessage) {
+	key := mockCodexAppIDKey(message.ID)
+	pending, ok := pendingTurns[key]
+	if !ok {
+		return
+	}
+	delete(pendingTurns, key)
+	writeMockCodexAppNotify(writer, "serverRequest/resolved", map[string]any{
+		"threadId":  pending.ThreadID,
+		"requestId": message.ID,
+	})
+	mockCodexAppFinishTurn(writer, pending)
+}
+
+// mockCodexAppFinishTurn 使用 writer 和 pending 参数输出 mock plan 并完成 turn。
+func mockCodexAppFinishTurn(writer *bufio.Writer, pending mockCodexAppPendingTurn) {
+	text, err := requestMockCodexText(pending.Model, mockPlanModePrompt(pending.Prompt))
+	if err != nil {
+		writeMockCodexAppNotify(writer, "turn/completed", map[string]any{
+			"threadId": pending.ThreadID,
+			"turn": map[string]any{
+				"id":     pending.TurnID,
+				"status": "failed",
+				"error":  map[string]string{"message": err.Error()},
+			},
+		})
+		return
+	}
+	writeMockCodexAppNotify(writer, "item/completed", map[string]any{
+		"threadId": pending.ThreadID,
+		"turnId":   pending.TurnID,
+		"item": map[string]any{
+			"id":   "mock-codex-app-plan",
+			"type": "plan",
+			"text": text,
+		},
+	})
+	writeMockCodexAppNotify(writer, "turn/completed", map[string]any{
+		"threadId": pending.ThreadID,
+		"turn": map[string]any{
+			"id":     pending.TurnID,
+			"status": "completed",
+		},
+	})
+}
+
+// mockCodexAppTurnInput 使用 params 参数提取模型和用户输入。
+func mockCodexAppTurnInput(params json.RawMessage) (string, string) {
+	var payload struct {
+		Model string `json:"model"` // Model 表示本轮模型。
+		Input []struct {
+			Type string `json:"type"` // Type 表示输入项类型。
+			Text string `json:"text"` // Text 表示文本输入。
+		} `json:"input"` // Input 表示输入项列表。
+	}
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return "", ""
+	}
+	parts := make([]string, 0, len(payload.Input))
+	for _, item := range payload.Input {
+		if item.Type == "text" && strings.TrimSpace(item.Text) != "" {
+			parts = append(parts, item.Text)
+		}
+	}
+	return payload.Model, strings.Join(parts, "\n")
+}
+
+// writeMockCodexAppRequest 使用 writer、id、method 和 params 参数输出 app-server 请求。
+func writeMockCodexAppRequest(writer *bufio.Writer, id any, method string, params any) {
+	writeMockJSONLine(writer, map[string]any{"id": id, "method": method, "params": params})
+}
+
+// writeMockCodexAppNotify 使用 writer、method 和 params 参数输出 app-server 通知。
+func writeMockCodexAppNotify(writer *bufio.Writer, method string, params any) {
+	writeMockJSONLine(writer, map[string]any{"method": method, "params": params})
+}
+
+// writeMockCodexAppResponse 使用 writer、id 和 result 参数输出 app-server 响应。
+func writeMockCodexAppResponse(writer *bufio.Writer, id any, result any) {
+	writeMockJSONLine(writer, map[string]any{"id": id, "result": result})
+}
+
+// writeMockCodexAppError 使用 writer、id、code 和 message 参数输出 app-server 错误。
+func writeMockCodexAppError(writer *bufio.Writer, id any, code int, message string) {
+	writeMockJSONLine(writer, map[string]any{
+		"id": id,
+		"error": map[string]any{
+			"code":    code,
+			"message": message,
+		},
+	})
+}
+
+// mockCodexAppIDKey 使用 id 参数生成 pending map key。
+func mockCodexAppIDKey(id any) string {
+	switch typed := id.(type) {
+	case nil:
+		return ""
+	case string:
+		return typed
+	case json.Number:
+		return typed.String()
+	case float64:
+		return fmt.Sprintf("%.0f", typed)
+	default:
+		return fmt.Sprint(typed)
+	}
 }
 
 // mockCodexDashPromptWithoutSeparator 使用 args 参数模拟 Codex resume 对 dash prompt 的参数校验。

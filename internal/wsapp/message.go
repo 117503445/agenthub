@@ -69,6 +69,13 @@ type ChatPlanExecutePayload struct {
 	PlanID string `json:"planId"` // PlanID 表示要执行的 plan 标识。
 }
 
+// ChatUserInputRespondPayload 表示回答 agent 用户输入请求的参数。
+type ChatUserInputRespondPayload struct {
+	ChatID     string              `json:"chatId"`     // ChatID 表示目标聊天页标识。
+	ToolCallID string              `json:"toolCallId"` // ToolCallID 表示 request_user_input 工具调用标识。
+	Answers    map[string][]string `json:"answers"`    // Answers 表示按问题 ID 提交的答案列表。
+}
+
 // MessageImagePayload 表示浏览器发送的图片附件。
 type MessageImagePayload struct {
 	ID       string `json:"id"`       // ID 表示前端生成的附件标识。

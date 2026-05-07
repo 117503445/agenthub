@@ -99,6 +99,11 @@ type AgentRuntime struct {
 	currentMessageID     string
 	emittedAssistantText string
 	callbacks            AgentRunCallbacks
+	appServer            bool
+	appNextRequestID     int64
+	appPendingResponses  map[string]chan codexAppRPCMessage
+	appPendingUserInputs map[string]codexAppPendingUserInput
+	appWriteMu           sync.Mutex
 }
 
 // NewAgentManager 使用 ctx 和 config 参数创建 AgentManager。
@@ -223,6 +228,10 @@ func (m *AgentManager) sendClaude(ctx context.Context, input AgentRunInput) erro
 
 // sendCodex 使用 ctx 和 input 参数启动 Codex CLI 单轮运行。
 func (m *AgentManager) sendCodex(ctx context.Context, input AgentRunInput) error {
+	if input.PlanMode {
+		return m.sendCodexApp(ctx, input)
+	}
+	m.stopIdleCodexAppRuntime(input.ChatID)
 	runtime, err := m.registerEphemeralRuntime(input)
 	if err != nil {
 		return err
@@ -343,6 +352,9 @@ func (m *AgentManager) removeRuntime(chatID string, runtime *AgentRuntime) {
 func (r *AgentRuntime) isAlive() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.appServer {
+		return r.cmd != nil && r.cmd.Process != nil && r.cmd.ProcessState == nil
+	}
 	if r.profile.Type == AgentProfileTypeCodex {
 		return r.running
 	}

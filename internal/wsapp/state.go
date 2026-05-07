@@ -99,13 +99,39 @@ type GitInfo struct {
 
 // ToolCall 表示 assistant 消息中的一次工具调用。
 type ToolCall struct {
-	ID        string    `json:"id"`               // ID 表示工具调用唯一标识。
-	Name      string    `json:"name"`             // Name 表示工具名称。
-	Status    string    `json:"status"`           // Status 表示工具调用状态。
-	Input     string    `json:"input,omitempty"`  // Input 表示工具入参摘要。
-	Output    string    `json:"output,omitempty"` // Output 表示工具输出摘要。
-	CreatedAt time.Time `json:"createdAt"`        // CreatedAt 表示创建时间。
-	UpdatedAt time.Time `json:"updatedAt"`        // UpdatedAt 表示更新时间。
+	ID               string            `json:"id"`                         // ID 表示工具调用唯一标识。
+	Name             string            `json:"name"`                       // Name 表示工具名称。
+	Status           string            `json:"status"`                     // Status 表示工具调用状态。
+	Input            string            `json:"input,omitempty"`            // Input 表示工具入参摘要。
+	Output           string            `json:"output,omitempty"`           // Output 表示工具输出摘要。
+	UserInputRequest *UserInputRequest `json:"userInputRequest,omitempty"` // UserInputRequest 表示 agent 请求用户补充输入的问题。
+	CreatedAt        time.Time         `json:"createdAt"`                  // CreatedAt 表示创建时间。
+	UpdatedAt        time.Time         `json:"updatedAt"`                  // UpdatedAt 表示更新时间。
+}
+
+// UserInputOption 表示 request_user_input 问题的一个可选答案。
+type UserInputOption struct {
+	Label       string `json:"label"`                 // Label 表示选项文案。
+	Description string `json:"description,omitempty"` // Description 表示选项说明。
+}
+
+// UserInputQuestion 表示 request_user_input 的一个问题。
+type UserInputQuestion struct {
+	ID       string            `json:"id"`                 // ID 表示问题标识。
+	Header   string            `json:"header"`             // Header 表示问题短标题。
+	Question string            `json:"question"`           // Question 表示问题正文。
+	Options  []UserInputOption `json:"options,omitempty"`  // Options 表示可选答案列表。
+	IsOther  bool              `json:"isOther,omitempty"`  // IsOther 表示是否允许用户填写其他答案。
+	IsSecret bool              `json:"isSecret,omitempty"` // IsSecret 表示答案是否应作为敏感信息处理。
+}
+
+// UserInputRequest 表示 agent 发起的一次用户输入请求。
+type UserInputRequest struct {
+	ID        string              `json:"id"`                  // ID 表示请求标识，通常等于工具调用 ID。
+	Questions []UserInputQuestion `json:"questions"`           // Questions 表示本次请求包含的问题。
+	Answers   map[string][]string `json:"answers,omitempty"`   // Answers 表示按问题 ID 记录的用户答案。
+	CreatedAt time.Time           `json:"createdAt,omitempty"` // CreatedAt 表示创建时间。
+	UpdatedAt time.Time           `json:"updatedAt,omitempty"` // UpdatedAt 表示更新时间。
 }
 
 // ContextWindowUsage 表示聊天页上下文窗口使用情况。
@@ -953,6 +979,10 @@ func (s *Store) UpsertToolCall(chatID string, messageID string, tool ToolCall) (
 				existing.Status = firstNonEmpty(tool.Status, existing.Status)
 				existing.Input = firstNonEmpty(tool.Input, existing.Input)
 				existing.Output = firstNonEmpty(tool.Output, existing.Output)
+				if tool.UserInputRequest != nil {
+					request := cloneToolCall(tool).UserInputRequest
+					existing.UserInputRequest = request
+				}
 				existing.UpdatedAt = now
 				mergedTool = *existing
 				updated = true
@@ -1358,10 +1388,58 @@ func cloneChatMessages(messages []ChatMessage) []ChatMessage {
 
 // cloneChatMessage 使用 message 参数创建不会共享工具调用切片的副本。
 func cloneChatMessage(message ChatMessage) ChatMessage {
-	message.ToolCalls = append([]ToolCall(nil), message.ToolCalls...)
+	message.ToolCalls = cloneToolCalls(message.ToolCalls)
 	message.Parts = cloneMessageParts(message.Parts)
 	message.Images = append([]MessageImage(nil), message.Images...)
 	return message
+}
+
+// cloneToolCalls 使用 tools 参数创建不会共享用户输入请求指针的工具调用副本。
+func cloneToolCalls(tools []ToolCall) []ToolCall {
+	if len(tools) == 0 {
+		return nil
+	}
+	result := make([]ToolCall, 0, len(tools))
+	for _, tool := range tools {
+		result = append(result, cloneToolCall(tool))
+	}
+	return result
+}
+
+// cloneToolCall 使用 tool 参数创建不会共享用户输入请求的工具调用副本。
+func cloneToolCall(tool ToolCall) ToolCall {
+	if tool.UserInputRequest != nil {
+		request := *tool.UserInputRequest
+		request.Questions = cloneUserInputQuestions(request.Questions)
+		request.Answers = cloneStringListMap(request.Answers)
+		tool.UserInputRequest = &request
+	}
+	return tool
+}
+
+// cloneUserInputQuestions 使用 questions 参数创建不会共享选项切片的问题副本。
+func cloneUserInputQuestions(questions []UserInputQuestion) []UserInputQuestion {
+	if len(questions) == 0 {
+		return nil
+	}
+	result := make([]UserInputQuestion, 0, len(questions))
+	for _, question := range questions {
+		question.Options = append([]UserInputOption(nil), question.Options...)
+		result = append(result, question)
+	}
+	return result
+}
+
+// cloneStringListMap 使用 values 参数创建不会共享字符串切片的 map 副本。
+func cloneStringListMap(values map[string][]string) map[string][]string {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make(map[string][]string, len(values))
+	for key, list := range values {
+		result[key] = append([]string(nil), list...)
+	}
+	return result
 }
 
 // cloneMessageParts 使用 parts 参数创建不会共享工具调用指针的片段副本。
@@ -1372,7 +1450,7 @@ func cloneMessageParts(parts []MessagePart) []MessagePart {
 	result := make([]MessagePart, 0, len(parts))
 	for _, part := range parts {
 		if part.ToolCall != nil {
-			tool := *part.ToolCall
+			tool := cloneToolCall(*part.ToolCall)
 			part.ToolCall = &tool
 		}
 		result = append(result, part)

@@ -50,6 +50,7 @@ import type {
   ProjectDeletedPayload,
   ProjectsReorderedPayload,
   SnapshotPayload,
+  ToolCall,
 } from './types'
 
 const minimumSendPendingMs = 800
@@ -1241,6 +1242,18 @@ function App() {
     sendClientMessage(wsRef.current, 'chat.plan.execute', { chatId: selectedChat.id, planId: plan.id })
   }
 
+  // respondUserInput 使用 toolCall 和 answers 参数提交 agent 用户输入请求答案。
+  const respondUserInput = (toolCall: ToolCall, answers: Record<string, string[]>) => {
+    if (!selectedChat) {
+      return
+    }
+    sendClientMessage(wsRef.current, 'chat.user_input.respond', {
+      chatId: selectedChat.id,
+      toolCallId: toolCall.id,
+      answers,
+    })
+  }
+
   // refreshAgentSkills 请求后端重新扫描最新 skills。
   const refreshAgentSkills = () => {
     sendClientMessage(wsRef.current, 'agent.skills.refresh')
@@ -1410,6 +1423,7 @@ function App() {
             onClearChatIndicator={clearChatIndicator}
             onCopyMessage={(message) => void copyMessageText(message)}
             onExecutePlan={executePlan}
+            onRespondUserInput={respondUserInput}
             onReadChatScrollMemory={readChatScrollMemory}
             onSaveChatScrollMemory={saveChatScrollMemory}
             onComposerValueChange={updateSelectedComposerValue}

@@ -144,10 +144,13 @@ func registeredCases() map[string]E2ECase {
 			"AGENTHUB_PROFILE_E2E_UNSET":  "backend-unset-value",
 			"MOCK_AGENT":                  "1",
 		}},
-		"case_material_theme":           {Name: "case_material_theme", Run: runMaterialThemeCase},
-		"case_project_chat_tab_memory":  {Name: "case_project_chat_tab_memory", Run: runProjectChatTabMemoryCase},
-		"case_project_icon":             {Name: "case_project_icon", Run: runProjectIconCase},
-		"case_project_reorder":          {Name: "case_project_reorder", Run: runProjectReorderCase},
+		"case_material_theme":          {Name: "case_material_theme", Run: runMaterialThemeCase},
+		"case_project_chat_tab_memory": {Name: "case_project_chat_tab_memory", Run: runProjectChatTabMemoryCase},
+		"case_project_icon":            {Name: "case_project_icon", Run: runProjectIconCase},
+		"case_project_reorder":         {Name: "case_project_reorder", Run: runProjectReorderCase},
+		"case_plan_request_user_input": {Name: "case_plan_request_user_input", Run: runPlanRequestUserInputCase, Env: map[string]string{
+			"MOCK_AGENT": "1",
+		}},
 		"case_settings_backend_version": {Name: "case_settings_backend_version", Run: runSettingsBackendVersionCase},
 		"case_skill_command":            {Name: "case_skill_command", Run: runSkillCommandCase},
 		"case_token_auth": {Name: "case_token_auth", Run: runTokenAuthCase, Env: map[string]string{

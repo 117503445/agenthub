@@ -426,6 +426,13 @@ func (s *Server) handle(ctx context.Context, subscriberID string, outbound chan 
 		}
 		s.setSubscriberActiveChat(subscriberID, payload.ChatID)
 		return s.startPlanExecution(ctx, payload.ChatID, payload.PlanID)
+	case "chat.user_input.respond":
+		var payload ChatUserInputRespondPayload
+		if err := decodePayload(msg, &payload); err != nil {
+			return err
+		}
+		s.setSubscriberActiveChat(subscriberID, payload.ChatID)
+		return s.agents.RespondUserInput(payload.ChatID, payload.ToolCallID, payload.Answers)
 	case "chat.stop":
 		var payload ChatStopPayload
 		if err := decodePayload(msg, &payload); err != nil {

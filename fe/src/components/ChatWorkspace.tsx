@@ -14,6 +14,7 @@ import type {
   ChatMessage,
   ChatScrollMemory,
   ChatTerminalIndicator,
+  ToolCall,
   ComposerImageAttachment,
   ConnectionState,
   PlanApproval,
@@ -84,6 +85,8 @@ interface ChatWorkspaceProps {
   onCopyMessage: (message: ChatMessage) => void
   /** onExecutePlan 使用 plan 参数执行已确认 plan。 */
   onExecutePlan: (plan: PlanApproval) => void
+  /** onRespondUserInput 使用 toolCall 和 answers 参数提交 agent 用户输入请求。 */
+  onRespondUserInput: (toolCall: ToolCall, answers: Record<string, string[]>) => void
   /** onReadChatScrollMemory 使用 chatId 参数读取聊天页滚动位置。 */
   onReadChatScrollMemory: (chatId: string) => ChatScrollMemory | undefined
   /** onSaveChatScrollMemory 使用 chatId 和 memory 参数保存聊天页滚动位置。 */
@@ -139,6 +142,7 @@ export function ChatWorkspace({
   onClearChatIndicator,
   onCopyMessage,
   onExecutePlan,
+  onRespondUserInput,
   onReadChatScrollMemory,
   onSaveChatScrollMemory,
   onComposerValueChange,
@@ -247,6 +251,7 @@ export function ChatWorkspace({
               scrollToBottomSignal={scrollToBottomSignal}
               onCopyMessage={onCopyMessage}
               onExecutePlan={onExecutePlan}
+              onRespondUserInput={onRespondUserInput}
               onReadScrollMemory={onReadChatScrollMemory}
               onSaveScrollMemory={onSaveChatScrollMemory}
             />

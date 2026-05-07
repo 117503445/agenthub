@@ -185,10 +185,47 @@ export interface ToolCall {
   input?: string
   /** output 表示工具输出摘要。 */
   output?: string
+  /** userInputRequest 表示 agent 请求用户输入的问题。 */
+  userInputRequest?: UserInputRequest
   /** createdAt 表示创建时间。 */
   createdAt: string
   /** updatedAt 表示更新时间。 */
   updatedAt: string
+}
+
+export interface UserInputOption {
+  /** label 表示选项文案。 */
+  label: string
+  /** description 表示选项说明。 */
+  description?: string
+}
+
+export interface UserInputQuestion {
+  /** id 表示问题标识。 */
+  id: string
+  /** header 表示问题短标题。 */
+  header: string
+  /** question 表示问题正文。 */
+  question: string
+  /** options 表示可选答案列表。 */
+  options?: UserInputOption[]
+  /** isOther 表示是否允许用户填写其他答案。 */
+  isOther?: boolean
+  /** isSecret 表示答案是否应作为敏感信息处理。 */
+  isSecret?: boolean
+}
+
+export interface UserInputRequest {
+  /** id 表示请求标识。 */
+  id: string
+  /** questions 表示本次请求包含的问题。 */
+  questions: UserInputQuestion[]
+  /** answers 表示按问题 ID 记录的用户答案。 */
+  answers?: Record<string, string[]>
+  /** createdAt 表示创建时间。 */
+  createdAt?: string
+  /** updatedAt 表示更新时间。 */
+  updatedAt?: string
 }
 
 export interface MessagePart {

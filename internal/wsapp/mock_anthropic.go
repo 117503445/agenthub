@@ -123,6 +123,10 @@ func ServeMockOpenAIResponses(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if request.Stream {
+		if mockOpenAIShouldRequestUserInput(prompt, request.Input, request.Tools, planStage) {
+			serveMockOpenAIRequestUserInputStream(w, r, model)
+			return
+		}
 		if mockOpenAIShouldCallTool(request.Input, request.Tools, planStage) {
 			serveMockOpenAIToolCallStream(w, r, model)
 			return
@@ -217,6 +221,52 @@ func serveMockOpenAIToolCallStream(w http.ResponseWriter, r *http.Request, model
 	})
 }
 
+// serveMockOpenAIRequestUserInputStream 使用 w、r 和 model 参数返回一次 request_user_input 工具调用。
+func serveMockOpenAIRequestUserInputStream(w http.ResponseWriter, r *http.Request, model string) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "stream unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	responseID := "resp_mock_user_input"
+	callID := "call_mock_user_input"
+	arguments := `{"questions":[{"id":"confirm_path","header":"Confirm","question":"Proceed with the plan?","options":[{"label":"Yes (Recommended)","description":"Continue the current plan."},{"label":"No","description":"Stop and revisit the approach."}]}]}`
+	writeSSE := func(event string, payload any) bool {
+		data, err := json.Marshal(payload)
+		if err != nil {
+			log.Ctx(r.Context()).Error().Err(err).Msg("编码 OpenAI mock request_user_input SSE 失败")
+			return false
+		}
+		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
+	if !writeSSE("response.created", map[string]any{
+		"type":     "response.created",
+		"response": map[string]any{"id": responseID},
+	}) {
+		return
+	}
+	toolItem := mockOpenAIFunctionCallItem("fc_mock_user_input", callID, "request_user_input", arguments, "completed")
+	if !writeSSE("response.output_item.done", map[string]any{
+		"type": "response.output_item.done",
+		"item": toolItem,
+	}) {
+		return
+	}
+	_ = writeSSE("response.completed", map[string]any{
+		"type":     "response.completed",
+		"response": mockOpenAIBaseResponse(responseID, model, "completed", []any{toolItem}),
+	})
+}
+
 // mockOpenAIToolNames 使用 tools 参数提取工具名称列表。
 func mockOpenAIToolNames(tools []map[string]any) []string {
 	names := make([]string, 0, len(tools))
@@ -227,6 +277,25 @@ func mockOpenAIToolNames(tools []map[string]any) []string {
 		}
 	}
 	return names
+}
+
+// mockOpenAIShouldRequestUserInput 使用 prompt、input、tools 和 planStage 参数判断是否需要返回用户输入请求。
+func mockOpenAIShouldRequestUserInput(prompt string, input any, tools []map[string]any, planStage mockPlanStage) bool {
+	if planStage != mockPlanStageDraft && planStage != mockPlanStageRevise {
+		return false
+	}
+	if !strings.Contains(strings.ToLower(prompt), "request_user_input") {
+		return false
+	}
+	if mockOpenAIHasFunctionOutput(input) {
+		return false
+	}
+	for _, name := range mockOpenAIToolNames(tools) {
+		if name == "request_user_input" {
+			return true
+		}
+	}
+	return false
 }
 
 // mockOpenAIShouldCallTool 使用 input、tools 和 planStage 参数判断是否需要先返回工具调用。

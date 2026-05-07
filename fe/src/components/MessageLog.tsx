@@ -2,8 +2,9 @@ import { useCallback, useLayoutEffect, useMemo, useRef } from 'react'
 import { Check, Copy, Loader2, Wrench } from 'lucide-react'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { PlanCard } from './PlanCard'
+import { RequestUserInputCard } from './RequestUserInputCard'
 import { formatTime, messagePartsForRender, toolCommandTitle } from '../lib/chat'
-import type { Chat, ChatMessage, ChatScrollMemory, PlanApproval } from '../types'
+import type { Chat, ChatMessage, ChatScrollMemory, MessagePart, PlanApproval, ToolCall } from '../types'
 
 interface MessageLogProps {
   /** chat 表示当前聊天页。 */
@@ -18,6 +19,8 @@ interface MessageLogProps {
   onCopyMessage: (message: ChatMessage) => void
   /** onExecutePlan 使用 plan 参数执行已确认 plan。 */
   onExecutePlan: (plan: PlanApproval) => void
+  /** onRespondUserInput 使用 toolCall 和 answers 参数提交 agent 用户输入请求。 */
+  onRespondUserInput: (toolCall: ToolCall, answers: Record<string, string[]>) => void
   /** onReadScrollMemory 使用 chatId 参数读取聊天页滚动位置。 */
   onReadScrollMemory: (chatId: string) => ChatScrollMemory | undefined
   /** onSaveScrollMemory 使用 chatId 和 memory 参数保存聊天页滚动位置。 */
@@ -57,6 +60,7 @@ export function MessageLog({
   scrollToBottomSignal,
   onCopyMessage,
   onExecutePlan,
+  onRespondUserInput,
   onReadScrollMemory,
   onSaveScrollMemory,
 }: MessageLogProps) {
@@ -67,6 +71,36 @@ export function MessageLog({
   useLayoutEffect(() => {
     scrollSignatureRef.current = scrollSignature
   }, [scrollSignature])
+
+  // renderMessagePart 使用 part 参数渲染 assistant 消息片段。
+  const renderMessagePart = (part: MessagePart) =>
+    part.type === 'tool_call' && part.toolCall?.name === 'request_user_input' && part.toolCall.userInputRequest ? (
+      <RequestUserInputCard key={part.id} toolCall={part.toolCall} onRespond={onRespondUserInput} />
+    ) : part.type === 'tool_call' && part.toolCall ? (
+      <details
+        key={part.id}
+        data-testid="tool-call-details"
+        className="rounded-md border border-[var(--agenthub-outline)] bg-[var(--agenthub-surface-1)] px-3 py-2"
+      >
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+          <span className="inline-flex min-w-0 items-center gap-2 text-sm font-medium text-[var(--agenthub-foreground)]">
+            <Wrench className="h-4 w-4 shrink-0 text-[var(--agenthub-muted)]" />
+            <span className="truncate font-mono text-xs">{toolCommandTitle(part.toolCall)}</span>
+          </span>
+          <span className="shrink-0 text-xs text-[var(--agenthub-muted)]">
+            {part.toolCall.status === 'running' ? '运行中' : part.toolCall.status === 'error' ? '失败' : '完成'}
+          </span>
+        </summary>
+        {part.toolCall.input ? <pre className="mt-2 truncate font-mono text-xs text-[var(--agenthub-muted)]">{part.toolCall.input}</pre> : null}
+        {part.toolCall.output ? (
+          <pre data-testid="tool-call-output" className="mt-2 whitespace-pre-wrap break-words font-mono text-xs text-[var(--agenthub-muted)]">
+            {part.toolCall.output}
+          </pre>
+        ) : null}
+      </details>
+    ) : (
+      <MarkdownRenderer key={part.id} text={part.text ?? ''} projectRoot={projectRoot} />
+    )
 
   // saveCurrentScroll 使用 element 参数保存当前聊天页滚动位置。
   const saveCurrentScroll = useCallback(
@@ -130,6 +164,8 @@ export function MessageLog({
         <div className="mx-auto flex max-w-4xl flex-col gap-3">
           {chat.messages.map((message) => {
             const timePosition = message.role === 'user' ? '-top-5 right-0' : '-top-5 left-0'
+            const plan = chat.plan?.messageId === message.id ? chat.plan : null
+            const messageParts = messagePartsForRender(message)
             return (
               <article
                 key={message.id}
@@ -147,36 +183,13 @@ export function MessageLog({
                 </span>
                 {message.role === 'assistant' ? (
                   <div className="space-y-2">
-                    {chat.plan?.messageId === message.id ? (
-                      <PlanCard plan={chat.plan} projectRoot={projectRoot} onExecute={onExecutePlan} />
+                    {plan ? (
+                      <>
+                        {messageParts.filter((part) => part.type === 'tool_call').map(renderMessagePart)}
+                        <PlanCard plan={plan} projectRoot={projectRoot} onExecute={onExecutePlan} />
+                      </>
                     ) : (
-                      messagePartsForRender(message).map((part) =>
-                        part.type === 'tool_call' && part.toolCall ? (
-                          <details
-                            key={part.id}
-                            data-testid="tool-call-details"
-                            className="rounded-md border border-[var(--agenthub-outline)] bg-[var(--agenthub-surface-1)] px-3 py-2"
-                          >
-                            <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
-                              <span className="inline-flex min-w-0 items-center gap-2 text-sm font-medium text-[var(--agenthub-foreground)]">
-                                <Wrench className="h-4 w-4 shrink-0 text-[var(--agenthub-muted)]" />
-                                <span className="truncate font-mono text-xs">{toolCommandTitle(part.toolCall)}</span>
-                              </span>
-                              <span className="shrink-0 text-xs text-[var(--agenthub-muted)]">
-                                {part.toolCall.status === 'running' ? '运行中' : part.toolCall.status === 'error' ? '失败' : '完成'}
-                              </span>
-                            </summary>
-                            {part.toolCall.input ? <pre className="mt-2 truncate font-mono text-xs text-[var(--agenthub-muted)]">{part.toolCall.input}</pre> : null}
-                            {part.toolCall.output ? (
-                              <pre data-testid="tool-call-output" className="mt-2 whitespace-pre-wrap break-words font-mono text-xs text-[var(--agenthub-muted)]">
-                                {part.toolCall.output}
-                              </pre>
-                            ) : null}
-                          </details>
-                        ) : (
-                          <MarkdownRenderer key={part.id} text={part.text ?? ''} projectRoot={projectRoot} />
-                        ),
-                      )
+                      messageParts.map(renderMessagePart)
                     )}
                   </div>
                 ) : (
