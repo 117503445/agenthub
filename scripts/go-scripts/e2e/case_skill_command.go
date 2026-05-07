@@ -97,6 +97,15 @@ func runSkillCommandCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDText(page, "message-log", filepath.Join(".agents", "skills", agentsSkillName, "SKILL.md"), 10*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := expectTestIDText(page, "message-log", "skills 搜索路径", 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDText(page, "message-log", filepath.Join(homeDir, ".claude", "skills"), 10*time.Second); err != nil {
+		return fail(err)
+	}
+	if err := expectTestIDText(page, "message-log", filepath.Join(homeDir, ".agents", "skills"), 10*time.Second); err != nil {
+		return fail(err)
+	}
 	if err := expectSkillTable(page, 10*time.Second); err != nil {
 		return fail(err)
 	}
@@ -104,7 +113,7 @@ func runSkillCommandCase(ctx E2EContext) (success bool) {
 		return fail(err)
 	}
 
-	events = append(events, reportStep("可从 Claude Code 和 Codex 用户 skill 目录发现 SKILL.md；#skills 命令通过本地表格回复，不启动 agent。"))
+	events = append(events, reportStep("可从 Claude Code 和 Codex 用户 skill 目录发现 SKILL.md；#skills 命令通过本地表格和搜索路径回复，不启动 agent。"))
 	return true
 }
 

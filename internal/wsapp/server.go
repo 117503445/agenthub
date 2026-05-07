@@ -432,7 +432,11 @@ func (s *Server) handle(ctx context.Context, subscriberID string, outbound chan 
 			return err
 		}
 		s.setSubscriberActiveChat(subscriberID, payload.ChatID)
-		return s.agents.RespondUserInput(payload.ChatID, payload.ToolCallID, payload.Answers)
+		if err := s.agents.RespondUserInput(payload.ChatID, payload.ToolCallID, payload.Answers); err != nil {
+			return err
+		}
+		s.flushStore(ctx, "user_input")
+		return nil
 	case "chat.stop":
 		var payload ChatStopPayload
 		if err := decodePayload(msg, &payload); err != nil {
@@ -448,8 +452,9 @@ func (s *Server) handle(ctx context.Context, subscriberID string, outbound chan 
 // respondAgentSkillsCommand 使用 ctx、chatID 和 prompt 参数在聊天框本地回复 skills 列表。
 func (s *Server) respondAgentSkillsCommand(ctx context.Context, chatID string, prompt string) error {
 	skills := s.store.AgentSkills()
+	searchPaths := s.store.AgentSkillSearchPaths()
 	s.setLastAgentSkills(skills)
-	response := formatAgentSkillsMarkdown(skills)
+	response := formatAgentSkillsMarkdown(skills, searchPaths)
 	chat, _, assistantMessage, err := s.store.AddLocalAssistantResponse(chatID, prompt, response)
 	if err != nil {
 		return err
@@ -462,7 +467,7 @@ func (s *Server) respondAgentSkillsCommand(ctx context.Context, chatID string, p
 	s.broadcastChatChanged(chat)
 	s.broadcastChatDetailChanged(chatID, chat)
 	s.broadcastToActiveChat(chatID, "chat.message.done", map[string]any{"chatId": chatID, "message": assistantMessage})
-	s.broadcast("agent.status", map[string]any{"chatId": chatID, "status": ChatStatusIdle})
+	s.broadcast("agent.status", map[string]any{"chatId": chatID, "status": ChatStatusIdle, "terminalStatus": "success"})
 	return nil
 }
 
@@ -535,7 +540,8 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string,
 			s.broadcastToActiveChat(chatID, "chat.message.done", map[string]any{"chatId": chatID, "message": message})
 			s.broadcastChatChanged(updatedChat)
 			s.broadcastChatDetailChanged(chatID, updatedChat)
-			s.broadcast("agent.status", map[string]any{"chatId": chatID, "status": ChatStatusIdle})
+			s.broadcast("agent.status", map[string]any{"chatId": chatID, "status": ChatStatusIdle, "terminalStatus": "success"})
+			s.flushStore(ctx, "done")
 		},
 		OnError: func(message string) {
 			deltaCoalescer.Close()
@@ -551,6 +557,7 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string,
 				s.broadcastToActiveChat(chatID, "chat.message.done", map[string]any{"chatId": chatID, "message": systemMessage})
 			}
 			s.broadcast("agent.status", map[string]any{"chatId": chatID, "status": ChatStatusError})
+			s.flushStore(ctx, "error")
 		},
 	}
 
@@ -606,6 +613,19 @@ func (s *Server) stopChatRun(chatID string) {
 	s.broadcastChatChanged(chat)
 	s.broadcastChatDetailChanged(chatID, chat)
 	s.broadcast("agent.status", map[string]any{"chatId": chatID, "status": ChatStatusIdle})
+	s.flushStore(s.ctx, "stop")
+}
+
+// Flush 使用 ctx 参数等待后端延迟持久化写入完成。
+func (s *Server) Flush(ctx context.Context) error {
+	return s.store.Flush(ctx)
+}
+
+// flushStore 使用 ctx 和 reason 参数刷新持久化写入并记录失败日志。
+func (s *Server) flushStore(ctx context.Context, reason string) {
+	if err := s.store.Flush(ctx); err != nil {
+		log.Ctx(ctx).Error().Err(err).Str("reason", reason).Msg("刷新 Store 持久化写入失败")
+	}
 }
 
 // broadcastAgentProfilesChanged 广播 Profile 和兼容 provider 列表变更。
@@ -637,7 +657,7 @@ func (s *Server) agentOptionsConfig() AgentOptionsConfig {
 
 // refreshAgentSkills 使用 ctx 参数刷新 skill 列表，并在列表变化时广播和记录日志。
 func (s *Server) refreshAgentSkills(ctx context.Context) {
-	skills := s.store.AgentSkills()
+	skills := s.store.RefreshAgentSkills()
 	if !s.updateLastAgentSkills(skills) {
 		return
 	}

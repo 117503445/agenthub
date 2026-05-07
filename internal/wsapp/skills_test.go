@@ -59,6 +59,22 @@ func TestLoadAgentSkillOptionsOfficialDirs(t *testing.T) {
 	}
 }
 
+// TestFormatAgentSkillsMarkdownIncludesSearchPaths 验证 #skills 回复会包含搜索路径。
+func TestFormatAgentSkillsMarkdownIncludesSearchPaths(t *testing.T) {
+	markdown := formatAgentSkillsMarkdown([]AgentSkillOption{{
+		ID:          "demo-skill",
+		Label:       "demo-skill",
+		Description: "演示 skill。",
+		Path:        filepath.Join("demo", "SKILL.md"),
+	}}, []string{filepath.Join("demo", ".agents", "skills")})
+	if !strings.Contains(markdown, "## skills 搜索路径") {
+		t.Fatalf("#skills 回复缺少搜索路径标题: %s", markdown)
+	}
+	if !strings.Contains(markdown, filepath.Join("demo", ".agents", "skills")) {
+		t.Fatalf("#skills 回复缺少搜索路径: %s", markdown)
+	}
+}
+
 // mustWriteTestSkill 使用 t、skillsDir、name 和 description 参数写入测试 SKILL.md。
 func mustWriteTestSkill(t *testing.T, skillsDir string, name string, description string) {
 	t.Helper()

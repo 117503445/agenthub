@@ -26,6 +26,12 @@ func newHTTPHandler(ctx context.Context, config webConfig) http.Handler {
 
 // newHTTPHandlerWithError 使用 ctx 和 config 参数创建可返回错误的 HTTP 处理器。
 func newHTTPHandlerWithError(ctx context.Context, config webConfig) (http.Handler, error) {
+	handler, _, err := newHTTPHandlerWithServer(ctx, config)
+	return handler, err
+}
+
+// newHTTPHandlerWithServer 使用 ctx 和 config 参数创建 HTTP 处理器和 WebSocket 服务。
+func newHTTPHandlerWithServer(ctx context.Context, config webConfig) (http.Handler, *wsapp.Server, error) {
 	mux := http.NewServeMux()
 	var wsServer *wsapp.Server
 	var err error
@@ -34,7 +40,7 @@ func newHTTPHandlerWithError(ctx context.Context, config webConfig) (http.Handle
 	} else {
 		wsServer, err = wsapp.NewPersistentServer(ctx, buildinfo.Version(), resolveAgentConfig(config), config.DataDir)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	auth := newTokenAuth(config.Token)
@@ -60,7 +66,7 @@ func newHTTPHandlerWithError(ctx context.Context, config webConfig) (http.Handle
 	})
 	mux.Handle("/", subpathHandler(wsServer, auth, staticHandler()))
 
-	return mux, nil
+	return mux, wsServer, nil
 }
 
 // subpathHandler 使用 wsServer、auth 和 static 参数处理子路径下的前端、鉴权状态与 WebSocket 请求。
@@ -146,10 +152,17 @@ func ListenAndServe(ctx context.Context, config webConfig) error {
 	}
 	defer dataLock.Release()
 
-	handler, err := newHTTPHandlerWithError(ctx, config)
+	handler, wsServer, err := newHTTPHandlerWithServer(ctx, config)
 	if err != nil {
 		return err
 	}
+	defer func() {
+		flushCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := wsServer.Flush(flushCtx); err != nil {
+			log.Ctx(ctx).Error().Err(err).Msg("退出前刷新 Store 持久化失败")
+		}
+	}()
 	listener, err := net.Listen("tcp", ":"+config.Port)
 	if err != nil {
 		log.Ctx(ctx).Error().Err(err).Msg("监听端口失败")

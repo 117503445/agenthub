@@ -1,6 +1,7 @@
 package wsapp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -20,6 +22,8 @@ const (
 	persistedChatDetailsDirName = "chats"
 	// persistedChatDetailSchemaVersion 表示聊天详情文件格式版本。
 	persistedChatDetailSchemaVersion = 1
+	// deferredChatDetailSaveDelay 表示流式详情延迟落盘等待时间。
+	deferredChatDetailSaveDelay = 750 * time.Millisecond
 )
 
 // PersistedStoreState 表示写入 state.json 的后端状态。
@@ -42,9 +46,22 @@ type PersistedChatDetail struct {
 	Messages      []ChatMessage `json:"messages"`       // Messages 表示聊天消息列表。
 }
 
+// PersistedStoreChange 表示一次 Store 提交产生的持久化变更集。
+type PersistedStoreChange struct {
+	State            PersistedStoreState `json:"-"` // State 表示提交后的完整 Store 状态。
+	MetaDirty        bool                `json:"-"` // MetaDirty 表示 state.json 是否需要写入。
+	DirtyChatIDs     []string            `json:"-"` // DirtyChatIDs 表示需要写入详情文件的聊天页标识。
+	DeletedChatIDs   []string            `json:"-"` // DeletedChatIDs 表示需要删除详情文件的聊天页标识。
+	DeferChatDetails bool                `json:"-"` // DeferChatDetails 表示聊天详情是否允许延迟写入。
+}
+
 // JSONStorePersister 使用 JSON 文件保存 Store 状态。
 type JSONStorePersister struct {
-	statePath string // statePath 表示 state.json 文件路径。
+	statePath          string                         // statePath 表示 state.json 文件路径。
+	mu                 sync.Mutex                     // mu 保护延迟写入队列。
+	pendingChatDetails map[string]PersistedChatDetail // pendingChatDetails 表示等待延迟写入的聊天详情。
+	pendingTimer       *time.Timer                    // pendingTimer 表示延迟写入计时器。
+	lastErr            error                          // lastErr 表示后台延迟写入最近一次错误。
 }
 
 // NewPersistentStore 使用 dataDir 和 agentProfiles 参数创建带 JSON 持久化的 Store。
@@ -59,7 +76,7 @@ func NewPersistentStore(dataDir string, agentProfiles []AgentProfile) (*Store, e
 	}
 	changed := normalizeLoadedRuntimeState(&state)
 	if existed && (changed || needsSave) {
-		if err := persister.Save(persistedStateFromStoreState(state)); err != nil {
+		if err := persister.SaveAll(persistedStateFromStoreState(state)); err != nil {
 			return nil, err
 		}
 	}
@@ -108,8 +125,56 @@ func (p *JSONStorePersister) Load(agentProfiles []AgentProfile) (storeState, boo
 	return state, true, persisted.SchemaVersion < persistedStoreSchemaVersion, nil
 }
 
-// Save 使用 state 参数以原子替换方式写入 state.json 和聊天详情文件。
-func (p *JSONStorePersister) Save(state PersistedStoreState) error {
+// SaveAll 使用 state 参数以原子替换方式写入 state.json 和所有聊天详情文件。
+func (p *JSONStorePersister) SaveAll(state PersistedStoreState) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.stopPendingTimerLocked()
+	p.pendingChatDetails = nil
+	p.lastErr = nil
+	return p.saveAllLocked(state)
+}
+
+// SaveChanges 使用 change 参数按变更集写入 state.json 和聊天详情文件。
+func (p *JSONStorePersister) SaveChanges(change PersistedStoreChange) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.lastErr != nil {
+		err := p.lastErr
+		p.lastErr = nil
+		return err
+	}
+	return p.saveChangesLocked(change)
+}
+
+// Flush 使用 ctx 参数等待并写入延迟的聊天详情。
+func (p *JSONStorePersister) Flush(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.stopPendingTimerLocked()
+	if p.lastErr != nil {
+		err := p.lastErr
+		p.lastErr = nil
+		return err
+	}
+	if err := p.flushPendingChatDetailsLocked(); err != nil {
+		return err
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return nil
+	}
+}
+
+// saveAllLocked 使用 state 参数写入完整状态，调用方必须持有 p.mu。
+func (p *JSONStorePersister) saveAllLocked(state PersistedStoreState) error {
 	state = normalizePersistedStateForSave(state)
 	state.SchemaVersion = persistedStoreSchemaVersion
 	if err := os.MkdirAll(filepath.Dir(p.statePath), 0700); err != nil {
@@ -140,6 +205,136 @@ func (p *JSONStorePersister) Save(state PersistedStoreState) error {
 	}
 	if err := p.removeStaleChatDetailFiles(expectedDetailFiles); err != nil {
 		return err
+	}
+	return nil
+}
+
+// saveChangesLocked 使用 change 参数写入变更集，调用方必须持有 p.mu。
+func (p *JSONStorePersister) saveChangesLocked(change PersistedStoreChange) error {
+	state := normalizePersistedStateForSave(change.State)
+	state.SchemaVersion = persistedStoreSchemaVersion
+	if err := os.MkdirAll(filepath.Dir(p.statePath), 0700); err != nil {
+		return fmt.Errorf("创建数据目录失败: %w", err)
+	}
+	detailDir := p.chatDetailsDir()
+	if len(change.DirtyChatIDs) > 0 {
+		if err := os.MkdirAll(detailDir, 0700); err != nil {
+			return fmt.Errorf("创建聊天详情目录失败: %w", err)
+		}
+	}
+	if change.MetaDirty {
+		if err := writeJSONAtomic(p.statePath, ".state-*.tmp", state); err != nil {
+			return fmt.Errorf("写入状态文件失败: %w", err)
+		}
+	}
+	for _, chatID := range change.DeletedChatIDs {
+		if p.pendingChatDetails != nil {
+			delete(p.pendingChatDetails, chatID)
+		}
+		if err := os.Remove(p.chatDetailPath(chatID)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("删除聊天详情文件失败: %w", err)
+		}
+	}
+	detailsByChatID := persistedChatDetailsByID(state.ChatDetails)
+	immediateChatIDs := make([]string, 0, len(change.DirtyChatIDs))
+	for _, chatID := range change.DirtyChatIDs {
+		detail, ok := detailsByChatID[chatID]
+		if !ok {
+			return fmt.Errorf("聊天详情不存在: %s", chatID)
+		}
+		if change.DeferChatDetails {
+			if p.pendingChatDetails == nil {
+				p.pendingChatDetails = make(map[string]PersistedChatDetail)
+			}
+			p.pendingChatDetails[chatID] = normalizePersistedChatDetail(detail)
+			continue
+		}
+		if p.pendingChatDetails != nil {
+			delete(p.pendingChatDetails, chatID)
+		}
+		immediateChatIDs = append(immediateChatIDs, chatID)
+	}
+	for _, chatID := range immediateChatIDs {
+		if err := p.writeChatDetailLocked(normalizePersistedChatDetail(detailsByChatID[chatID])); err != nil {
+			return err
+		}
+	}
+	if change.DeferChatDetails && len(change.DirtyChatIDs) > 0 {
+		p.resetPendingTimerLocked()
+	} else if len(p.pendingChatDetails) == 0 {
+		p.stopPendingTimerLocked()
+	}
+	return nil
+}
+
+// normalizePersistedChatDetail 使用 detail 参数生成可写入的聊天详情。
+func normalizePersistedChatDetail(detail PersistedChatDetail) PersistedChatDetail {
+	detail.SchemaVersion = persistedChatDetailSchemaVersion
+	detail.Messages = cloneChatMessages(detail.Messages)
+	if detail.Messages == nil {
+		detail.Messages = []ChatMessage{}
+	}
+	if detail.Plan != nil {
+		plan := *detail.Plan
+		detail.Plan = &plan
+	}
+	return detail
+}
+
+// writeChatDetailLocked 使用 detail 参数写入单个聊天详情文件，调用方必须持有 p.mu。
+func (p *JSONStorePersister) writeChatDetailLocked(detail PersistedChatDetail) error {
+	if strings.TrimSpace(detail.ChatID) == "" {
+		return fmt.Errorf("聊天详情缺少 chatID")
+	}
+	if err := writeJSONAtomic(p.chatDetailPath(detail.ChatID), ".chat-*.tmp", detail); err != nil {
+		return fmt.Errorf("写入聊天详情文件失败: %w", err)
+	}
+	return nil
+}
+
+// resetPendingTimerLocked 重置延迟写入计时器，调用方必须持有 p.mu。
+func (p *JSONStorePersister) resetPendingTimerLocked() {
+	p.stopPendingTimerLocked()
+	p.pendingTimer = time.AfterFunc(deferredChatDetailSaveDelay, p.flushPendingChatDetailsBackground)
+}
+
+// stopPendingTimerLocked 停止延迟写入计时器，调用方必须持有 p.mu。
+func (p *JSONStorePersister) stopPendingTimerLocked() {
+	if p.pendingTimer == nil {
+		return
+	}
+	p.pendingTimer.Stop()
+	p.pendingTimer = nil
+}
+
+// flushPendingChatDetailsBackground 在后台写入延迟的聊天详情。
+func (p *JSONStorePersister) flushPendingChatDetailsBackground() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.pendingTimer = nil
+	if err := p.flushPendingChatDetailsLocked(); err != nil {
+		p.lastErr = err
+	}
+}
+
+// flushPendingChatDetailsLocked 写入全部延迟聊天详情，调用方必须持有 p.mu。
+func (p *JSONStorePersister) flushPendingChatDetailsLocked() error {
+	if len(p.pendingChatDetails) == 0 {
+		return nil
+	}
+	chatIDs := make([]string, 0, len(p.pendingChatDetails))
+	for chatID := range p.pendingChatDetails {
+		chatIDs = append(chatIDs, chatID)
+	}
+	sort.Strings(chatIDs)
+	if err := os.MkdirAll(p.chatDetailsDir(), 0700); err != nil {
+		return fmt.Errorf("创建聊天详情目录失败: %w", err)
+	}
+	for _, chatID := range chatIDs {
+		if err := p.writeChatDetailLocked(p.pendingChatDetails[chatID]); err != nil {
+			return err
+		}
+		delete(p.pendingChatDetails, chatID)
 	}
 	return nil
 }

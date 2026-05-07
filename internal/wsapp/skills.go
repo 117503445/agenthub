@@ -17,7 +17,7 @@ type AgentSkillOption struct {
 
 // LoadAgentSkillOptions 使用 projectPaths 参数扫描可用 skill 列表。
 func LoadAgentSkillOptions(projectPaths []string) []AgentSkillOption {
-	dirs := skillCandidateDirs(projectPaths)
+	dirs := AgentSkillSearchPaths(projectPaths)
 	byID := make(map[string]AgentSkillOption)
 	for _, dir := range dirs {
 		entries, err := os.ReadDir(dir)
@@ -48,8 +48,8 @@ func LoadAgentSkillOptions(projectPaths []string) []AgentSkillOption {
 	return options
 }
 
-// skillCandidateDirs 使用 projectPaths 参数返回需要扫描的 skill 目录。
-func skillCandidateDirs(projectPaths []string) []string {
+// AgentSkillSearchPaths 使用 projectPaths 参数返回需要扫描的 skill 目录。
+func AgentSkillSearchPaths(projectPaths []string) []string {
 	dirs := make([]string, 0)
 	seen := make(map[string]struct{})
 	addDir := func(dir string) {
@@ -176,8 +176,8 @@ func isAgentSkillsCommand(prompt string) bool {
 	return strings.TrimSpace(prompt) == "#skills"
 }
 
-// formatAgentSkillsMarkdown 使用 skills 参数生成 #skills 命令回复的 markdown 表格。
-func formatAgentSkillsMarkdown(skills []AgentSkillOption) string {
+// formatAgentSkillsMarkdown 使用 skills 和 searchPaths 参数生成 #skills 命令回复的 markdown。
+func formatAgentSkillsMarkdown(skills []AgentSkillOption, searchPaths []string) string {
 	lines := []string{
 		"## 可用 skills",
 		"",
@@ -186,7 +186,6 @@ func formatAgentSkillsMarkdown(skills []AgentSkillOption) string {
 	}
 	if len(skills) == 0 {
 		lines = append(lines, "| - | 暂无可用 skills | - |")
-		return strings.Join(lines, "\n")
 	}
 	for _, skill := range skills {
 		lines = append(lines, strings.Join([]string{
@@ -194,6 +193,14 @@ func formatAgentSkillsMarkdown(skills []AgentSkillOption) string {
 			markdownTableCell(skill.Description),
 			markdownTableCell(skill.Path) + " |",
 		}, " | "))
+	}
+	lines = append(lines, "", "## skills 搜索路径", "")
+	if len(searchPaths) == 0 {
+		lines = append(lines, "- 暂无搜索路径")
+		return strings.Join(lines, "\n")
+	}
+	for _, searchPath := range searchPaths {
+		lines = append(lines, "- `"+strings.ReplaceAll(searchPath, "`", "\\`")+"`")
 	}
 	return strings.Join(lines, "\n")
 }

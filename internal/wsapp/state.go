@@ -902,47 +902,51 @@ func (s *Store) AppendAssistantDelta(chatID string, messageID string, delta stri
 		return ChatMessage{}, false
 	}
 
-	var message ChatMessage
-	err := s.commit(func(state *storeState) error {
-		chat, ok := state.chats[chatID]
-		if !ok {
-			return errStoreUnchanged
-		}
-		for index := range chat.Messages {
-			item := &chat.Messages[index]
-			if item.ID != messageID || item.Role != MessageRoleAssistant {
-				continue
-			}
-			if item.Status != MessageStatusStreaming {
-				return errStoreUnchanged
-			}
-			now := time.Now()
-			item.Text += delta
-			if len(item.Parts) > 0 && item.Parts[len(item.Parts)-1].Type == MessagePartTypeText {
-				part := &item.Parts[len(item.Parts)-1]
-				part.Text += delta
-				part.UpdatedAt = now
-			} else {
-				item.Parts = append(item.Parts, MessagePart{
-					ID:        newID("part"),
-					Type:      MessagePartTypeText,
-					Text:      delta,
-					CreatedAt: now,
-					UpdatedAt: now,
-				})
-			}
-			item.UpdatedAt = now
-			chat.UpdatedAt = now
-			state.chats[chatID] = chat
-			message = *item
-			return nil
-		}
-		return errStoreUnchanged
-	})
-	if err != nil {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	chat, ok := s.chats[chatID]
+	if !ok {
 		return ChatMessage{}, false
 	}
-	return message, true
+	chat = cloneChat(chat)
+	for index := range chat.Messages {
+		item := &chat.Messages[index]
+		if item.ID != messageID || item.Role != MessageRoleAssistant {
+			continue
+		}
+		if item.Status != MessageStatusStreaming {
+			return ChatMessage{}, false
+		}
+		now := time.Now()
+		item.Text += delta
+		if len(item.Parts) > 0 && item.Parts[len(item.Parts)-1].Type == MessagePartTypeText {
+			part := &item.Parts[len(item.Parts)-1]
+			part.Text += delta
+			part.UpdatedAt = now
+		} else {
+			item.Parts = append(item.Parts, MessagePart{
+				ID:        newID("part"),
+				Type:      MessagePartTypeText,
+				Text:      delta,
+				CreatedAt: now,
+				UpdatedAt: now,
+			})
+		}
+		item.UpdatedAt = now
+		message := cloneChatMessage(*item)
+		if s.persister != nil {
+			if err := s.persister.SaveChanges(PersistedStoreChange{
+				State:            PersistedStoreState{Chats: []Chat{chat}},
+				DirtyChatIDs:     []string{chatID},
+				DeferChatDetails: true,
+			}); err != nil {
+				return ChatMessage{}, false
+			}
+		}
+		s.chats[chatID] = chat
+		return message, true
+	}
+	return ChatMessage{}, false
 }
 
 // UpsertToolCall 使用 chatID、messageID 和 tool 参数插入或更新工具调用。
@@ -1264,17 +1268,14 @@ func (s *Store) Snapshot() Snapshot {
 		return chats[i].CreatedAt.Before(chats[j].CreatedAt)
 	})
 
-	projectPaths := make([]string, 0, len(projects))
-	for _, project := range projects {
-		projectPaths = append(projectPaths, project.Path)
-	}
+	agentSkills, _ := s.agentSkills(false)
 	return Snapshot{
 		Projects:           projects,
 		Chats:              chats,
 		AgentProviders:     agentProviders,
 		AgentProfiles:      agentProfiles,
 		BackendEnv:         BackendEnvSnapshot(),
-		AgentSkills:        LoadAgentSkillOptions(projectPaths),
+		AgentSkills:        agentSkills,
 		LastAgentSelection: lastAgent,
 	}
 }
@@ -1318,15 +1319,48 @@ func sortedProjectsFromStore(projects map[string]Project) []Project {
 	return result
 }
 
-// AgentSkills 返回当前 project 和用户目录中可用的 skill 列表。
+// AgentSkills 返回当前 project 和用户目录中缓存的 skill 列表。
 func (s *Store) AgentSkills() []AgentSkillOption {
+	skills, _ := s.agentSkills(false)
+	return skills
+}
+
+// RefreshAgentSkills 重新扫描并返回当前 project 和用户目录中的 skill 列表。
+func (s *Store) RefreshAgentSkills() []AgentSkillOption {
+	skills, _ := s.agentSkills(true)
+	return skills
+}
+
+// AgentSkillSearchPaths 返回当前 project 和用户目录对应的 skill 搜索路径。
+func (s *Store) AgentSkillSearchPaths() []string {
+	_, paths := s.agentSkills(false)
+	return paths
+}
+
+// agentSkills 使用 refresh 参数读取或刷新当前 Store 的 skill 缓存。
+func (s *Store) agentSkills(refresh bool) ([]AgentSkillOption, []string) {
 	s.mu.RLock()
 	projectPaths := make([]string, 0, len(s.projects))
 	for _, project := range s.projects {
 		projectPaths = append(projectPaths, project.Path)
 	}
 	s.mu.RUnlock()
-	return LoadAgentSkillOptions(projectPaths)
+	paths := AgentSkillSearchPaths(projectPaths)
+	cacheKey := strings.Join(paths, "\x00")
+
+	s.skillsMu.Lock()
+	defer s.skillsMu.Unlock()
+	if !refresh && s.skillsCache.loaded && s.skillsCache.key == cacheKey {
+		return cloneAgentSkillOptions(s.skillsCache.skills), append([]string(nil), s.skillsCache.paths...)
+	}
+	skills := LoadAgentSkillOptions(projectPaths)
+	s.skillsCache = agentSkillCache{
+		key:    cacheKey,
+		skills: cloneAgentSkillOptions(skills),
+		paths:  append([]string(nil), paths...),
+		loaded: true,
+	}
+	return cloneAgentSkillOptions(skills), append([]string(nil), paths...)
 }
 
 // validateProjectInput 使用 projectPath 参数校验 project 输入，并返回派生名称和绝对路径。

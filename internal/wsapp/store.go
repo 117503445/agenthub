@@ -1,7 +1,10 @@
 package wsapp
 
 import (
+	"context"
 	"errors"
+	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -16,11 +19,18 @@ type Store struct {
 	agentProfiles   []AgentProfile
 	lastAgent       LastAgentSelection
 	persister       StorePersister
+	skillsMu        sync.Mutex
+	skillsCache     agentSkillCache
 }
 
 // StorePersister 表示 Store 状态持久化接口。
 type StorePersister interface {
-	Save(state PersistedStoreState) error // Save 使用 state 参数保存完整 Store 状态。
+	// SaveAll 使用 state 参数保存完整 Store 状态。
+	SaveAll(state PersistedStoreState) error
+	// SaveChanges 使用 change 参数保存 Store 增量变更。
+	SaveChanges(change PersistedStoreChange) error
+	// Flush 使用 ctx 参数等待已延迟的持久化写入完成。
+	Flush(ctx context.Context) error
 }
 
 // storeState 表示 Store 可提交的完整内存状态。
@@ -30,6 +40,19 @@ type storeState struct {
 	nextChatOrdinal map[string]int
 	agentProfiles   []AgentProfile
 	lastAgent       LastAgentSelection
+}
+
+// storeCommitOptions 表示一次 Store 提交的持久化策略。
+type storeCommitOptions struct {
+	deferChatDetails bool // deferChatDetails 表示聊天详情是否允许延迟落盘。
+}
+
+// agentSkillCache 表示 Store 中缓存的 skills 扫描结果。
+type agentSkillCache struct {
+	key    string             // key 表示 project 搜索路径签名。
+	skills []AgentSkillOption // skills 表示缓存的 skill 列表。
+	paths  []string           // paths 表示缓存的搜索路径列表。
+	loaded bool               // loaded 表示缓存是否已有有效结果。
 }
 
 // NewStore 创建使用默认 agent 选项的内存状态存储。
@@ -85,9 +108,20 @@ func (s *Store) AgentProfiles() []AgentProfile {
 
 // commit 使用 mutate 参数生成新状态，先持久化成功后再替换内存状态。
 func (s *Store) commit(mutate func(state *storeState) error) error {
+	return s.commitWithOptions(storeCommitOptions{}, mutate)
+}
+
+// commitDeferredChatDetails 使用 mutate 参数生成新状态，并允许聊天详情延迟落盘。
+func (s *Store) commitDeferredChatDetails(mutate func(state *storeState) error) error {
+	return s.commitWithOptions(storeCommitOptions{deferChatDetails: true}, mutate)
+}
+
+// commitWithOptions 使用 options 和 mutate 参数提交 Store 状态变更。
+func (s *Store) commitWithOptions(options storeCommitOptions, mutate func(state *storeState) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	before := s.cloneStateLocked()
 	state := s.cloneStateLocked()
 	if err := mutate(&state); err != nil {
 		if errors.Is(err, errStoreUnchanged) {
@@ -97,12 +131,65 @@ func (s *Store) commit(mutate func(state *storeState) error) error {
 	}
 	normalizeStoreState(&state)
 	if s.persister != nil {
-		if err := s.persister.Save(persistedStateFromStoreState(state)); err != nil {
+		change := persistedStoreChangeFromStates(before, state, options.deferChatDetails)
+		if err := s.persister.SaveChanges(change); err != nil {
 			return err
 		}
 	}
 	s.applyStateLocked(state)
 	return nil
+}
+
+// Flush 使用 ctx 参数等待 Store 延迟持久化写入完成。
+func (s *Store) Flush(ctx context.Context) error {
+	if s.persister == nil {
+		return nil
+	}
+	return s.persister.Flush(ctx)
+}
+
+// persistedStoreChangeFromStates 使用 before、after 和 deferChatDetails 参数生成持久化变更集。
+func persistedStoreChangeFromStates(before storeState, after storeState, deferChatDetails bool) PersistedStoreChange {
+	beforePersisted := persistedStateFromStoreState(before)
+	afterPersisted := persistedStateFromStoreState(after)
+	beforeMeta := beforePersisted
+	beforeMeta.ChatDetails = nil
+	afterMeta := afterPersisted
+	afterMeta.ChatDetails = nil
+
+	beforeDetails := persistedChatDetailsByID(beforePersisted.ChatDetails)
+	afterDetails := persistedChatDetailsByID(afterPersisted.ChatDetails)
+	dirtyChatIDs := make([]string, 0)
+	deletedChatIDs := make([]string, 0)
+	for chatID, afterDetail := range afterDetails {
+		beforeDetail, ok := beforeDetails[chatID]
+		if !ok || !reflect.DeepEqual(beforeDetail, afterDetail) {
+			dirtyChatIDs = append(dirtyChatIDs, chatID)
+		}
+	}
+	for chatID := range beforeDetails {
+		if _, ok := afterDetails[chatID]; !ok {
+			deletedChatIDs = append(deletedChatIDs, chatID)
+		}
+	}
+	sort.Strings(dirtyChatIDs)
+	sort.Strings(deletedChatIDs)
+	return PersistedStoreChange{
+		State:            afterPersisted,
+		MetaDirty:        !reflect.DeepEqual(beforeMeta, afterMeta),
+		DirtyChatIDs:     dirtyChatIDs,
+		DeletedChatIDs:   deletedChatIDs,
+		DeferChatDetails: deferChatDetails,
+	}
+}
+
+// persistedChatDetailsByID 使用 details 参数按聊天页标识索引详情。
+func persistedChatDetailsByID(details []PersistedChatDetail) map[string]PersistedChatDetail {
+	result := make(map[string]PersistedChatDetail, len(details))
+	for _, detail := range details {
+		result[detail.ChatID] = detail
+	}
+	return result
 }
 
 // cloneStateLocked 返回当前 Store 状态副本，调用方必须持有锁。

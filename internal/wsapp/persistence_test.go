@@ -1,6 +1,7 @@
 package wsapp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -13,9 +14,19 @@ import (
 // failingStorePersister 表示始终保存失败的测试持久化器。
 type failingStorePersister struct{}
 
-// Save 使用 state 参数模拟保存失败。
-func (f failingStorePersister) Save(state PersistedStoreState) error {
+// SaveAll 使用 state 参数模拟完整保存失败。
+func (f failingStorePersister) SaveAll(state PersistedStoreState) error {
 	return errors.New("forced save failure")
+}
+
+// SaveChanges 使用 change 参数模拟增量保存失败。
+func (f failingStorePersister) SaveChanges(change PersistedStoreChange) error {
+	return errors.New("forced save failure")
+}
+
+// Flush 使用 ctx 参数模拟无延迟写入。
+func (f failingStorePersister) Flush(ctx context.Context) error {
+	return nil
 }
 
 // TestPersistentStoreSaveLoad 验证 Store 状态可保存并从 JSON 恢复。
@@ -88,6 +99,120 @@ func TestPersistentStoreSaveLoad(t *testing.T) {
 	if nextChat.Title != "聊天 3" {
 		t.Fatalf("恢复后的聊天页序号不正确: %q", nextChat.Title)
 	}
+}
+
+// TestPersistentStoreDeltaDefersDetailOnlySave 验证流式 delta 只延迟写对应聊天详情，不重写 state.json。
+func TestPersistentStoreDeltaDefersDetailOnlySave(t *testing.T) {
+	dataDir := t.TempDir()
+	store, err := NewPersistentStore(dataDir, AgentProfiles(AgentOptionsConfig{}))
+	if err != nil {
+		t.Fatalf("创建持久化 Store 失败: %v", err)
+	}
+	project, err := store.CreateProject(t.TempDir())
+	if err != nil {
+		t.Fatalf("创建 project 失败: %v", err)
+	}
+	chat, err := store.CreateChat(project.ID)
+	if err != nil {
+		t.Fatalf("创建聊天页失败: %v", err)
+	}
+	_, _, assistant, err := store.AddRunMessages(chat.ID, "性能热路径", nil, false)
+	if err != nil {
+		t.Fatalf("追加运行消息失败: %v", err)
+	}
+	statePath := filepath.Join(dataDir, persistedStateFileName)
+	stateStat := mustStat(t, statePath)
+	time.Sleep(20 * time.Millisecond)
+
+	if _, ok := store.AppendAssistantDelta(chat.ID, assistant.ID, strings.Repeat("delta ", 4)); !ok {
+		t.Fatalf("追加 assistant delta 失败")
+	}
+	if err := store.Flush(context.Background()); err != nil {
+		t.Fatalf("刷新延迟详情失败: %v", err)
+	}
+	if nextStat := mustStat(t, statePath); !nextStat.ModTime().Equal(stateStat.ModTime()) {
+		t.Fatalf("流式 delta 不应重写 state.json: before=%s after=%s", stateStat.ModTime(), nextStat.ModTime())
+	}
+
+	detailData, err := os.ReadFile(filepath.Join(dataDir, persistedChatDetailsDirName, chat.ID+".json"))
+	if err != nil {
+		t.Fatalf("读取聊天详情失败: %v", err)
+	}
+	if !strings.Contains(string(detailData), "delta delta") {
+		t.Fatalf("延迟刷新后聊天详情缺少 delta: %s", detailData)
+	}
+}
+
+// TestJSONStorePersisterSaveChangesWritesOnlyDirtyChat 验证增量保存只写入 dirty 聊天详情。
+func TestJSONStorePersisterSaveChangesWritesOnlyDirtyChat(t *testing.T) {
+	dataDir := t.TempDir()
+	persister := NewJSONStorePersister(dataDir)
+	now := time.Now()
+	project := Project{ID: "project-test", Name: "project", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
+	chatA := Chat{
+		ID:            "chat-a",
+		ProjectID:     project.ID,
+		Title:         "聊天 A",
+		Status:        ChatStatusIdle,
+		AgentProvider: AgentProviderCodex,
+		AgentModel:    "gpt-5.5",
+		Messages:      []ChatMessage{{ID: "msg-a", ChatID: "chat-a", Role: MessageRoleAssistant, Text: "A", Status: MessageStatusComplete, CreatedAt: now, UpdatedAt: now}},
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	chatB := chatA
+	chatB.ID = "chat-b"
+	chatB.Title = "聊天 B"
+	chatB.Messages = []ChatMessage{{ID: "msg-b", ChatID: "chat-b", Role: MessageRoleAssistant, Text: "B", Status: MessageStatusComplete, CreatedAt: now, UpdatedAt: now}}
+	state := PersistedStoreState{
+		Projects:           []Project{project},
+		Chats:              []Chat{chatA, chatB},
+		AgentProfiles:      AgentProfiles(AgentOptionsConfig{}),
+		LastAgentSelection: defaultLastAgentSelection(DefaultAgentProviderOptions()),
+		NextChatOrdinal:    map[string]int{project.ID: 2},
+	}
+	if err := persister.SaveAll(state); err != nil {
+		t.Fatalf("完整保存失败: %v", err)
+	}
+	stateStat := mustStat(t, filepath.Join(dataDir, persistedStateFileName))
+	chatBStat := mustStat(t, filepath.Join(dataDir, persistedChatDetailsDirName, "chat-b.json"))
+	time.Sleep(20 * time.Millisecond)
+
+	chatA.Messages[0].Text = "A updated"
+	state.Chats = []Chat{chatA, chatB}
+	if err := persister.SaveChanges(PersistedStoreChange{
+		State:            state,
+		DirtyChatIDs:     []string{chatA.ID},
+		DeferChatDetails: true,
+	}); err != nil {
+		t.Fatalf("增量保存失败: %v", err)
+	}
+	if err := persister.Flush(context.Background()); err != nil {
+		t.Fatalf("刷新延迟详情失败: %v", err)
+	}
+	if nextStateStat := mustStat(t, filepath.Join(dataDir, persistedStateFileName)); !nextStateStat.ModTime().Equal(stateStat.ModTime()) {
+		t.Fatalf("详情变更不应重写 state.json")
+	}
+	if nextChatBStat := mustStat(t, filepath.Join(dataDir, persistedChatDetailsDirName, "chat-b.json")); !nextChatBStat.ModTime().Equal(chatBStat.ModTime()) {
+		t.Fatalf("未变更聊天详情不应被重写")
+	}
+	detailData, err := os.ReadFile(filepath.Join(dataDir, persistedChatDetailsDirName, "chat-a.json"))
+	if err != nil {
+		t.Fatalf("读取 dirty 聊天详情失败: %v", err)
+	}
+	if !strings.Contains(string(detailData), "A updated") {
+		t.Fatalf("dirty 聊天详情未写入最新内容: %s", detailData)
+	}
+}
+
+// mustStat 使用 t 和 path 参数读取文件状态。
+func mustStat(t *testing.T, path string) os.FileInfo {
+	t.Helper()
+	stat, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("读取文件状态失败 %s: %v", path, err)
+	}
+	return stat
 }
 
 // assertPersistentChatSplit 使用 dataDir、chatID 和 prompt 参数断言聊天详情已拆分保存。
@@ -190,7 +315,7 @@ func TestPersistentStoreNormalizesRunningState(t *testing.T) {
 		UpdatedAt: now,
 	}
 	persister := NewJSONStorePersister(dataDir)
-	if err := persister.Save(PersistedStoreState{
+	if err := persister.SaveAll(PersistedStoreState{
 		Projects:           []Project{project},
 		Chats:              []Chat{chat},
 		AgentProfiles:      AgentProfiles(AgentOptionsConfig{EnableMockAgent: true}),
