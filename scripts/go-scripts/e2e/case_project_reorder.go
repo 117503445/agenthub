@@ -90,32 +90,21 @@ func createProjectFromSidebar(page playwright.Page, projectPath string) error {
 
 // expectProjectOrder 使用 page、expectedNames 和 timeout 参数等待 Project 列表顺序匹配。
 func expectProjectOrder(page playwright.Page, expectedNames []string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastOrder string
-	var lastErr error
-	for time.Now().Before(deadline) {
+	return waitForCondition(fmt.Sprintf("等待 Project 顺序 %v", expectedNames), timeout, func() (bool, string, error) {
 		value, err := page.Evaluate(`() => Array.from(document.querySelectorAll('[data-testid="project-name"]')).map((item) => item.textContent?.trim() || '')`, nil)
-		if err == nil {
-			names, ok := value.([]any)
-			if ok {
-				got := make([]string, 0, len(names))
-				for _, item := range names {
-					got = append(got, fmt.Sprint(item))
-				}
-				lastOrder = fmt.Sprint(got)
-				if projectOrderHasPrefix(got, expectedNames) {
-					return nil
-				}
-			}
-		} else {
-			lastErr = err
+		if err != nil {
+			return false, "", err
 		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待 Project 顺序 %v 超时，最后错误: %w", expectedNames, lastErr)
-	}
-	return fmt.Errorf("等待 Project 顺序 %v 超时，实际顺序: %s", expectedNames, lastOrder)
+		names, ok := value.([]any)
+		if !ok {
+			return false, fmt.Sprintf("顺序类型异常: %T", value), nil
+		}
+		got := make([]string, 0, len(names))
+		for _, item := range names {
+			got = append(got, fmt.Sprint(item))
+		}
+		return projectOrderHasPrefix(got, expectedNames), fmt.Sprintf("实际顺序: %v", got), nil
+	})
 }
 
 // projectOrderHasPrefix 使用 got 和 expected 参数判断 Project 顺序前缀是否匹配。

@@ -159,7 +159,8 @@ func registeredCases() map[string]E2ECase {
 		"case_token_cli_auth": {Name: "case_token_cli_auth", Run: runTokenAuthCase, Args: []string{
 			"--token", e2eAgentHubToken,
 		}},
-		"case_ws": {Name: "case_ws", Run: runWSCase},
+		"case_ws":           {Name: "case_ws", Run: runWSCase},
+		"case_ws_reconnect": {Name: "case_ws_reconnect", Run: runWSReconnectCase},
 	}
 }
 
@@ -427,22 +428,17 @@ func waitUntilReady(baseURL string) error {
 // waitUntilReadyWithin 使用 baseURL 和 timeout 参数在限定时间内等待健康检查通过。
 func waitUntilReadyWithin(baseURL string, timeout time.Duration) error {
 	client := &http.Client{Timeout: time.Second}
-	deadline := time.Now().Add(timeout)
-	var lastErr error
-	for time.Now().Before(deadline) {
+	return waitForCondition("等待健康检查通过", timeout, func() (bool, string, error) {
 		response, err := client.Get(baseURL + "/healthz")
-		if err == nil {
-			_ = response.Body.Close()
-			if response.StatusCode == http.StatusOK {
-				return nil
-			}
-			lastErr = fmt.Errorf("状态码 %d", response.StatusCode)
-		} else {
-			lastErr = err
+		if err != nil {
+			return false, "", err
 		}
-		time.Sleep(250 * time.Millisecond)
-	}
-	return lastErr
+		_ = response.Body.Close()
+		if response.StatusCode == http.StatusOK {
+			return true, "", nil
+		}
+		return false, fmt.Sprintf("状态码 %d", response.StatusCode), nil
+	})
 }
 
 // passText 使用 success 参数返回中文结果文本。

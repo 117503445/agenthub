@@ -110,23 +110,11 @@ func runSkillCommandCase(ctx E2EContext) (success bool) {
 
 // expectSkillTable 使用 page 和 timeout 参数等待 assistant markdown 中出现 skills 表格。
 func expectSkillTable(page playwright.Page, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastCount int
-	var lastErr error
-	for time.Now().Before(deadline) {
+	return waitForCondition("等待 skills 表格", timeout, func() (bool, string, error) {
 		count, err := page.Locator(`[data-testid="assistant-markdown"] table`).Count()
-		if err == nil {
-			lastCount = count
-			if count > 0 {
-				return nil
-			}
-		} else {
-			lastErr = err
+		if err != nil {
+			return false, "", err
 		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待 skills 表格超时，最后错误: %w", lastErr)
-	}
-	return fmt.Errorf("等待 skills 表格超时，实际数量: %d", lastCount)
+		return count > 0, fmt.Sprintf("实际数量: %d", count), nil
+	})
 }

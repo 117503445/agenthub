@@ -159,17 +159,12 @@ func readPersistenceMessage(conn *websocket.Conn, messageType string, timeout ti
 
 // waitPersistenceState 使用 statePath、projectPath 和 timeout 参数等待 state.json 包含 project。
 func waitPersistenceState(statePath string, projectPath string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastErr error
-	for time.Now().Before(deadline) {
-		if err := assertPersistenceStateHasProject(statePath, projectPath); err == nil {
-			return nil
-		} else {
-			lastErr = err
+	return waitForCondition(fmt.Sprintf("等待 state.json 包含 project %s", projectPath), timeout, func() (bool, string, error) {
+		if err := assertPersistenceStateHasProject(statePath, projectPath); err != nil {
+			return false, "", err
 		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	return lastErr
+		return true, "", nil
+	})
 }
 
 // assertPersistenceStateHasProject 使用 statePath 和 projectPath 参数断言 state.json 包含 project 和聊天页。

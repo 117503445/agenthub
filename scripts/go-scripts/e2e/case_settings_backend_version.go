@@ -71,25 +71,14 @@ func expectBackendBuildTimeVisible(page playwright.Page, timeout time.Duration) 
 
 // expectSettingsInfoVisible 使用 page、testID、label 和 timeout 参数等待设置页信息值可见。
 func expectSettingsInfoVisible(page playwright.Page, testID string, label string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	lastText := ""
-	var lastErr error
-	for time.Now().Before(deadline) {
+	return waitForCondition("等待"+label, timeout, func() (bool, string, error) {
 		text, err := getByTestID(page, testID).TextContent()
-		if err == nil {
-			lastText = strings.TrimSpace(text)
-			if lastText != "" && lastText != "-" {
-				return nil
-			}
-		} else {
-			lastErr = err
+		if err != nil {
+			return false, "", err
 		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待%s超时，最后错误: %w", label, lastErr)
-	}
-	return fmt.Errorf("等待%s超时，实际文本: %s", label, lastText)
+		text = strings.TrimSpace(text)
+		return text != "" && text != "-", "实际文本: " + text, nil
+	})
 }
 
 // writeSettingsBackendVersionReport 使用 outputDir、success 和 events 参数写入设置页后端版本信息报告。

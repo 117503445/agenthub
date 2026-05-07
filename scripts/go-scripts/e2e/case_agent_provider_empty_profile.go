@@ -3,7 +3,6 @@ package e2e
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/playwright-community/playwright-go"
@@ -48,11 +47,7 @@ func runAgentProviderEmptyProfileCase(ctx E2EContext) (success bool) {
 
 // expectAgentProviderOptionsWithoutEmpty 使用 page 和 timeout 参数等待 Agent 下拉框只有真实选项。
 func expectAgentProviderOptionsWithoutEmpty(page playwright.Page, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastState string
-	var lastErr error
-	for time.Now().Before(deadline) {
-		value, err := page.Evaluate(`() => {
+	return expectPageState(page, "等待 Agent 下拉框去除空白选项", `() => {
 			const select = document.querySelector('[data-testid="agent-provider-select"]');
 			if (!select) {
 				return 'missing select';
@@ -73,28 +68,7 @@ func expectAgentProviderOptionsWithoutEmpty(page playwright.Page, timeout time.D
 				return '选项文案不正确: ' + JSON.stringify(options);
 			}
 			return '';
-		}`, nil)
-		if err != nil {
-			lastErr = err
-			time.Sleep(150 * time.Millisecond)
-			continue
-		}
-		state, ok := value.(string)
-		if !ok {
-			lastState = fmt.Sprintf("%v", value)
-			time.Sleep(150 * time.Millisecond)
-			continue
-		}
-		lastState = state
-		if state == "" {
-			return nil
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待 Agent 下拉框去除空白选项超时，最后错误: %w", lastErr)
-	}
-	return fmt.Errorf("等待 Agent 下拉框去除空白选项超时，最后状态: %s", strings.TrimSpace(lastState))
+		}`, nil, timeout)
 }
 
 // writeAgentProviderEmptyProfileReport 使用 outputDir、success 和 events 参数写入测试报告。

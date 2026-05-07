@@ -64,7 +64,7 @@ func runManualStopNotificationCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDCount(page, "send-button", 0, 10*time.Second); err != nil {
 		return fail(err)
 	}
-	if err := expectNotificationCountExactly(page, 0, 2*time.Second); err != nil {
+	if err := assertNotificationCount(page, 0); err != nil {
 		return fail(err)
 	}
 

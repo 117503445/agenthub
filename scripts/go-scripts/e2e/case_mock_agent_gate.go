@@ -105,10 +105,11 @@ func expectSelectOptionAbsent(page playwright.Page, testID string, value string,
 
 // expectSelectOptionState 使用 page、testID、value、present 和 timeout 参数等待选择框选项状态。
 func expectSelectOptionState(page playwright.Page, testID string, value string, present bool, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastState string
-	var lastErr error
-	for time.Now().Before(deadline) {
+	expected := "present"
+	if !present {
+		expected = "absent"
+	}
+	return waitForCondition(fmt.Sprintf("等待 %s 选项 %s=%s", testID, value, expected), timeout, func() (bool, string, error) {
 		result, err := page.Evaluate(`([testID, value]) => {
 			const select = document.querySelector('[data-testid="' + testID + '"]');
 			if (!select) {
@@ -118,33 +119,20 @@ func expectSelectOptionState(page playwright.Page, testID string, value string, 
 			return values.includes(value) ? 'present' : 'absent';
 		}`, []any{testID, value})
 		if err != nil {
-			lastErr = err
-			time.Sleep(150 * time.Millisecond)
-			continue
+			return false, "", err
 		}
 		state, ok := result.(string)
 		if !ok {
-			lastState = fmt.Sprintf("%v", result)
-			time.Sleep(150 * time.Millisecond)
-			continue
+			return false, fmt.Sprintf("%v", result), nil
 		}
-		lastState = state
 		if present && state == "present" {
-			return nil
+			return true, "", nil
 		}
 		if !present && state == "absent" {
-			return nil
+			return true, "", nil
 		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	expected := "present"
-	if !present {
-		expected = "absent"
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待 %s 选项 %s=%s 超时，最后错误: %w", testID, value, expected, lastErr)
-	}
-	return fmt.Errorf("等待 %s 选项 %s=%s 超时，最后状态: %s", testID, value, expected, lastState)
+		return false, state, nil
+	})
 }
 
 // writeMockAgentGateReport 使用 outputDir、success 和 events 参数写入 Mock Agent 开关报告。

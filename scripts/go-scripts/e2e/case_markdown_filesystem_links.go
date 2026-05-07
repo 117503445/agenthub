@@ -119,29 +119,18 @@ func runMarkdownFilesystemLinksCase(ctx E2EContext) (success bool) {
 // expectMarkdownLinkFilesystemHref 使用 page、label、expectedPath 和 timeout 参数等待 markdown 链接指向文件系统 API。
 func expectMarkdownLinkFilesystemHref(page playwright.Page, label string, expectedPath string, timeout time.Duration) error {
 	expectedPath = filepath.Clean(expectedPath)
-	deadline := time.Now().Add(timeout)
-	var lastHref string
-	var lastErr error
-	for time.Now().Before(deadline) {
+	return waitForCondition(fmt.Sprintf("等待 markdown 链接 %q 指向文件系统 API", label), timeout, func() (bool, string, error) {
 		value, err := page.Evaluate(`(label) => {
 			const links = Array.from(document.querySelectorAll('[data-testid="assistant-markdown"] a'));
 			const link = links.find((item) => item.textContent?.trim() === label);
 			return link ? link.href : '';
 		}`, label)
-		if err == nil {
-			lastHref = fmt.Sprint(value)
-			if markdownFilesystemHrefMatches(lastHref, expectedPath) {
-				return nil
-			}
-		} else {
-			lastErr = err
+		if err != nil {
+			return false, "", err
 		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待 markdown 链接 %q 指向文件系统 API 超时，最后错误: %w", label, lastErr)
-	}
-	return fmt.Errorf("等待 markdown 链接 %q 指向 %q 超时，实际 href: %s", label, expectedPath, lastHref)
+		href := fmt.Sprint(value)
+		return markdownFilesystemHrefMatches(href, expectedPath), fmt.Sprintf("期望路径: %s，实际 href: %s", expectedPath, href), nil
+	})
 }
 
 // markdownFilesystemHrefMatches 使用 href 和 expectedPath 参数判断链接是否匹配文件系统 API。
@@ -159,10 +148,7 @@ func markdownFilesystemHrefMatches(href string, expectedPath string) bool {
 
 // expectMarkdownLinkFetchText 使用 page、label、expected 和 timeout 参数等待链接内容包含 expected。
 func expectMarkdownLinkFetchText(page playwright.Page, label string, expected string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastText string
-	var lastErr error
-	for time.Now().Before(deadline) {
+	return waitForCondition(fmt.Sprintf("等待 markdown 链接 %q 内容包含 %q", label, expected), timeout, func() (bool, string, error) {
 		value, err := page.Evaluate(`async ([label]) => {
 			const links = Array.from(document.querySelectorAll('[data-testid="assistant-markdown"] a'));
 			const link = links.find((item) => item.textContent?.trim() === label);
@@ -175,20 +161,12 @@ func expectMarkdownLinkFetchText(page playwright.Page, label string, expected st
 			}
 			return await response.text();
 		}`, []any{label})
-		if err == nil {
-			lastText = fmt.Sprint(value)
-			if strings.Contains(lastText, expected) {
-				return nil
-			}
-		} else {
-			lastErr = err
+		if err != nil {
+			return false, "", err
 		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待 markdown 链接 %q 内容包含 %q 超时，最后错误: %w", label, expected, lastErr)
-	}
-	return fmt.Errorf("等待 markdown 链接 %q 内容包含 %q 超时，实际内容: %s", label, expected, lastText)
+		text := fmt.Sprint(value)
+		return strings.Contains(text, expected), "实际内容: " + text, nil
+	})
 }
 
 // writeMarkdownFilesystemLinksReport 使用 outputDir、success 和 events 参数写入 markdown 文件链接报告。

@@ -182,11 +182,7 @@ func pasteTestImage(page playwright.Page, name string) error {
 
 // expectImageAddButtonUsesPictureLogo 使用 page 和 timeout 参数等待添加图片按钮展示图片 logo。
 func expectImageAddButtonUsesPictureLogo(page playwright.Page, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastState string
-	var lastErr error
-	for time.Now().Before(deadline) {
-		value, err := page.Evaluate(`() => {
+	return expectPageState(page, "等待添加图片按钮展示图片 logo", `() => {
 			const button = document.querySelector('[data-testid="image-add-button"]');
 			if (!button) {
 				return 'missing button';
@@ -205,32 +201,12 @@ func expectImageAddButtonUsesPictureLogo(page playwright.Page, timeout time.Dura
 				', height=' + rect.height.toFixed(2) +
 				', alt=' + alt +
 				', plus=' + Boolean(plusIcon);
-		}`, nil)
-		if err == nil {
-			if text, ok := value.(string); ok {
-				lastState = text
-				if text == "" {
-					return nil
-				}
-			}
-		} else {
-			lastErr = err
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待添加图片按钮展示图片 logo 超时，最后错误: %w", lastErr)
-	}
-	return fmt.Errorf("等待添加图片按钮展示图片 logo 超时，最后状态: %s", lastState)
+		}`, nil, timeout)
 }
 
 // expectAgentHubIcon 使用 page 和 timeout 参数等待页面声明并加载 Tabler chart-bubble 图标。
 func expectAgentHubIcon(page playwright.Page, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastState string
-	var lastErr error
-	for time.Now().Before(deadline) {
-		value, err := page.Evaluate(`async () => {
+	return expectPageState(page, "等待 Tabler chart-bubble 图标加载", `async () => {
 			const iconLink = document.querySelector('link[rel~="icon"]');
 			if (!iconLink) {
 				return 'missing icon link';
@@ -264,23 +240,7 @@ func expectAgentHubIcon(page playwright.Page, timeout time.Duration) error {
 				return 'missing material blue icon stroke';
 			}
 			return '';
-		}`, nil)
-		if err == nil {
-			if text, ok := value.(string); ok {
-				lastState = text
-				if text == "" {
-					return nil
-				}
-			}
-		} else {
-			lastErr = err
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待 Tabler chart-bubble 图标加载超时，最后错误: %w", lastErr)
-	}
-	return fmt.Errorf("等待 Tabler chart-bubble 图标加载超时，最后状态: %s", lastState)
+		}`, nil, timeout)
 }
 
 // clickFirstTestID 使用 page 和 id 参数点击首个 data-testid 对应元素。
@@ -298,49 +258,25 @@ func selectTestID(page playwright.Page, id string, value string) error {
 
 // expectTestIDValue 使用 page、id、expected 和 timeout 参数等待表单元素值等于 expected。
 func expectTestIDValue(page playwright.Page, id string, expected string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastValue string
-	var lastErr error
-	for time.Now().Before(deadline) {
+	return waitForCondition(fmt.Sprintf("等待元素 %q 值为 %q", id, expected), timeout, func() (bool, string, error) {
 		value, err := getByTestID(page, id).InputValue()
-		if err == nil {
-			lastValue = value
-			if value == expected {
-				return nil
-			}
-		} else {
-			lastErr = err
+		if err != nil {
+			return false, "", err
 		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待元素 %q 值为 %q 超时，最后错误: %w", id, expected, lastErr)
-	}
-	return fmt.Errorf("等待元素 %q 值为 %q 超时，实际值: %s", id, expected, lastValue)
+		return value == expected, "实际值: " + value, nil
+	})
 }
 
 // expectSkillOptionSelected 使用 page、skillID 和 timeout 参数等待 skill 选项被键盘选中。
 func expectSkillOptionSelected(page playwright.Page, skillID string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastValue string
-	var lastErr error
 	selector := fmt.Sprintf(`[data-testid="skill-option"][data-skill-id="%s"]`, skillID)
-	for time.Now().Before(deadline) {
+	return waitForCondition(fmt.Sprintf("等待 skill %q 选中", skillID), timeout, func() (bool, string, error) {
 		value, err := page.Locator(selector).GetAttribute("aria-selected")
-		if err == nil {
-			lastValue = value
-			if value == "true" {
-				return nil
-			}
-		} else {
-			lastErr = err
+		if err != nil {
+			return false, "", err
 		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待 skill %q 选中超时，最后错误: %w", skillID, lastErr)
-	}
-	return fmt.Errorf("等待 skill %q 选中超时，实际 aria-selected: %s", skillID, lastValue)
+		return value == "true", "实际 aria-selected: " + value, nil
+	})
 }
 
 // expectBrowserStorage 使用 page、expectedKeys、expectedValues 和 timeout 参数等待浏览器只持久化指定状态。
@@ -350,10 +286,7 @@ func expectBrowserStorage(
 	expectedValues map[string]string,
 	timeout time.Duration,
 ) error {
-	deadline := time.Now().Add(timeout)
-	var lastState string
-	var lastErr error
-	for time.Now().Before(deadline) {
+	return waitForCondition("等待浏览器持久化状态匹配", timeout, func() (bool, string, error) {
 		value, err := page.Evaluate(`() => {
 			const localEntries = {};
 			for (const key of Object.keys(window.localStorage).sort()) {
@@ -366,23 +299,15 @@ func expectBrowserStorage(
 				sessionKeys,
 			};
 		}`, nil)
-		if err == nil {
-			state, ok := value.(map[string]any)
-			if ok {
-				lastState = fmt.Sprint(state)
-				if browserStorageMatches(state, expectedKeys, expectedValues) {
-					return nil
-				}
-			}
-		} else {
-			lastErr = err
+		if err != nil {
+			return false, "", err
 		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待浏览器持久化状态匹配超时，最后错误: %w", lastErr)
-	}
-	return fmt.Errorf("等待浏览器持久化状态匹配超时，最后状态: %s", lastState)
+		state, ok := value.(map[string]any)
+		if !ok {
+			return false, fmt.Sprintf("状态类型异常: %T", value), nil
+		}
+		return browserStorageMatches(state, expectedKeys, expectedValues), fmt.Sprint(state), nil
+	})
 }
 
 // browserStorageMatches 使用 state、expectedKeys 和 expectedValues 参数判断浏览器持久化状态是否匹配预期。
@@ -435,94 +360,59 @@ func sameStringSlice(actual []string, expected []string) bool {
 
 // expectTestIDDisabled 使用 page、id、expected 和 timeout 参数等待元素禁用状态符合预期。
 func expectTestIDDisabled(page playwright.Page, id string, expected bool, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastDisabled bool
-	var lastErr error
-	for time.Now().Before(deadline) {
+	return waitForCondition(fmt.Sprintf("等待元素 %q 禁用状态为 %v", id, expected), timeout, func() (bool, string, error) {
 		disabled, err := getByTestID(page, id).IsDisabled()
-		if err == nil {
-			lastDisabled = disabled
-			if disabled == expected {
-				return nil
-			}
-		} else {
-			lastErr = err
+		if err != nil {
+			return false, "", err
 		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待元素 %q 禁用状态为 %v 超时，最后错误: %w", id, expected, lastErr)
-	}
-	return fmt.Errorf("等待元素 %q 禁用状态为 %v 超时，实际状态: %v", id, expected, lastDisabled)
+		return disabled == expected, fmt.Sprintf("实际状态: %v", disabled), nil
+	})
 }
 
 // expectTestIDAttributeAbsent 使用 page、id、name 和 timeout 参数等待元素属性不存在。
 func expectTestIDAttributeAbsent(page playwright.Page, id string, name string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastHasAttribute bool
-	var lastErr error
-	for time.Now().Before(deadline) {
+	return waitForCondition(fmt.Sprintf("等待元素 %q 属性 %q 不存在", id, name), timeout, func() (bool, string, error) {
 		value, err := getByTestID(page, id).First().Evaluate(fmt.Sprintf("(element) => element.hasAttribute(%q)", name), nil)
-		if err == nil {
-			hasAttribute, ok := value.(bool)
-			if ok {
-				lastHasAttribute = hasAttribute
-			}
-			if ok && !hasAttribute {
-				return nil
-			}
-		} else {
-			lastErr = err
+		if err != nil {
+			return false, "", err
 		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待元素 %q 属性 %q 不存在超时，最后错误: %w", id, name, lastErr)
-	}
-	return fmt.Errorf("等待元素 %q 属性 %q 不存在超时，实际存在: %v", id, name, lastHasAttribute)
+		hasAttribute, ok := value.(bool)
+		if !ok {
+			return false, fmt.Sprintf("属性状态类型异常: %T", value), nil
+		}
+		return !hasAttribute, fmt.Sprintf("实际存在: %v", hasAttribute), nil
+	})
 }
 
 // expectTestIDAttributeValue 使用 page、id、name、expected 和 timeout 参数等待至少一个元素属性符合预期。
 func expectTestIDAttributeValue(page playwright.Page, id string, name string, expected string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastValues string
-	var lastErr error
-	for time.Now().Before(deadline) {
+	return waitForCondition(fmt.Sprintf("等待元素 %q 属性 %q 为 %q", id, name, expected), timeout, func() (bool, string, error) {
 		value, err := page.Evaluate(`([id, name]) => {
 			const elements = Array.from(document.querySelectorAll('[data-testid="' + id + '"]'));
 			return elements.map((element) => element.getAttribute(name) ?? '');
 		}`, []any{id, name})
-		if err == nil {
-			values, ok := value.([]any)
-			if ok {
-				parts := make([]string, 0, len(values))
-				for _, item := range values {
-					text := fmt.Sprint(item)
-					parts = append(parts, text)
-					if text == expected {
-						return nil
-					}
-				}
-				lastValues = strings.Join(parts, ", ")
-			}
-		} else {
-			lastErr = err
+		if err != nil {
+			return false, "", err
 		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待元素 %q 属性 %q 为 %q 超时，最后错误: %w", id, name, expected, lastErr)
-	}
-	return fmt.Errorf("等待元素 %q 属性 %q 为 %q 超时，实际值: %s", id, name, expected, lastValues)
+		values, ok := value.([]any)
+		if !ok {
+			return false, fmt.Sprintf("属性值类型异常: %T", value), nil
+		}
+		parts := make([]string, 0, len(values))
+		for _, item := range values {
+			text := fmt.Sprint(item)
+			parts = append(parts, text)
+			if text == expected {
+				return true, "", nil
+			}
+		}
+		return false, "实际值: " + strings.Join(parts, ", "), nil
+	})
 }
 
 // expectSendButtonLoading 使用 page 和 timeout 参数等待发送按钮进入转圈状态。
 func expectSendButtonLoading(page playwright.Page, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastState string
-	var lastErr error
-	for time.Now().Before(deadline) {
-		value, err := page.Evaluate(`() => {
+	return expectPageState(page, "等待发送按钮转圈", `() => {
 			const button = document.querySelector('[data-testid="send-button"]');
 			if (!button) {
 				return 'missing send-button';
@@ -533,23 +423,7 @@ func expectSendButtonLoading(page playwright.Page, timeout time.Duration) error 
 				return '';
 			}
 			return 'label=' + label + ', loading=' + Boolean(icon);
-		}`, nil)
-		if err == nil {
-			if text, ok := value.(string); ok {
-				lastState = text
-				if text == "" {
-					return nil
-				}
-			}
-		} else {
-			lastErr = err
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待发送按钮转圈超时，最后错误: %w", lastErr)
-	}
-	return fmt.Errorf("等待发送按钮转圈超时，最后状态: %s", lastState)
+		}`, nil, timeout)
 }
 
 // setMessageLogScrollTop 使用 page 和 top 参数设置消息列表滚动位置。
@@ -567,11 +441,7 @@ func setMessageLogScrollTop(page playwright.Page, top float64) error {
 
 // expectMessageLogScrollable 使用 page、minimumGap 和 timeout 参数等待消息列表可滚动。
 func expectMessageLogScrollable(page playwright.Page, minimumGap float64, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastState string
-	var lastErr error
-	for time.Now().Before(deadline) {
-		value, err := page.Evaluate(`(minimumGap) => {
+	return expectPageState(page, "等待消息列表可滚动", `(minimumGap) => {
 			const element = document.querySelector('[data-testid="message-log"]');
 			if (!element) {
 				return 'missing message-log';
@@ -581,32 +451,12 @@ func expectMessageLogScrollable(page playwright.Page, minimumGap float64, timeou
 				return '';
 			}
 			return 'gap=' + gap.toFixed(2) + ', scrollHeight=' + element.scrollHeight + ', clientHeight=' + element.clientHeight;
-		}`, minimumGap)
-		if err == nil {
-			if text, ok := value.(string); ok {
-				lastState = text
-				if text == "" {
-					return nil
-				}
-			}
-		} else {
-			lastErr = err
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待消息列表可滚动超时，最后错误: %w", lastErr)
-	}
-	return fmt.Errorf("等待消息列表可滚动超时，最后状态: %s", lastState)
+		}`, minimumGap, timeout)
 }
 
 // expectMessageLogScrollTop 使用 page、expected、tolerance 和 timeout 参数等待消息列表滚动位置接近预期。
 func expectMessageLogScrollTop(page playwright.Page, expected float64, tolerance float64, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastState string
-	var lastErr error
-	for time.Now().Before(deadline) {
-		value, err := page.Evaluate(`([expected, tolerance]) => {
+	return expectPageState(page, fmt.Sprintf("等待消息列表滚动位置为 %.2f", expected), `([expected, tolerance]) => {
 			const element = document.querySelector('[data-testid="message-log"]');
 			if (!element) {
 				return 'missing message-log';
@@ -617,32 +467,12 @@ func expectMessageLogScrollTop(page playwright.Page, expected float64, tolerance
 				return '';
 			}
 			return 'actual=' + actual.toFixed(2) + ', expected=' + expected.toFixed(2) + ', diff=' + diff.toFixed(2);
-		}`, []any{expected, tolerance})
-		if err == nil {
-			if text, ok := value.(string); ok {
-				lastState = text
-				if text == "" {
-					return nil
-				}
-			}
-		} else {
-			lastErr = err
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待消息列表滚动位置为 %.2f 超时，最后错误: %w", expected, lastErr)
-	}
-	return fmt.Errorf("等待消息列表滚动位置为 %.2f 超时，最后状态: %s", expected, lastState)
+		}`, []any{expected, tolerance}, timeout)
 }
 
 // expectMessageLogScrolledToBottom 使用 page、tolerance 和 timeout 参数等待消息列表滚动到底部。
 func expectMessageLogScrolledToBottom(page playwright.Page, tolerance float64, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastState string
-	var lastErr error
-	for time.Now().Before(deadline) {
-		value, err := page.Evaluate(`(tolerance) => {
+	return expectPageState(page, "等待消息列表滚动到底部", `(tolerance) => {
 			const element = document.querySelector('[data-testid="message-log"]');
 			if (!element) {
 				return 'missing message-log';
@@ -652,148 +482,86 @@ func expectMessageLogScrolledToBottom(page playwright.Page, tolerance float64, t
 				return '';
 			}
 			return 'gap=' + gap.toFixed(2) + ', scrollTop=' + element.scrollTop.toFixed(2) + ', scrollHeight=' + element.scrollHeight + ', clientHeight=' + element.clientHeight;
-		}`, tolerance)
-		if err == nil {
-			if text, ok := value.(string); ok {
-				lastState = text
-				if text == "" {
-					return nil
-				}
-			}
-		} else {
-			lastErr = err
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待消息列表滚动到底部超时，最后错误: %w", lastErr)
-	}
-	return fmt.Errorf("等待消息列表滚动到底部超时，最后状态: %s", lastState)
+		}`, tolerance, timeout)
 }
 
 // expectTestIDNonEmpty 使用 page、id 和 timeout 参数等待元素文本非空。
 func expectTestIDNonEmpty(page playwright.Page, id string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastText string
-	var lastErr error
-	for time.Now().Before(deadline) {
+	return waitForCondition(fmt.Sprintf("等待元素 %q 文本非空", id), timeout, func() (bool, string, error) {
 		text, err := getByTestID(page, id).TextContent()
-		if err == nil {
-			lastText = strings.TrimSpace(text)
-			if lastText != "" {
-				return nil
-			}
-		} else {
-			lastErr = err
+		if err != nil {
+			return false, "", err
 		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待元素 %q 文本非空超时，最后错误: %w", id, lastErr)
-	}
-	return fmt.Errorf("等待元素 %q 文本非空超时，实际文本: %s", id, lastText)
+		text = strings.TrimSpace(text)
+		return text != "", "实际文本: " + text, nil
+	})
 }
 
 // expectNotificationCount 使用 page、minimum 和 timeout 参数等待桌面通知数量达到下限。
 func expectNotificationCount(page playwright.Page, minimum int, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastCount int
-	var lastErr error
-	for time.Now().Before(deadline) {
+	return waitForCondition(fmt.Sprintf("等待桌面通知数量达到 %d", minimum), timeout, func() (bool, string, error) {
 		value, err := page.Evaluate(`() => window.__agenthubNotifications?.length ?? 0`, nil)
-		if err == nil {
-			switch typed := value.(type) {
-			case int:
-				lastCount = typed
-			case float64:
-				lastCount = int(typed)
-			}
-			if lastCount >= minimum {
-				return nil
-			}
-		} else {
-			lastErr = err
+		if err != nil {
+			return false, "", err
 		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待桌面通知数量达到 %d 超时，最后错误: %w", minimum, lastErr)
-	}
-	return fmt.Errorf("等待桌面通知数量达到 %d 超时，实际数量: %d", minimum, lastCount)
+		count, ok := intFromJS(value)
+		if !ok {
+			return false, fmt.Sprintf("通知数量类型异常: %T", value), nil
+		}
+		return count >= minimum, fmt.Sprintf("实际数量: %d", count), nil
+	})
 }
 
-// expectNotificationCountExactly 使用 page、expected 和 timeout 参数确认桌面通知数量保持为 expected。
-func expectNotificationCountExactly(page playwright.Page, expected int, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastCount int
-	var lastErr error
-	for time.Now().Before(deadline) {
-		value, err := page.Evaluate(`() => window.__agenthubNotifications?.length ?? 0`, nil)
-		if err == nil {
-			switch typed := value.(type) {
-			case int:
-				lastCount = typed
-			case float64:
-				lastCount = int(typed)
-			}
-			if lastCount != expected {
-				return fmt.Errorf("桌面通知数量应保持为 %d，实际为 %d", expected, lastCount)
-			}
-		} else {
-			lastErr = err
-		}
-		time.Sleep(150 * time.Millisecond)
+// assertNotificationCount 使用 page 和 expected 参数立即断言桌面通知数量。
+func assertNotificationCount(page playwright.Page, expected int) error {
+	value, err := page.Evaluate(`() => window.__agenthubNotifications?.length ?? 0`, nil)
+	if err != nil {
+		return err
 	}
-	if lastErr != nil {
-		return fmt.Errorf("确认桌面通知数量保持为 %d 失败，最后错误: %w", expected, lastErr)
+	count, ok := intFromJS(value)
+	if !ok {
+		return fmt.Errorf("桌面通知数量类型异常: %T", value)
+	}
+	if count != expected {
+		return fmt.Errorf("桌面通知数量应为 %d，实际为 %d", expected, count)
 	}
 	return nil
 }
 
 // expectClipboardText 使用 page、expected 和 timeout 参数等待复制内容包含 expected。
 func expectClipboardText(page playwright.Page, expected string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastText string
-	var lastErr error
-	for time.Now().Before(deadline) {
+	return waitForCondition(fmt.Sprintf("等待复制内容包含 %q", expected), timeout, func() (bool, string, error) {
 		value, err := page.Evaluate(`() => window.__agenthubClipboard ?? ''`, nil)
-		if err == nil {
-			lastText = fmt.Sprint(value)
-			if strings.Contains(lastText, expected) {
-				return nil
-			}
-		} else {
-			lastErr = err
+		if err != nil {
+			return false, "", err
 		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待复制内容包含 %q 超时，最后错误: %w", expected, lastErr)
-	}
-	return fmt.Errorf("等待复制内容包含 %q 超时，实际内容: %s", expected, lastText)
+		text := fmt.Sprint(value)
+		return strings.Contains(text, expected), "实际内容: " + text, nil
+	})
 }
 
 // expectClipboardNotText 使用 page、unexpected 和 timeout 参数等待复制内容不包含 unexpected。
 func expectClipboardNotText(page playwright.Page, unexpected string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastText string
-	var lastErr error
-	for time.Now().Before(deadline) {
+	return waitForCondition(fmt.Sprintf("等待复制内容不包含 %q", unexpected), timeout, func() (bool, string, error) {
 		value, err := page.Evaluate(`() => window.__agenthubClipboard ?? ''`, nil)
-		if err == nil {
-			lastText = fmt.Sprint(value)
-			if !strings.Contains(lastText, unexpected) {
-				return nil
-			}
-		} else {
-			lastErr = err
+		if err != nil {
+			return false, "", err
 		}
-		time.Sleep(150 * time.Millisecond)
+		text := fmt.Sprint(value)
+		return !strings.Contains(text, unexpected), "实际内容: " + text, nil
+	})
+}
+
+// intFromJS 使用 value 参数把 Playwright 返回的数字转换为 int。
+func intFromJS(value any) (int, bool) {
+	switch typed := value.(type) {
+	case int:
+		return typed, true
+	case float64:
+		return int(typed), true
+	default:
+		return 0, false
 	}
-	if lastErr != nil {
-		return fmt.Errorf("等待复制内容不包含 %q 超时，最后错误: %w", unexpected, lastErr)
-	}
-	return fmt.Errorf("等待复制内容不包含 %q 超时，实际内容: %s", unexpected, lastText)
 }
 
 // expectTestIDDescendantText 使用 page、id、selector、expected 和 timeout 参数等待后代元素文本。
@@ -803,11 +571,7 @@ func expectTestIDDescendantText(page playwright.Page, id string, selector string
 
 // expectTestIDsSameLine 使用 page、firstID、secondID、tolerance 和 timeout 参数等待两个元素同一行展示。
 func expectTestIDsSameLine(page playwright.Page, firstID string, secondID string, tolerance float64, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastState string
-	var lastErr error
-	for time.Now().Before(deadline) {
-		value, err := page.Evaluate(`([firstID, secondID, tolerance]) => {
+	return expectPageState(page, fmt.Sprintf("等待元素 %q 和 %q 同行", firstID, secondID), `([firstID, secondID, tolerance]) => {
 			const find = (id) => document.querySelector('[data-testid="' + id + '"]');
 			const first = find(firstID);
 			const second = find(secondID);
@@ -823,32 +587,12 @@ func expectTestIDsSameLine(page playwright.Page, firstID string, secondID string
 				return '';
 			}
 			return 'center diff=' + diff.toFixed(2) + ', first=' + firstCenter.toFixed(2) + ', second=' + secondCenter.toFixed(2);
-		}`, []any{firstID, secondID, tolerance})
-		if err == nil {
-			if text, ok := value.(string); ok {
-				lastState = text
-				if text == "" {
-					return nil
-				}
-			}
-		} else {
-			lastErr = err
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待元素 %q 和 %q 同行超时，最后错误: %w", firstID, secondID, lastErr)
-	}
-	return fmt.Errorf("等待元素 %q 和 %q 同行超时，最后状态: %s", firstID, secondID, lastState)
+		}`, []any{firstID, secondID, tolerance}, timeout)
 }
 
 // expectProjectMetaSingleCommit 使用 page 和 timeout 参数等待顶部 Git 哈希只出现一次。
 func expectProjectMetaSingleCommit(page playwright.Page, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastState string
-	var lastErr error
-	for time.Now().Before(deadline) {
-		value, err := page.Evaluate(`() => {
+	return expectPageState(page, "等待顶部 Git 哈希只出现一次", `() => {
 			const meta = document.querySelector('[data-testid="project-meta"]');
 			const commit = document.querySelector('[data-testid="project-commit-text"]');
 			if (!meta || !commit) {
@@ -864,32 +608,12 @@ func expectProjectMetaSingleCommit(page playwright.Page, timeout time.Duration) 
 				return '';
 			}
 			return 'commit=' + commitText + ', count=' + count + ', text=' + metaText;
-		}`, nil)
-		if err == nil {
-			if text, ok := value.(string); ok {
-				lastState = text
-				if text == "" {
-					return nil
-				}
-			}
-		} else {
-			lastErr = err
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待顶部 Git 哈希只出现一次超时，最后错误: %w", lastErr)
-	}
-	return fmt.Errorf("等待顶部 Git 哈希只出现一次超时，最后状态: %s", lastState)
+		}`, nil, timeout)
 }
 
 // expectChatTabCompact 使用 page 和 timeout 参数等待聊天标签页尺寸接近 paseo。
 func expectChatTabCompact(page playwright.Page, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastState string
-	var lastErr error
-	for time.Now().Before(deadline) {
-		value, err := page.Evaluate(`() => {
+	return expectPageState(page, "等待聊天标签页尺寸变紧凑", `() => {
 			const tab = document.querySelector('[data-testid="chat-tab"]');
 			if (!tab) {
 				return 'missing tab';
@@ -901,32 +625,12 @@ func expectChatTabCompact(page playwright.Page, timeout time.Duration) error {
 				return '';
 			}
 			return 'height=' + rect.height.toFixed(2) + ', font=' + fontSize.toFixed(2) + ', close=' + Boolean(close);
-		}`, nil)
-		if err == nil {
-			if text, ok := value.(string); ok {
-				lastState = text
-				if text == "" {
-					return nil
-				}
-			}
-		} else {
-			lastErr = err
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待聊天标签页尺寸变紧凑超时，最后错误: %w", lastErr)
-	}
-	return fmt.Errorf("等待聊天标签页尺寸变紧凑超时，最后状态: %s", lastState)
+		}`, nil, timeout)
 }
 
 // expectActiveChatTabText 使用 page、expected 和 timeout 参数等待当前激活聊天页包含 expected。
 func expectActiveChatTabText(page playwright.Page, expected string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastState string
-	var lastErr error
-	for time.Now().Before(deadline) {
-		value, err := page.Evaluate(`(expected) => {
+	return expectPageState(page, fmt.Sprintf("等待激活聊天页包含 %q", expected), `(expected) => {
 			const tabs = Array.from(document.querySelectorAll('[data-testid="chat-tab"]'));
 			const active = tabs.find((tab) => tab.getAttribute('aria-selected') === 'true' || tab.getAttribute('data-state') === 'active');
 			if (!active) {
@@ -937,32 +641,12 @@ func expectActiveChatTabText(page playwright.Page, expected string, timeout time
 				return '';
 			}
 			return 'active=' + text + ', expected=' + expected;
-		}`, expected)
-		if err == nil {
-			if text, ok := value.(string); ok {
-				lastState = text
-				if text == "" {
-					return nil
-				}
-			}
-		} else {
-			lastErr = err
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待激活聊天页包含 %q 超时，最后错误: %w", expected, lastErr)
-	}
-	return fmt.Errorf("等待激活聊天页包含 %q 超时，最后状态: %s", expected, lastState)
+		}`, expected, timeout)
 }
 
 // expectComposerShellLayout 使用 page 和 timeout 参数等待输入框居中且控件位于输入框内。
 func expectComposerShellLayout(page playwright.Page, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastState string
-	var lastErr error
-	for time.Now().Before(deadline) {
-		value, err := page.Evaluate(`() => {
+	return expectPageState(page, "等待输入框居中布局", `() => {
 			const taskbar = document.querySelector('[data-testid="composer-taskbar"]');
 			const shell = document.querySelector('[data-testid="composer-shell"]');
 			if (!taskbar || !shell) {
@@ -982,32 +666,12 @@ func expectComposerShellLayout(page playwright.Page, timeout time.Duration) erro
 				', taskbar=' + taskbarRect.width.toFixed(2) +
 				', radius=' + radius.toFixed(2) +
 				', selects=' + selectCount;
-		}`, nil)
-		if err == nil {
-			if text, ok := value.(string); ok {
-				lastState = text
-				if text == "" {
-					return nil
-				}
-			}
-		} else {
-			lastErr = err
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待输入框居中布局超时，最后错误: %w", lastErr)
-	}
-	return fmt.Errorf("等待输入框居中布局超时，最后状态: %s", lastState)
+		}`, nil, timeout)
 }
 
 // expectComposerInitialSizing 使用 page 和 timeout 参数等待输入框初始高度、字号和背景符合预期。
 func expectComposerInitialSizing(page playwright.Page, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastState string
-	var lastErr error
-	for time.Now().Before(deadline) {
-		value, err := page.Evaluate(`() => {
+	return expectPageState(page, "等待输入框初始尺寸和背景", `() => {
 			const taskbar = document.querySelector('[data-testid="composer-taskbar"]');
 			const shell = document.querySelector('[data-testid="composer-shell"]');
 			const input = document.querySelector('[data-testid="message-input"]');
@@ -1049,32 +713,12 @@ func expectComposerInitialSizing(page playwright.Page, timeout time.Duration) er
 				if (!match) return normalized.trim().toLowerCase();
 				return match[1].split(',').slice(0, 3).map((item) => String(Math.round(Number.parseFloat(item.trim())))).join(',');
 			}
-		}`, nil)
-		if err == nil {
-			if text, ok := value.(string); ok {
-				lastState = text
-				if text == "" {
-					return nil
-				}
-			}
-		} else {
-			lastErr = err
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待输入框初始尺寸和背景超时，最后错误: %w", lastErr)
-	}
-	return fmt.Errorf("等待输入框初始尺寸和背景超时，最后状态: %s", lastState)
+		}`, nil, timeout)
 }
 
 // expectComposerExpandedSizing 使用 page 和 timeout 参数等待输入框随内容增高并保持上限。
 func expectComposerExpandedSizing(page playwright.Page, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastState string
-	var lastErr error
-	for time.Now().Before(deadline) {
-		value, err := getByTestID(page, "message-input").Evaluate(`(element) => {
+	return expectLocatorState(getByTestID(page, "message-input"), "等待输入框内容增高", `(element) => {
 			const rect = element.getBoundingClientRect();
 			const style = getComputedStyle(element);
 			const maxHeight = Number.parseFloat(style.maxHeight);
@@ -1082,95 +726,55 @@ func expectComposerExpandedSizing(page playwright.Page, timeout time.Duration) e
 				return '';
 			}
 			return 'height=' + rect.height.toFixed(2) + ', maxHeight=' + style.maxHeight;
-		}`, nil)
-		if err == nil {
-			if text, ok := value.(string); ok {
-				lastState = text
-				if text == "" {
-					return nil
-				}
-			}
-		} else {
-			lastErr = err
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待输入框内容增高超时，最后错误: %w", lastErr)
-	}
-	return fmt.Errorf("等待输入框内容增高超时，最后状态: %s", lastState)
+		}`, nil, timeout)
 }
 
 // expectComposerSelectWidthsFollowOptions 使用 page 和 timeout 参数等待输入框选择框宽度随实际选项变化。
 func expectComposerSelectWidthsFollowOptions(page playwright.Page, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastState string
-	var lastErr error
-	for time.Now().Before(deadline) {
+	return waitForCondition("等待输入框选择框宽度随选项变化", timeout, func() (bool, string, error) {
 		if err := selectTestID(page, "agent-provider-select", "codex"); err != nil {
-			lastErr = err
-			time.Sleep(150 * time.Millisecond)
-			continue
+			return false, "", err
 		}
 		shortProviderWidth, err := testIDWidth(page, "agent-provider-select")
 		if err != nil {
-			lastErr = err
-			time.Sleep(150 * time.Millisecond)
-			continue
+			return false, "", err
 		}
 		codexWidth, err := testIDWidth(page, "agent-model-select")
 		if err != nil {
-			lastErr = err
-			time.Sleep(150 * time.Millisecond)
-			continue
+			return false, "", err
 		}
 		if err := selectTestID(page, "agent-provider-select", "mock-claude-code"); err != nil {
-			lastErr = err
-			time.Sleep(150 * time.Millisecond)
-			continue
+			return false, "", err
 		}
 		longProviderWidth, err := testIDWidth(page, "agent-provider-select")
 		if err != nil {
-			lastErr = err
-			time.Sleep(150 * time.Millisecond)
-			continue
+			return false, "", err
 		}
 		if err := selectTestID(page, "agent-provider-select", "mock-codex"); err != nil {
-			lastErr = err
-			time.Sleep(150 * time.Millisecond)
-			continue
+			return false, "", err
 		}
 		mockCodexWidth, err := testIDWidth(page, "agent-model-select")
 		if err != nil {
-			lastErr = err
-			time.Sleep(150 * time.Millisecond)
-			continue
+			return false, "", err
 		}
 		textFitState, err := composerSelectTextFitState(page)
 		if err != nil {
-			lastErr = err
-			time.Sleep(150 * time.Millisecond)
-			continue
+			return false, "", err
 		}
 		providerFollowsSelection := longProviderWidth >= shortProviderWidth+24
 		modelFollowsOptions := mockCodexWidth >= codexWidth+16
 		if providerFollowsSelection && modelFollowsOptions && textFitState == "" {
-			return nil
+			return true, "", nil
 		}
-		lastState = fmt.Sprintf(
+		return false, fmt.Sprintf(
 			"shortProviderWidth=%.2f, longProviderWidth=%.2f, codexWidth=%.2f, mockCodexWidth=%.2f, textFit=%s",
 			shortProviderWidth,
 			longProviderWidth,
 			codexWidth,
 			mockCodexWidth,
 			textFitState,
-		)
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待输入框选择框宽度随选项变化超时，最后错误: %w", lastErr)
-	}
-	return fmt.Errorf("等待输入框选择框宽度随选项变化超时，最后状态: %s", lastState)
+		), nil
+	})
 }
 
 // composerSelectTextFitState 使用 page 参数返回选择框文本适配状态。
@@ -1238,11 +842,7 @@ func testIDWidth(page playwright.Page, id string) (float64, error) {
 
 // expectChatContentFontSize 使用 page 和 timeout 参数等待聊天正文使用 16px 字号。
 func expectChatContentFontSize(page playwright.Page, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastState string
-	var lastErr error
-	for time.Now().Before(deadline) {
-		value, err := page.Evaluate(`() => {
+	return expectPageState(page, "等待聊天正文 16px 字号", `() => {
 			const elements = Array.from(document.querySelectorAll('.message-user > pre, .markdown-body'));
 			if (!elements.length) {
 				return 'missing message text';
@@ -1252,32 +852,12 @@ func expectChatContentFontSize(page playwright.Page, timeout time.Duration) erro
 				return '';
 			}
 			return 'sizes=' + sizes.map((size) => size.toFixed(2)).join(',');
-		}`, nil)
-		if err == nil {
-			if text, ok := value.(string); ok {
-				lastState = text
-				if text == "" {
-					return nil
-				}
-			}
-		} else {
-			lastErr = err
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待聊天正文 16px 字号超时，最后错误: %w", lastErr)
-	}
-	return fmt.Errorf("等待聊天正文 16px 字号超时，最后状态: %s", lastState)
+		}`, nil, timeout)
 }
 
 // expectMessageTimesIncludeSeconds 使用 page 和 timeout 参数等待消息时间精确到秒。
 func expectMessageTimesIncludeSeconds(page playwright.Page, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastState string
-	var lastErr error
-	for time.Now().Before(deadline) {
-		value, err := page.Evaluate(`() => {
+	return expectPageState(page, "等待消息时间精确到秒", `() => {
 			const times = Array.from(document.querySelectorAll('[data-testid="message-time"]'))
 				.map((element) => (element.textContent ?? '').trim())
 				.filter(Boolean);
@@ -1288,32 +868,12 @@ func expectMessageTimesIncludeSeconds(page playwright.Page, timeout time.Duratio
 				return '';
 			}
 			return 'times=' + times.join(',');
-		}`, nil)
-		if err == nil {
-			if text, ok := value.(string); ok {
-				lastState = text
-				if text == "" {
-					return nil
-				}
-			}
-		} else {
-			lastErr = err
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待消息时间精确到秒超时，最后错误: %w", lastErr)
-	}
-	return fmt.Errorf("等待消息时间精确到秒超时，最后状态: %s", lastState)
+		}`, nil, timeout)
 }
 
 // expectMessageTimesOutsideBubbles 使用 page 和 timeout 参数等待消息时间位于消息内容外侧。
 func expectMessageTimesOutsideBubbles(page playwright.Page, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastState string
-	var lastErr error
-	for time.Now().Before(deadline) {
-		value, err := page.Evaluate(`() => {
+	return expectPageState(page, "等待消息时间位于消息外侧", `() => {
 			const user = document.querySelector('.message-user');
 			const assistant = document.querySelector('.message-assistant');
 			const userTime = user?.querySelector('[data-testid="message-time"]');
@@ -1345,32 +905,12 @@ func expectMessageTimesOutsideBubbles(page playwright.Page, timeout time.Duratio
 				', assistantTop=' + assistantRect.top.toFixed(2) +
 				', assistantTimeBottom=' + assistantTimeRect.bottom.toFixed(2) +
 				', assistantLeftDelta=' + Math.abs(assistantTimeRect.left - assistantRect.left).toFixed(2);
-		}`, nil)
-		if err == nil {
-			if text, ok := value.(string); ok {
-				lastState = text
-				if text == "" {
-					return nil
-				}
-			}
-		} else {
-			lastErr = err
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待消息时间位于消息外侧超时，最后错误: %w", lastErr)
-	}
-	return fmt.Errorf("等待消息时间位于消息外侧超时，最后状态: %s", lastState)
+		}`, nil, timeout)
 }
 
 // expectNoMessageRoleLabels 使用 page 和 timeout 参数等待消息区域不显示角色名。
 func expectNoMessageRoleLabels(page playwright.Page, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastState string
-	var lastErr error
-	for time.Now().Before(deadline) {
-		value, err := page.Evaluate(`() => {
+	return expectPageState(page, "等待消息区域隐藏角色名", `() => {
 			const legacyLabels = Array.from(document.querySelectorAll('.message-card > div:first-child > span:first-child'))
 				.map((element) => (element.textContent ?? '').trim())
 				.filter(Boolean);
@@ -1382,32 +922,12 @@ func expectNoMessageRoleLabels(page playwright.Page, timeout time.Duration) erro
 				return '';
 			}
 			return 'labels=' + labels.join(',');
-		}`, nil)
-		if err == nil {
-			if text, ok := value.(string); ok {
-				lastState = text
-				if text == "" {
-					return nil
-				}
-			}
-		} else {
-			lastErr = err
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待消息区域隐藏角色名超时，最后错误: %w", lastErr)
-	}
-	return fmt.Errorf("等待消息区域隐藏角色名超时，最后状态: %s", lastState)
+		}`, nil, timeout)
 }
 
 // expectUserCopyButtonOutsideMessage 使用 page 和 timeout 参数等待用户消息复制按钮位于消息框外侧右下方。
 func expectUserCopyButtonOutsideMessage(page playwright.Page, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastState string
-	var lastErr error
-	for time.Now().Before(deadline) {
-		value, err := page.Evaluate(`() => {
+	return expectPageState(page, "等待用户消息复制按钮位于外侧", `() => {
 			const message = document.querySelector('.message-user');
 			const button = document.querySelector('[data-testid="user-copy-button"]');
 			if (!message || !button) {
@@ -1424,32 +944,12 @@ func expectUserCopyButtonOutsideMessage(page playwright.Page, timeout time.Durat
 				', messageRight=' + messageRect.right.toFixed(2) +
 				', buttonTop=' + buttonRect.top.toFixed(2) +
 				', buttonRight=' + buttonRect.right.toFixed(2);
-		}`, nil)
-		if err == nil {
-			if text, ok := value.(string); ok {
-				lastState = text
-				if text == "" {
-					return nil
-				}
-			}
-		} else {
-			lastErr = err
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待用户消息复制按钮位于外侧超时，最后错误: %w", lastErr)
-	}
-	return fmt.Errorf("等待用户消息复制按钮位于外侧超时，最后状态: %s", lastState)
+		}`, nil, timeout)
 }
 
 // expectTestIDPinnedToViewportBottom 使用 page、id 和 timeout 参数等待元素固定在视口底部。
 func expectTestIDPinnedToViewportBottom(page playwright.Page, id string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastState string
-	var lastErr error
-	for time.Now().Before(deadline) {
-		value, err := getByTestID(page, id).First().Evaluate(`(element) => {
+	return expectLocatorState(getByTestID(page, id), fmt.Sprintf("等待元素 %q 固定在视口底部", id), `(element) => {
 			const style = getComputedStyle(element);
 			const rect = element.getBoundingClientRect();
 			const gap = Math.abs(window.innerHeight - rect.bottom);
@@ -1464,51 +964,23 @@ func expectTestIDPinnedToViewportBottom(page playwright.Page, id string, timeout
 				', gap=' + gap.toFixed(2) +
 				', rectBottom=' + rect.bottom.toFixed(2) +
 				', viewport=' + window.innerHeight;
-		}`, nil)
-		if err == nil {
-			if text, ok := value.(string); ok {
-				lastState = text
-				if text == "" {
-					return nil
-				}
-			}
-		} else {
-			lastErr = err
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待元素 %q 固定在视口底部超时，最后错误: %w", id, lastErr)
-	}
-	return fmt.Errorf("等待元素 %q 固定在视口底部超时，最后状态: %s", id, lastState)
+		}`, nil, timeout)
 }
 
 // expectLocatorBackgroundLuminance 使用 locator、minimum 和 timeout 参数等待背景亮度高于 minimum。
 func expectLocatorBackgroundLuminance(locator playwright.Locator, minimum float64, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastLuminance float64
-	var lastText string
-	var lastErr error
-	for time.Now().Before(deadline) {
+	return waitForCondition(fmt.Sprintf("等待背景亮度不低于 %.1f", minimum), timeout, func() (bool, string, error) {
 		value, err := locator.First().Evaluate("(element) => getComputedStyle(element).backgroundColor", nil)
-		if err == nil {
-			text, ok := value.(string)
-			if ok {
-				lastText = text
-				lastLuminance = cssRGBLuminance(text)
-				if lastLuminance >= minimum {
-					return nil
-				}
-			}
-		} else {
-			lastErr = err
+		if err != nil {
+			return false, "", err
 		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待背景亮度不低于 %.1f 超时，最后错误: %w", minimum, lastErr)
-	}
-	return fmt.Errorf("等待背景亮度不低于 %.1f 超时，实际亮度 %.1f，颜色 %s", minimum, lastLuminance, lastText)
+		text, ok := value.(string)
+		if !ok {
+			return false, fmt.Sprintf("背景色类型异常: %T", value), nil
+		}
+		luminance := cssRGBLuminance(text)
+		return luminance >= minimum, fmt.Sprintf("实际亮度 %.1f，颜色 %s", luminance, text), nil
+	})
 }
 
 // cssRGBLuminance 使用 text 参数解析 CSS rgb/rgba 文本并返回感知亮度。
@@ -1535,25 +1007,13 @@ func cssRGBLuminance(text string) float64 {
 
 // expectTestIDCount 使用 page、id 和 expected 参数等待元素数量符合预期。
 func expectTestIDCount(page playwright.Page, id string, expected int, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastCount int
-	var lastErr error
-	for time.Now().Before(deadline) {
+	return waitForCondition(fmt.Sprintf("等待元素 %q 数量为 %d", id, expected), timeout, func() (bool, string, error) {
 		count, err := getByTestID(page, id).Count()
-		if err == nil {
-			lastCount = count
-			if count == expected {
-				return nil
-			}
-		} else {
-			lastErr = err
+		if err != nil {
+			return false, "", err
 		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待元素 %q 数量为 %d 超时，最后错误: %w", id, expected, lastErr)
-	}
-	return fmt.Errorf("等待元素 %q 数量为 %d 超时，实际数量: %d", id, expected, lastCount)
+		return count == expected, fmt.Sprintf("实际数量: %d", count), nil
+	})
 }
 
 // expectTestIDText 使用 page、id、expected 和 timeout 参数等待元素文本包含 expected。
@@ -1563,52 +1023,30 @@ func expectTestIDText(page playwright.Page, id string, expected string, timeout 
 
 // expectTestIDTextOrder 使用 page、id、before、after 和 timeout 参数等待文本顺序符合预期。
 func expectTestIDTextOrder(page playwright.Page, id string, before string, after string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastText string
-	var lastErr error
-	for time.Now().Before(deadline) {
+	return waitForCondition(fmt.Sprintf("等待文本 %q 位于 %q 前", before, after), timeout, func() (bool, string, error) {
 		text, err := getByTestID(page, id).TextContent()
-		if err == nil {
-			lastText = text
-			beforeIndex := strings.Index(text, before)
-			afterIndex := strings.Index(text, after)
-			if beforeIndex >= 0 && afterIndex >= 0 && beforeIndex < afterIndex {
-				return nil
-			}
-		} else {
-			lastErr = err
+		if err != nil {
+			return false, "", err
 		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待文本 %q 位于 %q 前超时，最后错误: %w", before, after, lastErr)
-	}
-	return fmt.Errorf("等待文本 %q 位于 %q 前超时，实际文本: %s", before, after, lastText)
+		beforeIndex := strings.Index(text, before)
+		afterIndex := strings.Index(text, after)
+		return beforeIndex >= 0 && afterIndex >= 0 && beforeIndex < afterIndex, "实际文本: " + text, nil
+	})
 }
 
 // expectToolCallSummaryText 使用 page、expected 和 timeout 参数等待工具调用标题包含 expected。
 func expectToolCallSummaryText(page playwright.Page, expected string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastText string
-	var lastErr error
-	for time.Now().Before(deadline) {
+	return waitForCondition(fmt.Sprintf("等待工具调用标题包含 %q", expected), timeout, func() (bool, string, error) {
 		value, err := getByTestID(page, "tool-call-details").First().Evaluate("(element) => element.querySelector('summary')?.textContent ?? ''", nil)
-		if err == nil {
-			if text, ok := value.(string); ok {
-				lastText = text
-				if strings.Contains(text, expected) {
-					return nil
-				}
-			}
-		} else {
-			lastErr = err
+		if err != nil {
+			return false, "", err
 		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待工具调用标题包含 %q 超时，最后错误: %w", expected, lastErr)
-	}
-	return fmt.Errorf("等待工具调用标题包含 %q 超时，实际标题: %s", expected, lastText)
+		text, ok := value.(string)
+		if !ok {
+			return false, fmt.Sprintf("工具调用标题类型异常: %T", value), nil
+		}
+		return strings.Contains(text, expected), "实际标题: " + text, nil
+	})
 }
 
 // expectTestIDNotText 使用 page、id、unexpected 和 timeout 参数等待元素文本不包含 unexpected。
@@ -1618,48 +1056,24 @@ func expectTestIDNotText(page playwright.Page, id string, unexpected string, tim
 
 // expectLocatorText 使用 locator、expected 和 timeout 参数等待元素文本包含 expected。
 func expectLocatorText(locator playwright.Locator, expected string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastText string
-	var lastErr error
-	for time.Now().Before(deadline) {
+	return waitForCondition(fmt.Sprintf("等待文本 %q", expected), timeout, func() (bool, string, error) {
 		text, err := locator.TextContent()
-		if err == nil {
-			lastText = text
-			if strings.Contains(text, expected) {
-				return nil
-			}
-		} else {
-			lastErr = err
+		if err != nil {
+			return false, "", err
 		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待文本 %q 超时，最后错误: %w", expected, lastErr)
-	}
-	return fmt.Errorf("等待文本 %q 超时，实际文本: %s", expected, lastText)
+		return strings.Contains(text, expected), "实际文本: " + text, nil
+	})
 }
 
 // expectLocatorNotText 使用 locator、unexpected 和 timeout 参数等待元素文本不包含 unexpected。
 func expectLocatorNotText(locator playwright.Locator, unexpected string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastText string
-	var lastErr error
-	for time.Now().Before(deadline) {
+	return waitForCondition(fmt.Sprintf("等待文本不包含 %q", unexpected), timeout, func() (bool, string, error) {
 		text, err := locator.TextContent()
-		if err == nil {
-			lastText = text
-			if !strings.Contains(text, unexpected) {
-				return nil
-			}
-		} else {
-			lastErr = err
+		if err != nil {
+			return false, "", err
 		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待文本不包含 %q 超时，最后错误: %w", unexpected, lastErr)
-	}
-	return fmt.Errorf("等待文本不包含 %q 超时，实际文本: %s", unexpected, lastText)
+		return !strings.Contains(text, unexpected), "实际文本: " + text, nil
+	})
 }
 
 // writeFile 使用 path 和 content 参数写入文本文件。

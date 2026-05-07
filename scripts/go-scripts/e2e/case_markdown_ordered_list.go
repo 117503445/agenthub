@@ -65,18 +65,14 @@ func runMarkdownOrderedListCase(ctx E2EContext) (success bool) {
 
 // expectMarkdownOrderedList 使用 page、expectedItems 和 timeout 参数等待有序列表连续渲染。
 func expectMarkdownOrderedList(page playwright.Page, expectedItems []string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastState string
-	var lastErr error
-	for time.Now().Before(deadline) {
-		value, err := page.Evaluate(`(expectedItems) => {
-			const markdown = document.querySelector('[data-testid="assistant-markdown"]');
-			if (!markdown) return 'missing markdown';
-			const lists = Array.from(markdown.querySelectorAll('ol'));
-			const matchingList = lists.find((list) => {
-				const items = Array.from(list.querySelectorAll(':scope > li')).map((item) => item.textContent || '');
-				return expectedItems.every((expected) => items.some((text) => text.includes(expected)));
-			});
+	return expectPageState(page, "等待 markdown 有序列表连续渲染", `(expectedItems) => {
+		const markdown = document.querySelector('[data-testid="assistant-markdown"]');
+		if (!markdown) return 'missing markdown';
+		const lists = Array.from(markdown.querySelectorAll('ol'));
+		const matchingList = lists.find((list) => {
+			const items = Array.from(list.querySelectorAll(':scope > li')).map((item) => item.textContent || '');
+			return expectedItems.every((expected) => items.some((text) => text.includes(expected)));
+		});
 		if (!matchingList) {
 			return 'ol=' + lists.length;
 		}
@@ -84,23 +80,8 @@ func expectMarkdownOrderedList(page playwright.Page, expectedItems []string, tim
 		if (directItems.length !== expectedItems.length) {
 			return 'li=' + directItems.length;
 		}
-			return '';
-		}`, expectedItems)
-		if err == nil {
-			if text := fmt.Sprint(value); text == "" {
-				return nil
-			} else {
-				lastState = text
-			}
-		} else {
-			lastErr = err
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待 markdown 有序列表连续渲染超时，最后错误: %w", lastErr)
-	}
-	return fmt.Errorf("等待 markdown 有序列表连续渲染超时，最后状态: %s", lastState)
+		return '';
+	}`, expectedItems, timeout)
 }
 
 // writeMarkdownOrderedListReport 使用 outputDir、success 和 events 参数写入 Markdown 有序列表报告。

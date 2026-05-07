@@ -51,27 +51,7 @@ func runMaterialThemeCase(ctx E2EContext) (success bool) {
 
 // expectMaterialThemeContract 使用 page 和 timeout 参数等待 Material 主题契约生效。
 func expectMaterialThemeContract(page playwright.Page, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	lastState := ""
-	var lastErr error
-	for time.Now().Before(deadline) {
-		value, err := page.Evaluate(materialThemeContractScript())
-		if err != nil {
-			lastErr = err
-			time.Sleep(150 * time.Millisecond)
-			continue
-		}
-		state, _ := value.(string)
-		lastState = state
-		if state == "ok" {
-			return nil
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待 Material 主题契约超时，最后错误: %w", lastErr)
-	}
-	return fmt.Errorf("等待 Material 主题契约超时，最后状态: %s", lastState)
+	return expectPageState(page, "等待 Material 主题契约", materialThemeContractScript(), nil, timeout)
 }
 
 // materialThemeContractScript 返回浏览器端 Material 主题契约检查脚本。
@@ -93,7 +73,7 @@ func materialThemeContractScript() string {
 		const composerStyle = getComputedStyle(composer);
 		if (relativeLuminance(composerStyle.backgroundColor) < 0.92) return 'composer is too dark';
 		if (!composerStyle.boxShadow || composerStyle.boxShadow === 'none') return 'composer has no elevation';
-		return 'ok';
+		return '';
 
 		function relativeLuminance(color) {
 			const channels = color.match(/\d+(\.\d+)?/g)?.slice(0, 3).map(Number) ?? [0, 0, 0];

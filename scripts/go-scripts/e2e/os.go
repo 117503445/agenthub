@@ -14,23 +14,12 @@ func osStat(path string) (os.FileInfo, error) {
 
 // expectFileText 使用 path、text 和 timeout 参数等待文件内容包含指定文本。
 func expectFileText(path string, text string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastContent string
-	var lastErr error
-	for time.Now().Before(deadline) {
+	return waitForCondition(fmt.Sprintf("等待文件 %s 包含 %q", path, text), timeout, func() (bool, string, error) {
 		data, err := os.ReadFile(path)
-		if err == nil {
-			lastContent = string(data)
-			if strings.Contains(lastContent, text) {
-				return nil
-			}
-		} else {
-			lastErr = err
+		if err != nil {
+			return false, "", err
 		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("等待文件 %s 包含 %q 超时，最后错误: %w", path, text, lastErr)
-	}
-	return fmt.Errorf("等待文件 %s 包含 %q 超时，当前内容: %s", path, text, lastContent)
+		content := string(data)
+		return strings.Contains(content, text), "当前内容: " + content, nil
+	})
 }
