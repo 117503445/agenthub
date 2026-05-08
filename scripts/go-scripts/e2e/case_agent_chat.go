@@ -446,7 +446,7 @@ func runAgentChatCase(ctx E2EContext) (success bool) {
 	if err := fillTestID(page, "message-input", inactivePrompt); err != nil {
 		return fail(err)
 	}
-	if err := page.Keyboard().Press("Enter"); err != nil {
+	if err := clickTestID(page, "send-button"); err != nil {
 		return fail(err)
 	}
 	if err := page.Locator(`[data-testid="chat-tab"]`, playwright.PageLocatorOptions{HasText: "聊天 2"}).Click(); err != nil {

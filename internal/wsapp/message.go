@@ -16,8 +16,6 @@ type ServerMessage struct {
 	Version    string `json:"version"`           // Version 表示当前构建版本。
 	BuildTime  string `json:"buildTime"`         // BuildTime 表示后端构建时间。
 	Hostname   string `json:"hostname"`          // Hostname 表示后端机器名。
-	Epoch      string `json:"epoch,omitempty"`   // Epoch 表示服务端本轮 timeline 标识。
-	Seq        int64  `json:"seq,omitempty"`     // Seq 表示服务端 timeline 单调递增序号。
 }
 
 // ProjectMutationPayload 表示 project 创建和更新消息的参数。
@@ -55,11 +53,6 @@ type ChatStopPayload struct {
 	ChatID string `json:"chatId"` // ChatID 表示目标聊天页标识。
 }
 
-// ChatDetailGetPayload 表示读取聊天页详情的请求参数。
-type ChatDetailGetPayload struct {
-	ChatID string `json:"chatId"` // ChatID 表示目标聊天页标识。
-}
-
 // ChatDraftUpdatePayload 表示更新聊天输入框文字草稿的请求参数。
 type ChatDraftUpdatePayload struct {
 	ChatID string `json:"chatId"` // ChatID 表示目标聊天页标识。
@@ -79,20 +72,12 @@ type ChatUserInputRespondPayload struct {
 	Answers    map[string][]string `json:"answers"`    // Answers 表示按问题 ID 提交的答案列表。
 }
 
-// TimelineCatchUpPayload 表示前端请求补齐 timeline 的参数。
-type TimelineCatchUpPayload struct {
-	Epoch  string `json:"epoch"`  // Epoch 表示前端当前持有的 timeline 标识。
-	EndSeq int64  `json:"endSeq"` // EndSeq 表示前端已经应用到的最后序号。
-}
-
-// TimelineCatchUpResponse 表示服务端返回的 timeline 补齐结果。
-type TimelineCatchUpResponse struct {
-	Epoch    string          `json:"epoch"`              // Epoch 表示服务端当前 timeline 标识。
-	StartSeq int64           `json:"startSeq"`           // StartSeq 表示本次返回窗口的起始序号。
-	EndSeq   int64           `json:"endSeq"`             // EndSeq 表示本次返回窗口的结束序号。
-	Messages []ServerMessage `json:"messages,omitempty"` // Messages 表示按序返回的历史消息。
-	Reset    bool            `json:"reset"`              // Reset 表示前端应使用 Snapshot 重建 canonical 状态。
-	Snapshot *Snapshot       `json:"snapshot,omitempty"` // Snapshot 表示 reset 时返回的权威状态快照。
+// ChatTimelineFetchPayload 表示前端拉取聊天 timeline 的参数。
+type ChatTimelineFetchPayload struct {
+	ChatID    string              `json:"chatId"`           // ChatID 表示聊天页标识。
+	Direction string              `json:"direction"`        // Direction 表示拉取方向。
+	Cursor    *ChatTimelineCursor `json:"cursor,omitempty"` // Cursor 表示可选游标。
+	Limit     int                 `json:"limit,omitempty"`  // Limit 表示最多返回行数。
 }
 
 // MessageImagePayload 表示浏览器发送的图片附件。
@@ -115,7 +100,6 @@ type ChatAgentUpdatePayload struct {
 type AgentModelAddPayload struct {
 	Provider string `json:"provider"` // Provider 表示目标 agent provider。
 	ID       string `json:"id"`       // ID 表示模型标识。
-	Label    string `json:"label"`    // Label 为旧请求兼容字段，服务端忽略并使用 ID。
 }
 
 // AgentBuiltinProfilePayload 表示新增内置 Profile 的请求参数。
@@ -127,6 +111,5 @@ type AgentBuiltinProfilePayload struct {
 type AgentProfileModelPayload struct {
 	ProfileID string `json:"profileId"` // ProfileID 表示目标 Profile 标识。
 	ID        string `json:"id"`        // ID 表示模型标识。
-	Label     string `json:"label"`     // Label 为旧请求兼容字段，服务端忽略并使用 ID。
 	Default   bool   `json:"default"`   // Default 表示是否设为默认模型。
 }

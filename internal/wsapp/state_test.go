@@ -49,9 +49,12 @@ func TestStoreProjectChatLifecycle(t *testing.T) {
 		t.Fatalf("聊天页草稿未保存原文: changed=%v chat=%#v", changed, chat)
 	}
 
-	chat, userMessage, assistantMessage, err := store.AddRunMessages(chat.ID, "  第一条 prompt  ", nil, false)
+	chat, userMessage, assistantMessage, rows, err := store.AddRunMessages(chat.ID, "  第一条 prompt  ", nil, false)
 	if err != nil {
 		t.Fatalf("追加运行消息失败: %v", err)
+	}
+	if len(rows) != 2 || rows[0].Seq >= rows[1].Seq {
+		t.Fatalf("运行消息 timeline 行不正确: %#v", rows)
 	}
 	if chat.Status != ChatStatusRunning {
 		t.Fatalf("聊天页未进入运行状态: %s", chat.Status)
@@ -81,10 +84,10 @@ func TestStoreProjectChatLifecycle(t *testing.T) {
 	if chat.AgentModel != "gpt-5.4" {
 		t.Fatalf("锁定后的模型未更新: %#v", chat)
 	}
-	if _, ok := store.AppendAssistantDelta(chat.ID, assistantMessage.ID, "Mock "); !ok {
+	if _, _, ok := store.AppendAssistantDelta(chat.ID, assistantMessage.ID, "Mock "); !ok {
 		t.Fatal("追加第一段 assistant 增量失败")
 	}
-	chat, toolMessage, ok := store.UpsertToolCall(chat.ID, assistantMessage.ID, ToolCall{
+	chat, toolMessage, _, ok := store.UpsertToolCall(chat.ID, assistantMessage.ID, ToolCall{
 		ID:     "tool-1",
 		Name:   "Read",
 		Status: ToolCallStatusRunning,
@@ -96,7 +99,7 @@ func TestStoreProjectChatLifecycle(t *testing.T) {
 	if len(toolMessage.ToolCalls) != 1 || toolMessage.ToolCalls[0].Name != "Read" {
 		t.Fatalf("工具调用插入不正确: %#v", toolMessage.ToolCalls)
 	}
-	chat, toolMessage, ok = store.UpsertToolCall(chat.ID, assistantMessage.ID, ToolCall{
+	chat, toolMessage, _, ok = store.UpsertToolCall(chat.ID, assistantMessage.ID, ToolCall{
 		ID:     "tool-1",
 		Status: ToolCallStatusComplete,
 		Output: "完成",
@@ -107,10 +110,10 @@ func TestStoreProjectChatLifecycle(t *testing.T) {
 	if toolMessage.ToolCalls[0].Status != ToolCallStatusComplete || toolMessage.ToolCalls[0].Output != "完成" {
 		t.Fatalf("工具调用更新不正确: %#v chat=%#v", toolMessage.ToolCalls, chat)
 	}
-	if _, ok := store.AppendAssistantDelta(chat.ID, assistantMessage.ID, "Claude"); !ok {
+	if _, _, ok := store.AppendAssistantDelta(chat.ID, assistantMessage.ID, "Claude"); !ok {
 		t.Fatal("追加第二段 assistant 增量失败")
 	}
-	chat, assistantMessage, ok = store.FinishAssistantMessage(chat.ID, assistantMessage.ID, MessageStatusComplete)
+	chat, assistantMessage, _, ok = store.FinishAssistantMessage(chat.ID, assistantMessage.ID, MessageStatusComplete)
 	if !ok {
 		t.Fatal("结束 assistant 消息失败")
 	}
@@ -128,19 +131,26 @@ func TestStoreProjectChatLifecycle(t *testing.T) {
 		t.Fatalf("设置 session id 失败: ok=%v chat=%#v", ok, updatedChat)
 	}
 
-	chat, _, assistantMessage, err = store.AddRunMessages(chat.ID, "需要停止", nil, false)
+	chat, _, assistantMessage, _, err = store.AddRunMessages(chat.ID, "需要停止", nil, false)
 	if err != nil {
 		t.Fatalf("追加待停止消息失败: %v", err)
 	}
 	if chat.Title != "第一条 prompt" {
 		t.Fatalf("聊天页标题不应被后续 prompt 覆盖: %q", chat.Title)
 	}
-	chat, stoppedMessage, ok := store.StopStreamingMessage(chat.ID, MessageStatusStopped)
+	chat, stoppedMessage, _, ok := store.StopStreamingMessage(chat.ID, MessageStatusStopped)
 	if !ok {
 		t.Fatal("停止流式消息失败")
 	}
 	if chat.Status != ChatStatusIdle || stoppedMessage.ID != assistantMessage.ID || stoppedMessage.Status != MessageStatusStopped {
 		t.Fatalf("停止后的消息状态不正确: chat=%#v message=%#v", chat, stoppedMessage)
+	}
+	chat, systemMessage, systemRow, err := store.AddSystemMessage(chat.ID, "系统错误", MessageStatusError)
+	if err != nil {
+		t.Fatalf("追加系统消息失败: %v", err)
+	}
+	if systemRow.Item.Type != ChatTimelineItemSystemMessage || systemMessage.Role != MessageRoleSystem || chat.Status != ChatStatusError {
+		t.Fatalf("系统消息 timeline 不正确: row=%#v message=%#v chat=%#v", systemRow, systemMessage, chat)
 	}
 
 	snapshot := store.Snapshot()

@@ -119,7 +119,10 @@ func registeredCases() map[string]E2ECase {
 		"case_chat_send_feedback": {Name: "case_chat_send_feedback", Run: runChatSendFeedbackCase, Env: map[string]string{
 			"MOCK_AGENT": "1",
 		}},
-		"case_chat_detail_lazy_load": {Name: "case_chat_detail_lazy_load", Run: runChatDetailLazyLoadCase, Env: map[string]string{
+		"case_chat_timeline_append_only": {Name: "case_chat_timeline_append_only", Run: runChatTimelineAppendOnlyCase, Env: map[string]string{
+			"MOCK_AGENT": "1",
+		}},
+		"case_chat_timeline_fetch": {Name: "case_chat_timeline_fetch", Run: runChatTimelineFetchCase, Env: map[string]string{
 			"MOCK_AGENT": "1",
 		}},
 		"case_codex_resume_context": {Name: "case_codex_resume_context", Run: runCodexResumeContextCase, Env: map[string]string{
@@ -166,7 +169,9 @@ func registeredCases() map[string]E2ECase {
 		"case_stream_coalescing": {Name: "case_stream_coalescing", Run: runStreamCoalescingCase, Env: map[string]string{
 			"MOCK_AGENT": "1",
 		}},
-		"case_timeline_reliability": {Name: "case_timeline_reliability", Run: runTimelineReliabilityCase},
+		"case_timeline_reliability": {Name: "case_timeline_reliability", Run: runTimelineReliabilityCase, Env: map[string]string{
+			"MOCK_AGENT": "1",
+		}},
 		"case_token_auth": {Name: "case_token_auth", Run: runTokenAuthCase, Env: map[string]string{
 			"AGENTHUB_TOKEN": e2eAgentHubToken,
 		}},

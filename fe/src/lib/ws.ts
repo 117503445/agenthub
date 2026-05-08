@@ -18,10 +18,6 @@ export interface ServerMessage<TPayload = unknown> {
   buildTime: string
   /** hostname 表示后端机器名。 */
   hostname?: string
-  /** epoch 表示服务端本轮 timeline 标识。 */
-  epoch?: string
-  /** seq 表示服务端 timeline 单调递增序号。 */
-  seq?: number
 }
 
 // getWebSocketUrl 根据当前页面路径和 token 参数生成 WebSocket 地址，支持子路径部署。

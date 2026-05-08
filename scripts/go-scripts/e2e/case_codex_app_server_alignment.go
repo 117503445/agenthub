@@ -3,7 +3,6 @@ package e2e
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -87,9 +86,6 @@ func runCodexAppServerAlignmentCase(ctx E2EContext) (success bool) {
 	}
 	events = append(events, reportStep("WebSocket chat.send 可携带 outputSchema，并透传到 Codex turn/start。"))
 
-	if err := removeCodexChatDetail(ctx.DataDir, chatID); err != nil {
-		return fail(err)
-	}
 	ctx.StopServer()
 	restartStop, err := restartServerAtSameBaseURL(ctx, "codex-alignment-restart-logs")
 	if err != nil {
@@ -102,20 +98,20 @@ func runCodexAppServerAlignmentCase(ctx E2EContext) (success bool) {
 	if err := expectTestIDText(page, "connection-state", "已连接", 20*time.Second); err != nil {
 		return fail(err)
 	}
+	if err := expectTestIDText(page, "message-log", "Output schema received", 20*time.Second); err != nil {
+		return fail(err)
+	}
 	if err := fillTestID(page, "message-input", "MOCK_CODEX_HISTORY_HYDRATE"); err != nil {
 		return fail(err)
 	}
 	if err := page.Keyboard().Press("Enter"); err != nil {
 		return fail(err)
 	}
-	if err := expectTestIDText(page, "message-log", "历史中恢复的 Codex 消息", 30*time.Second); err != nil {
-		return fail(err)
-	}
 	if err := expectTestIDText(page, "message-log", "History hydrate complete", 30*time.Second); err != nil {
 		return fail(err)
 	}
 	screenshot(page, filepath.Join(ctx.ScreenshotsDir, "01-codex-app-server-alignment.png"), true)
-	events = append(events, reportStep("聊天详情缺失时，AgentHub 通过 thread/read 从 Codex 原生历史恢复消息后继续当前 turn。"))
+	events = append(events, reportStep("服务重启后，前端通过聊天 timeline 恢复历史消息并继续当前 Codex turn。"))
 	events = append(events, reportImage("Codex app-server 对齐", "screenshots/01-codex-app-server-alignment.png"))
 	return true
 }
@@ -165,17 +161,5 @@ func sendCodexOutputSchemaPrompt(baseURL string, chatID string) error {
 			"required": []string{"message"},
 		},
 	}
-	return sendChatDetailLazyMessage(conn, "chat.send", payload)
-}
-
-// removeCodexChatDetail 使用 dataDir 和 chatID 参数删除聊天详情文件以模拟详情缺失。
-func removeCodexChatDetail(dataDir string, chatID string) error {
-	if chatID == "" {
-		return fmt.Errorf("chatID 不能为空")
-	}
-	path := filepath.Join(dataDir, "chats", chatID+".json")
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
+	return sendE2EClientMessage(conn, "chat.send", payload)
 }

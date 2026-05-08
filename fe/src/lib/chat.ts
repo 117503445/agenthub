@@ -1,4 +1,4 @@
-import type { Chat, ChatMessage, ChatTerminalIndicator, ChatVisualStatus, MessagePart, Project, ToolCall } from '../types'
+import type { AgentUsage, Chat, ChatMessage, ChatTerminalIndicator, ChatTimelineRow, ChatVisualStatus, MessagePart, PlanApproval, Project, ToolCall } from '../types'
 
 // formatTime 使用 value 参数格式化界面时间。
 export function formatTime(value: string) {
@@ -87,31 +87,143 @@ export function toolCommandTitle(tool: ToolCall) {
   return `${tool.name}: ${command}`
 }
 
-// messagePartsForRender 使用 message 参数返回兼容旧数据的渲染片段。
+// messagePartsForRender 使用 message 参数返回可渲染片段。
 export function messagePartsForRender(message: ChatMessage): MessagePart[] {
-  if (message.parts?.length) {
-    return message.parts
+  return message.parts ?? []
+}
+
+// projectChatTimeline 使用 chat 和 rows 参数投影聊天正文。
+export function projectChatTimeline(chat: Chat, rows: ChatTimelineRow[]): Chat {
+  const messages: ChatMessage[] = []
+  const indexes = new Map<string, number>()
+  let plan: PlanApproval | undefined
+  let usage: AgentUsage | undefined = chat.usage
+  for (const row of [...rows].sort((left, right) => left.seq - right.seq)) {
+    const item = row.item
+    if (item.type === 'message_started' || item.type === 'system_message') {
+      const message: ChatMessage = {
+        id: item.messageId ?? row.id,
+        chatId: row.chatId,
+        role: item.type === 'system_message' ? 'system' : (item.role ?? 'assistant'),
+        text: item.text ?? '',
+        status: (item.status as ChatMessage['status']) ?? 'complete',
+        images: item.images ?? [],
+        toolCalls: [],
+        parts: [],
+        createdAt: row.timestamp,
+        updatedAt: row.timestamp,
+      }
+      indexes.set(message.id, messages.length)
+      messages.push(message)
+      continue
+    }
+    if (item.type === 'assistant_delta' && item.messageId) {
+      const index = indexes.get(item.messageId)
+      if (index === undefined) continue
+      const message = messages[index]
+      const delta = item.delta ?? ''
+      message.text += delta
+      message.status = 'streaming'
+      message.updatedAt = row.timestamp
+      appendTextPart(message, delta, row)
+      continue
+    }
+    if (item.type === 'tool_call' && item.messageId && item.toolCall) {
+      const index = indexes.get(item.messageId)
+      if (index === undefined) continue
+      const message = messages[index]
+      upsertToolCall(message, item.toolCall, row.timestamp)
+      message.updatedAt = row.timestamp
+      continue
+    }
+    if (item.type === 'usage_updated' && item.usage) {
+      usage = item.usage
+      continue
+    }
+    if (item.type === 'message_finished' && item.messageId) {
+      const index = indexes.get(item.messageId)
+      if (index === undefined) continue
+      messages[index] = { ...messages[index], status: (item.status as ChatMessage['status']) ?? 'complete', updatedAt: row.timestamp }
+      continue
+    }
+    if (item.type === 'plan_set' && item.plan) {
+      plan = item.plan
+      continue
+    }
+    if (item.type === 'plan_status_changed' && plan) {
+      plan = { ...plan, status: (item.status as PlanApproval['status']) ?? plan.status, updatedAt: row.timestamp }
+    }
   }
-  const parts: MessagePart[] = []
-  for (const toolCall of message.toolCalls ?? []) {
-    parts.push({
-      id: `legacy-tool-${toolCall.id}`,
-      type: 'tool_call',
-      toolCall,
-      createdAt: toolCall.createdAt,
-      updatedAt: toolCall.updatedAt,
-    })
+  return { ...chat, messages, plan, usage, timelineLoaded: true, timelineLoadedAt: chat.updatedAt }
+}
+
+// appendTextPart 使用 message、delta 和 row 参数追加文本片段。
+function appendTextPart(message: ChatMessage, delta: string, row: ChatTimelineRow) {
+  if (!delta) return
+  const parts = message.parts ?? []
+  const last = parts.at(-1)
+  if (last?.type === 'text') {
+    last.text = `${last.text ?? ''}${delta}`
+    last.updatedAt = row.timestamp
+    message.parts = parts
+    return
   }
-  if (message.text || message.status === 'streaming') {
-    parts.push({
-      id: `legacy-text-${message.id}`,
+  message.parts = [
+    ...parts,
+    {
+      id: `part-${row.id}`,
       type: 'text',
-      text: message.text || (message.status === 'streaming' ? '正在等待输出...' : ''),
-      createdAt: message.createdAt,
-      updatedAt: message.updatedAt,
-    })
+      text: delta,
+      createdAt: row.timestamp,
+      updatedAt: row.timestamp,
+    },
+  ]
+}
+
+// upsertToolCall 使用 message、tool 和 timestamp 参数归并工具调用。
+function upsertToolCall(message: ChatMessage, tool: ToolCall, timestamp: string) {
+  const tools = [...(message.toolCalls ?? [])]
+  const index = tools.findIndex((item) => item.id === tool.id)
+  const nextTool = index >= 0 ? mergeToolCall(tools[index], tool, timestamp) : { ...tool, createdAt: timestamp, updatedAt: timestamp }
+  if (index >= 0) {
+    tools[index] = nextTool
+  } else {
+    tools.push(nextTool)
   }
-  return parts
+  message.toolCalls = tools
+  const parts = [...(message.parts ?? [])]
+  const partIndex = parts.findIndex((part) => part.type === 'tool_call' && part.toolCall?.id === nextTool.id)
+  const part: MessagePart = {
+    id: partIndex >= 0 ? parts[partIndex].id : `part-${nextTool.id}`,
+    type: 'tool_call',
+    toolCall: nextTool,
+    createdAt: partIndex >= 0 ? parts[partIndex].createdAt : timestamp,
+    updatedAt: timestamp,
+  }
+  if (partIndex >= 0) {
+    parts[partIndex] = part
+  } else {
+    parts.push(part)
+  }
+  message.parts = parts
+}
+
+// mergeToolCall 使用 existing、incoming 和 timestamp 参数归并工具调用。
+function mergeToolCall(existing: ToolCall, incoming: ToolCall, timestamp: string): ToolCall {
+  const output =
+    incoming.output && existing.output && incoming.status === 'running' && existing.status === 'running' && !existing.output.includes(incoming.output)
+      ? `${existing.output}${incoming.output}`
+      : incoming.output || existing.output
+  return {
+    ...existing,
+    ...incoming,
+    name: incoming.name || existing.name,
+    input: incoming.input || existing.input,
+    output,
+    userInputRequest: incoming.userInputRequest ?? existing.userInputRequest,
+    createdAt: existing.createdAt,
+    updatedAt: timestamp,
+  }
 }
 
 // upsertById 使用 list、item 和 getId 参数插入或更新列表项。

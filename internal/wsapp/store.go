@@ -15,6 +15,7 @@ type Store struct {
 	mu              sync.RWMutex
 	projects        map[string]Project
 	chats           map[string]Chat
+	timelines       map[string]chatTimelineState
 	nextChatOrdinal map[string]int
 	agentProfiles   []AgentProfile
 	lastAgent       LastAgentSelection
@@ -38,6 +39,7 @@ type StorePersister interface {
 type storeState struct {
 	projects        map[string]Project
 	chats           map[string]Chat
+	timelines       map[string]chatTimelineState
 	nextChatOrdinal map[string]int
 	agentProfiles   []AgentProfile
 	lastAgent       LastAgentSelection
@@ -45,7 +47,7 @@ type storeState struct {
 
 // storeCommitOptions 表示一次 Store 提交的持久化策略。
 type storeCommitOptions struct {
-	deferChatDetails bool // deferChatDetails 表示聊天详情是否允许延迟落盘。
+	deferTimelines bool // deferTimelines 表示聊天 timeline 是否允许延迟落盘。
 }
 
 // agentSkillCache 表示 Store 中缓存的 skills 扫描结果。
@@ -61,11 +63,6 @@ func NewStore() *Store {
 	return NewStoreWithAgentProfiles(AgentProfiles(AgentOptionsConfig{}))
 }
 
-// NewStoreWithAgentProviders 使用 agentProviders 参数创建内存状态存储。
-func NewStoreWithAgentProviders(agentProviders []AgentProviderOption) *Store {
-	return NewStoreWithAgentProfiles(AgentProfilesFromProviderOptions(agentProviders))
-}
-
 // NewStoreWithAgentProfiles 使用 agentProfiles 参数创建内存状态存储。
 func NewStoreWithAgentProfiles(agentProfiles []AgentProfile) *Store {
 	if len(agentProfiles) == 0 {
@@ -74,6 +71,7 @@ func NewStoreWithAgentProfiles(agentProfiles []AgentProfile) *Store {
 	return newStoreFromState(storeState{
 		projects:        make(map[string]Project),
 		chats:           make(map[string]Chat),
+		timelines:       make(map[string]chatTimelineState),
 		nextChatOrdinal: make(map[string]int),
 		agentProfiles:   cloneAgentProfiles(agentProfiles),
 		lastAgent:       defaultLastAgentSelection(AgentProviderOptionsFromProfiles(agentProfiles)),
@@ -86,6 +84,7 @@ func newStoreFromState(state storeState, persister StorePersister) *Store {
 	return &Store{
 		projects:        state.projects,
 		chats:           state.chats,
+		timelines:       state.timelines,
 		nextChatOrdinal: state.nextChatOrdinal,
 		agentProfiles:   state.agentProfiles,
 		lastAgent:       state.lastAgent,
@@ -112,11 +111,6 @@ func (s *Store) commit(mutate func(state *storeState) error) error {
 	return s.commitWithOptions(storeCommitOptions{}, mutate)
 }
 
-// commitDeferredChatDetails 使用 mutate 参数生成新状态，并允许聊天详情延迟落盘。
-func (s *Store) commitDeferredChatDetails(mutate func(state *storeState) error) error {
-	return s.commitWithOptions(storeCommitOptions{deferChatDetails: true}, mutate)
-}
-
 // commitWithOptions 使用 options 和 mutate 参数提交 Store 状态变更。
 func (s *Store) commitWithOptions(options storeCommitOptions, mutate func(state *storeState) error) error {
 	s.mu.Lock()
@@ -132,7 +126,7 @@ func (s *Store) commitWithOptions(options storeCommitOptions, mutate func(state 
 	}
 	normalizeStoreState(&state)
 	if s.persister != nil {
-		change := persistedStoreChangeFromStates(before, state, options.deferChatDetails)
+		change := persistedStoreChangeFromStates(before, state, options.deferTimelines)
 		if err := s.persister.SaveChanges(change); err != nil {
 			return err
 		}
@@ -149,48 +143,39 @@ func (s *Store) Flush(ctx context.Context) error {
 	return s.persister.Flush(ctx)
 }
 
-// persistedStoreChangeFromStates 使用 before、after 和 deferChatDetails 参数生成持久化变更集。
-func persistedStoreChangeFromStates(before storeState, after storeState, deferChatDetails bool) PersistedStoreChange {
+// persistedStoreChangeFromStates 使用 before、after 和 deferTimelines 参数生成持久化变更集。
+func persistedStoreChangeFromStates(before storeState, after storeState, deferTimelines bool) PersistedStoreChange {
 	beforePersisted := persistedStateFromStoreState(before)
 	afterPersisted := persistedStateFromStoreState(after)
 	beforeMeta := beforePersisted
-	beforeMeta.ChatDetails = nil
+	beforeMeta.ChatTimelines = nil
 	afterMeta := afterPersisted
-	afterMeta.ChatDetails = nil
+	afterMeta.ChatTimelines = nil
 
-	beforeDetails := persistedChatDetailsByID(beforePersisted.ChatDetails)
-	afterDetails := persistedChatDetailsByID(afterPersisted.ChatDetails)
+	beforeTimelines := persistedChatTimelinesByID(beforePersisted.ChatTimelines)
+	afterTimelines := persistedChatTimelinesByID(afterPersisted.ChatTimelines)
 	dirtyChatIDs := make([]string, 0)
 	deletedChatIDs := make([]string, 0)
-	for chatID, afterDetail := range afterDetails {
-		beforeDetail, ok := beforeDetails[chatID]
-		if !ok || !reflect.DeepEqual(beforeDetail, afterDetail) {
+	for chatID, afterTimeline := range afterTimelines {
+		beforeTimeline, ok := beforeTimelines[chatID]
+		if !ok || !reflect.DeepEqual(beforeTimeline, afterTimeline) {
 			dirtyChatIDs = append(dirtyChatIDs, chatID)
 		}
 	}
-	for chatID := range beforeDetails {
-		if _, ok := afterDetails[chatID]; !ok {
+	for chatID := range beforeTimelines {
+		if _, ok := afterTimelines[chatID]; !ok {
 			deletedChatIDs = append(deletedChatIDs, chatID)
 		}
 	}
 	sort.Strings(dirtyChatIDs)
 	sort.Strings(deletedChatIDs)
 	return PersistedStoreChange{
-		State:            afterPersisted,
-		MetaDirty:        !reflect.DeepEqual(beforeMeta, afterMeta),
-		DirtyChatIDs:     dirtyChatIDs,
-		DeletedChatIDs:   deletedChatIDs,
-		DeferChatDetails: deferChatDetails,
+		State:          afterPersisted,
+		MetaDirty:      !reflect.DeepEqual(beforeMeta, afterMeta),
+		DirtyChatIDs:   dirtyChatIDs,
+		DeletedChatIDs: deletedChatIDs,
+		DeferTimelines: deferTimelines,
 	}
-}
-
-// persistedChatDetailsByID 使用 details 参数按聊天页标识索引详情。
-func persistedChatDetailsByID(details []PersistedChatDetail) map[string]PersistedChatDetail {
-	result := make(map[string]PersistedChatDetail, len(details))
-	for _, detail := range details {
-		result[detail.ChatID] = detail
-	}
-	return result
 }
 
 // cloneStateLocked 返回当前 Store 状态副本，调用方必须持有锁。
@@ -203,6 +188,10 @@ func (s *Store) cloneStateLocked() storeState {
 	for id, chat := range s.chats {
 		chats[id] = cloneChat(chat)
 	}
+	timelines := make(map[string]chatTimelineState, len(s.timelines))
+	for id, timeline := range s.timelines {
+		timelines[id] = cloneChatTimelineState(timeline)
+	}
 	nextChatOrdinal := make(map[string]int, len(s.nextChatOrdinal))
 	for id, ordinal := range s.nextChatOrdinal {
 		nextChatOrdinal[id] = ordinal
@@ -210,6 +199,7 @@ func (s *Store) cloneStateLocked() storeState {
 	return storeState{
 		projects:        projects,
 		chats:           chats,
+		timelines:       timelines,
 		nextChatOrdinal: nextChatOrdinal,
 		agentProfiles:   cloneAgentProfiles(s.agentProfiles),
 		lastAgent:       s.lastAgent,
@@ -220,6 +210,7 @@ func (s *Store) cloneStateLocked() storeState {
 func (s *Store) applyStateLocked(state storeState) {
 	s.projects = state.projects
 	s.chats = state.chats
+	s.timelines = state.timelines
 	s.nextChatOrdinal = state.nextChatOrdinal
 	s.agentProfiles = state.agentProfiles
 	s.lastAgent = state.lastAgent
@@ -232,6 +223,9 @@ func normalizeStoreState(state *storeState) {
 	}
 	if state.chats == nil {
 		state.chats = make(map[string]Chat)
+	}
+	if state.timelines == nil {
+		state.timelines = make(map[string]chatTimelineState)
 	}
 	if state.nextChatOrdinal == nil {
 		state.nextChatOrdinal = make(map[string]int)
@@ -248,18 +242,32 @@ func normalizeStoreState(state *storeState) {
 		state.lastAgent = defaultLastAgentSelection(agentProviders)
 	}
 	for chatID, chat := range state.chats {
+		timeline, ok := state.timelines[chatID]
+		if !ok {
+			timeline = newChatTimelineState(chatID)
+		}
+		timeline.ChatID = chatID
+		if strings.TrimSpace(timeline.Epoch) == "" {
+			timeline.Epoch = newID("epoch")
+		}
+		if timeline.NextSeq <= 0 {
+			timeline.NextSeq = nextTimelineSeq(timeline.Rows)
+		}
+		state.timelines[chatID] = timeline
+		chat = projectChatFromTimeline(chat, timeline.Rows)
 		if chat.AgentLocked {
 			if chat.AgentProfile.ID == "" {
 				if profile, ok := AgentProfileByID(state.agentProfiles, chat.AgentProvider); ok {
 					chat.AgentProfile = profile
-					state.chats[chatID] = chat
 				}
 			}
+			state.chats[chatID] = chat
 			continue
 		}
 		if strings.TrimSpace(chat.AgentProvider) != "" &&
 			strings.TrimSpace(chat.AgentModel) != "" &&
 			agentSelectionExists(chat.AgentProvider, chat.AgentModel, agentProviders) {
+			state.chats[chatID] = chat
 			continue
 		}
 		defaultAgent := defaultLastAgentSelection(agentProviders)
@@ -268,6 +276,11 @@ func normalizeStoreState(state *storeState) {
 		chat.AgentReasoning = defaultAgent.Reasoning
 		chat.AgentProfile = AgentProfile{}
 		state.chats[chatID] = chat
+	}
+	for chatID := range state.timelines {
+		if _, ok := state.chats[chatID]; !ok {
+			delete(state.timelines, chatID)
+		}
 	}
 	for projectID := range state.projects {
 		if _, ok := state.nextChatOrdinal[projectID]; !ok {

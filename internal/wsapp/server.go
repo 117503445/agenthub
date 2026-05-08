@@ -17,11 +17,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-const (
-	// serverTimelineLogLimit 表示服务端为断线补齐保留的消息数量。
-	serverTimelineLogLimit = 2048
-)
-
 // Server 提供项目、聊天和 agent 流式输出的 WebSocket 服务。
 type Server struct {
 	ctx             context.Context
@@ -35,10 +30,6 @@ type Server struct {
 	lastAgentSkills []AgentSkillOption
 	mu              sync.Mutex
 	skillsMu        sync.Mutex
-	timelineMu      sync.Mutex
-	timelineEpoch   string
-	timelineSeq     int64
-	timelineLog     []ServerMessage
 }
 
 // serverSubscriber 表示单个 WebSocket 连接的服务端订阅状态。
@@ -79,7 +70,6 @@ func newServerWithStore(ctx context.Context, version string, agentConfig AgentCo
 		hostname = "unknown"
 	}
 	agentConfig.AgentProfiles = store.AgentProfiles()
-	agentConfig.AgentProviders = store.AgentProviders()
 	if len(agentConfig.BackendEnv) == 0 {
 		agentConfig.BackendEnv = BackendEnvSnapshot()
 	}
@@ -93,8 +83,6 @@ func newServerWithStore(ctx context.Context, version string, agentConfig AgentCo
 		agentConfig:     agentConfig,
 		subscribers:     make(map[string]*serverSubscriber),
 		lastAgentSkills: store.AgentSkills(),
-		timelineEpoch:   newID("epoch"),
-		timelineLog:     make([]ServerMessage, 0, serverTimelineLogLimit),
 	}
 }
 
@@ -200,13 +188,6 @@ func (s *Server) handle(ctx context.Context, subscriberID string, outbound chan 
 	case "agent.skills.refresh":
 		s.refreshAgentSkills(s.ctx)
 		return nil
-	case "timeline.catch_up":
-		var payload TimelineCatchUpPayload
-		if err := decodePayload(msg, &payload); err != nil {
-			return err
-		}
-		s.sendTimelineCatchUp(outbound, payload)
-		return nil
 	case "project.create":
 		var payload ProjectMutationPayload
 		if err := decodePayload(msg, &payload); err != nil {
@@ -301,17 +282,17 @@ func (s *Server) handle(ctx context.Context, subscriberID string, outbound chan 
 		s.agents.Stop(payload.ChatID)
 		s.broadcastChatChanged(chat)
 		return nil
-	case "chat.detail.get":
-		var payload ChatDetailGetPayload
+	case "chat.timeline.fetch":
+		var payload ChatTimelineFetchPayload
 		if err := decodePayload(msg, &payload); err != nil {
 			return err
 		}
-		chat, err := s.store.GetChat(payload.ChatID)
+		result, err := s.store.FetchChatTimeline(payload.ChatID, payload.Direction, payload.Cursor, payload.Limit)
 		if err != nil {
 			return err
 		}
-		s.setSubscriberActiveChat(subscriberID, chat.ID)
-		s.sendTo(outbound, "chat.detail", map[string]any{"chat": chat})
+		s.setSubscriberActiveChat(subscriberID, payload.ChatID)
+		s.sendTo(outbound, "chat.timeline", result)
 		return nil
 	case "chat.draft.update":
 		var payload ChatDraftUpdatePayload
@@ -473,7 +454,7 @@ func (s *Server) respondAgentSkillsCommand(ctx context.Context, chatID string, p
 	searchPaths := s.store.AgentSkillSearchPaths()
 	s.setLastAgentSkills(skills)
 	response := formatAgentSkillsMarkdown(skills, searchPaths)
-	chat, _, assistantMessage, err := s.store.AddLocalAssistantResponse(chatID, prompt, response)
+	chat, _, _, rows, err := s.store.AddLocalAssistantResponse(chatID, prompt, response)
 	if err != nil {
 		return err
 	}
@@ -483,8 +464,7 @@ func (s *Server) respondAgentSkillsCommand(ctx context.Context, chatID string, p
 		Msg("已本地回复 skills 列表")
 	s.broadcast("agent.status", map[string]any{"chatId": chatID, "status": ChatStatusRunning})
 	s.broadcastChatChanged(chat)
-	s.broadcastChatDetailChanged(chatID, chat)
-	s.broadcastToActiveChat(chatID, "chat.message.done", map[string]any{"chatId": chatID, "message": assistantMessage})
+	s.broadcastChatTimelineRows(chatID, rows)
 	s.broadcast("agent.status", map[string]any{"chatId": chatID, "status": ChatStatusIdle, "terminalStatus": "success"})
 	return nil
 }
@@ -499,26 +479,20 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string,
 		s.stopChatRun(chatID)
 	}
 
-	chat, userMessage, assistantMessage, err := s.store.AddRunMessages(chatID, prompt, images, planMode)
+	chat, userMessage, assistantMessage, rows, err := s.store.AddRunMessages(chatID, prompt, images, planMode)
 	if err != nil {
 		return err
 	}
 	s.broadcastChatChanged(chat)
-	s.broadcastChatDetailChanged(chatID, chat)
+	s.broadcastChatTimelineRows(chatID, rows)
 	s.broadcast("agent.status", map[string]any{"chatId": chatID, "status": ChatStatusRunning})
 
 	deltaCoalescer := newAssistantDeltaCoalescer(60*time.Millisecond, func(delta string) {
-		message, ok := s.store.AppendAssistantDelta(chatID, assistantMessage.ID, delta)
+		_, row, ok := s.store.AppendAssistantDelta(chatID, assistantMessage.ID, delta)
 		if !ok {
 			return
 		}
-		s.broadcastToActiveChat(chatID, "chat.message.delta", map[string]any{
-			"chatId":    chatID,
-			"messageId": message.ID,
-			"delta":     delta,
-			"text":      message.Text,
-			"message":   message,
-		})
+		s.broadcastChatTimelineRows(chatID, []ChatTimelineRow{row})
 	})
 	callbacks := AgentRunCallbacks{
 		OnSessionID: func(sessionID string) {
@@ -540,9 +514,9 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string,
 			}
 		},
 		OnHistory: func(messages []ChatMessage) {
-			if historyChat, ok := s.store.HydrateChatHistory(chatID, assistantMessage.ID, messages); ok {
+			if historyChat, rows, ok := s.store.HydrateChatHistory(chatID, assistantMessage.ID, messages); ok {
 				s.broadcastChatChanged(historyChat)
-				s.broadcastChatDetailChanged(chatID, historyChat)
+				s.broadcastChatTimelineRows(chatID, rows)
 			}
 		},
 		OnDelta: func(delta string) {
@@ -550,48 +524,47 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string,
 		},
 		OnToolCall: func(tool ToolCall) {
 			deltaCoalescer.Flush()
-			updatedChat, _, ok := s.store.UpsertToolCall(chatID, assistantMessage.ID, tool)
+			updatedChat, _, row, ok := s.store.UpsertToolCall(chatID, assistantMessage.ID, tool)
 			if !ok {
 				return
 			}
 			s.broadcastChatChanged(updatedChat)
-			s.broadcastChatDetailChanged(chatID, updatedChat)
+			s.broadcastChatTimelineRows(chatID, []ChatTimelineRow{row})
 		},
 		OnUsage: func(usage AgentUsage) {
-			if updatedChat, ok := s.store.SetChatUsage(chatID, usage); ok {
+			if updatedChat, row, ok := s.store.SetChatUsage(chatID, usage); ok {
 				s.broadcastChatChanged(updatedChat)
-				s.broadcastChatDetailChanged(chatID, updatedChat)
+				s.broadcastChatTimelineRows(chatID, []ChatTimelineRow{row})
 			}
 		},
 		OnDone: func() {
 			deltaCoalescer.Close()
-			updatedChat, message, ok := s.store.FinishAssistantMessage(chatID, assistantMessage.ID, MessageStatusComplete)
+			updatedChat, message, row, ok := s.store.FinishAssistantMessage(chatID, assistantMessage.ID, MessageStatusComplete)
 			if !ok {
 				return
 			}
+			doneRows := []ChatTimelineRow{row}
 			if planMode {
-				if planChat, planOK := s.store.SetChatPlan(chatID, assistantMessage.ID, message.Text); planOK {
+				if planChat, planRow, planOK := s.store.SetChatPlan(chatID, assistantMessage.ID, message.Text); planOK {
 					updatedChat = planChat
+					doneRows = append(doneRows, planRow)
 				}
 			}
-			s.broadcastToActiveChat(chatID, "chat.message.done", map[string]any{"chatId": chatID, "message": message})
 			s.broadcastChatChanged(updatedChat)
-			s.broadcastChatDetailChanged(chatID, updatedChat)
+			s.broadcastChatTimelineRows(chatID, doneRows)
 			s.broadcast("agent.status", map[string]any{"chatId": chatID, "status": ChatStatusIdle, "terminalStatus": "success"})
 			s.flushStore(ctx, "done")
 		},
 		OnError: func(message string) {
 			deltaCoalescer.Close()
-			updatedChat, assistant, ok := s.store.FinishAssistantMessage(chatID, assistantMessage.ID, MessageStatusError)
+			updatedChat, _, row, ok := s.store.FinishAssistantMessage(chatID, assistantMessage.ID, MessageStatusError)
 			if ok {
-				s.broadcastToActiveChat(chatID, "chat.message.done", map[string]any{"chatId": chatID, "message": assistant})
 				s.broadcastChatChanged(updatedChat)
-				s.broadcastChatDetailChanged(chatID, updatedChat)
+				s.broadcastChatTimelineRows(chatID, []ChatTimelineRow{row})
 			}
-			if errorChat, systemMessage, err := s.store.AddSystemMessage(chatID, message, MessageStatusError); err == nil {
+			if errorChat, _, systemRow, err := s.store.AddSystemMessage(chatID, message, MessageStatusError); err == nil {
 				s.broadcastChatChanged(errorChat)
-				s.broadcastChatDetailChanged(chatID, errorChat)
-				s.broadcastToActiveChat(chatID, "chat.message.done", map[string]any{"chatId": chatID, "message": systemMessage})
+				s.broadcastChatTimelineRows(chatID, []ChatTimelineRow{systemRow})
 			}
 			s.broadcast("agent.status", map[string]any{"chatId": chatID, "status": ChatStatusError})
 			s.flushStore(ctx, "error")
@@ -621,12 +594,12 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string,
 
 // startPlanExecution 使用 ctx、chatID 和 planID 参数执行已确认 plan。
 func (s *Server) startPlanExecution(ctx context.Context, chatID string, planID string) error {
-	chat, plan, err := s.store.MarkPlanExecuting(chatID, planID)
+	chat, plan, row, err := s.store.MarkPlanExecuting(chatID, planID)
 	if err != nil {
 		return err
 	}
 	s.broadcastChatChanged(chat)
-	s.broadcastChatDetailChanged(chatID, chat)
+	s.broadcastChatTimelineRows(chatID, []ChatTimelineRow{row})
 	prompt := strings.Join([]string{
 		"开始执行已确认的 plan。",
 		"",
@@ -641,15 +614,14 @@ func (s *Server) startPlanExecution(ctx context.Context, chatID string, planID s
 // stopChatRun 使用 chatID 参数停止聊天页当前输出。
 func (s *Server) stopChatRun(chatID string) {
 	s.agents.Stop(chatID)
-	chat, message, ok := s.store.StopStreamingMessage(chatID, MessageStatusStopped)
+	chat, _, row, ok := s.store.StopStreamingMessage(chatID, MessageStatusStopped)
 	if !ok {
 		return
 	}
-	if message.ID != "" {
-		s.broadcastToActiveChat(chatID, "chat.message.done", map[string]any{"chatId": chatID, "message": message})
+	if row.ID != "" {
+		s.broadcastChatTimelineRows(chatID, []ChatTimelineRow{row})
 	}
 	s.broadcastChatChanged(chat)
-	s.broadcastChatDetailChanged(chatID, chat)
 	s.broadcast("agent.status", map[string]any{"chatId": chatID, "status": ChatStatusIdle})
 	s.flushStore(s.ctx, "stop")
 }
@@ -802,31 +774,20 @@ func (s *Server) broadcast(messageType string, payload any) {
 	}
 }
 
-// broadcastToActiveChat 使用 chatID、messageType 和 payload 参数向已进入该聊天页的连接发送消息。
-func (s *Server) broadcastToActiveChat(chatID string, messageType string, payload any) {
-	message := s.message(messageType, payload)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, subscriber := range s.subscribers {
-		if subscriber.activeChatID != chatID {
-			continue
-		}
-		select {
-		case subscriber.outbound <- message:
-		default:
-			log.Ctx(s.ctx).Warn().Str("type", messageType).Str("chatID", chatID).Msg("聊天详情订阅者消息队列已满，丢弃消息")
-		}
-	}
-}
-
 // broadcastChatChanged 使用 chat 参数向所有连接广播聊天页摘要变更。
 func (s *Server) broadcastChatChanged(chat Chat) {
 	s.broadcast("chat.changed", map[string]any{"chat": cloneChatSummary(chat)})
 }
 
-// broadcastChatDetailChanged 使用 chatID 和 chat 参数向已进入聊天页的连接广播完整详情变更。
-func (s *Server) broadcastChatDetailChanged(chatID string, chat Chat) {
-	s.broadcastToActiveChat(chatID, "chat.detail.changed", map[string]any{"chat": cloneChat(chat)})
+// broadcastChatTimelineRows 使用 chatID 和 rows 参数广播追加的聊天 timeline 行。
+func (s *Server) broadcastChatTimelineRows(chatID string, rows []ChatTimelineRow) {
+	for _, row := range rows {
+		s.broadcast("chat.timeline.appended", map[string]any{
+			"chatId": chatID,
+			"epoch":  row.Epoch,
+			"row":    row,
+		})
+	}
 }
 
 // sendTo 使用 ch、messageType 和 payload 参数发送单个服务端消息。
@@ -841,104 +802,13 @@ func (s *Server) sendTo(ch chan ServerMessage, messageType string, payload any) 
 
 // message 使用 messageType 和 payload 参数构造统一服务端消息。
 func (s *Server) message(messageType string, payload any) ServerMessage {
-	return s.buildMessage(messageType, payload, true)
-}
-
-// unloggedMessage 使用 messageType 和 payload 参数构造不进入 timeline 日志的服务端消息。
-func (s *Server) unloggedMessage(messageType string, payload any) ServerMessage {
-	return s.buildMessage(messageType, payload, false)
-}
-
-// buildMessage 使用 messageType、payload 和 record 参数构造带 timeline 游标的服务端消息。
-func (s *Server) buildMessage(messageType string, payload any, record bool) ServerMessage {
-	s.timelineMu.Lock()
-	if record {
-		s.timelineSeq++
-	}
-	message := ServerMessage{
+	return ServerMessage{
 		Type:       messageType,
 		Payload:    payload,
 		ServerTime: time.Now().Format(time.RFC3339),
 		Version:    s.version,
 		BuildTime:  s.buildTime,
 		Hostname:   s.hostname,
-		Epoch:      s.timelineEpoch,
-		Seq:        s.timelineSeq,
-	}
-	if record {
-		s.timelineLog = append(s.timelineLog, message)
-		if len(s.timelineLog) > serverTimelineLogLimit {
-			copy(s.timelineLog, s.timelineLog[len(s.timelineLog)-serverTimelineLogLimit:])
-			s.timelineLog = s.timelineLog[:serverTimelineLogLimit]
-		}
-	}
-	s.timelineMu.Unlock()
-	return message
-}
-
-// sendTimelineCatchUp 使用 ch 和 payload 参数返回 timeline 补齐结果。
-func (s *Server) sendTimelineCatchUp(ch chan ServerMessage, payload TimelineCatchUpPayload) {
-	response := s.timelineCatchUp(payload)
-	message := s.unloggedMessage("timeline.catch_up", response)
-	select {
-	case ch <- message:
-	default:
-		log.Ctx(s.ctx).Warn().Msg("WebSocket timeline.catch_up 发送队列已满，丢弃消息")
-	}
-}
-
-// timelineCatchUp 使用 payload 参数从内存 timeline 日志生成补齐响应。
-func (s *Server) timelineCatchUp(payload TimelineCatchUpPayload) TimelineCatchUpResponse {
-	s.timelineMu.Lock()
-	epoch := s.timelineEpoch
-	currentSeq := s.timelineSeq
-	logCopy := append([]ServerMessage(nil), s.timelineLog...)
-	s.timelineMu.Unlock()
-
-	if payload.Epoch != epoch || payload.EndSeq < 0 {
-		snapshot := s.store.Snapshot()
-		return TimelineCatchUpResponse{
-			Epoch:    epoch,
-			StartSeq: currentSeq,
-			EndSeq:   currentSeq,
-			Reset:    true,
-			Snapshot: &snapshot,
-		}
-	}
-	if len(logCopy) == 0 || payload.EndSeq >= currentSeq {
-		return TimelineCatchUpResponse{
-			Epoch:    epoch,
-			StartSeq: payload.EndSeq + 1,
-			EndSeq:   currentSeq,
-			Messages: []ServerMessage{},
-		}
-	}
-	firstSeq := logCopy[0].Seq
-	if payload.EndSeq+1 < firstSeq {
-		snapshot := s.store.Snapshot()
-		return TimelineCatchUpResponse{
-			Epoch:    epoch,
-			StartSeq: firstSeq,
-			EndSeq:   currentSeq,
-			Reset:    true,
-			Snapshot: &snapshot,
-		}
-	}
-	messages := make([]ServerMessage, 0, len(logCopy))
-	for _, message := range logCopy {
-		if message.Seq > payload.EndSeq {
-			messages = append(messages, message)
-		}
-	}
-	startSeq := payload.EndSeq + 1
-	if len(messages) > 0 {
-		startSeq = messages[0].Seq
-	}
-	return TimelineCatchUpResponse{
-		Epoch:    epoch,
-		StartSeq: startSeq,
-		EndSeq:   currentSeq,
-		Messages: messages,
 	}
 }
 

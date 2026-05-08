@@ -27,8 +27,6 @@ type persistenceClientMessage struct {
 type persistenceServerMessage struct {
 	Type    string          `json:"type"`              // Type 表示消息类型。
 	Payload json.RawMessage `json:"payload,omitempty"` // Payload 表示消息正文。
-	Epoch   string          `json:"epoch,omitempty"`   // Epoch 表示服务端本轮 timeline 标识。
-	Seq     int64           `json:"seq,omitempty"`     // Seq 表示服务端 timeline 单调递增序号。
 }
 
 // persistenceProjectChangedPayload 表示 project.changed 消息正文。

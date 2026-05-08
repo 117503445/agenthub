@@ -53,6 +53,10 @@ interface ChatWorkspaceProps {
   submitErrorText: string
   /** scrollToBottomSignal 表示强制滚动到底部的信号。 */
   scrollToBottomSignal: number
+  /** timelineHasOlder 表示当前聊天页是否还有更早 timeline 行。 */
+  timelineHasOlder: boolean
+  /** timelineLoading 表示当前聊天页 timeline 是否正在拉取。 */
+  timelineLoading: boolean
   /** agentProviders 表示可选 agent provider。 */
   agentProviders: AgentProviderOption[]
   /** agentSkills 表示可选 skills。 */
@@ -97,6 +101,8 @@ interface ChatWorkspaceProps {
   onComposerDraftFlush: () => void
   /** onComposerImagesChange 使用 images 参数更新图片附件草稿。 */
   onComposerImagesChange: (images: ComposerImageAttachment[]) => void
+  /** onLoadOlderTimeline 请求拉取更早聊天 timeline。 */
+  onLoadOlderTimeline: () => void
   /** onRefreshAgentSkills 请求后端刷新最新 skills。 */
   onRefreshAgentSkills: () => void
   /** onPlanModeChange 使用 enabled 参数切换 plan 模式。 */
@@ -128,6 +134,8 @@ export function ChatWorkspace({
   isSendAwaiting,
   submitErrorText,
   scrollToBottomSignal,
+  timelineHasOlder,
+  timelineLoading,
   agentProviders,
   agentSkills,
   selectedAgentProvider,
@@ -150,6 +158,7 @@ export function ChatWorkspace({
   onComposerValueChange,
   onComposerDraftFlush,
   onComposerImagesChange,
+  onLoadOlderTimeline,
   onRefreshAgentSkills,
   onPlanModeChange,
   onSubmitComposer,
@@ -252,11 +261,14 @@ export function ChatWorkspace({
               projectRoot={selectedProject?.path}
               copiedMessageId={copiedMessageId}
               scrollToBottomSignal={scrollToBottomSignal}
+              hasOlder={timelineHasOlder}
+              loadingOlder={timelineLoading}
               onCopyMessage={onCopyMessage}
               onExecutePlan={onExecutePlan}
               onRespondUserInput={onRespondUserInput}
               onReadScrollMemory={onReadChatScrollMemory}
               onSaveScrollMemory={onSaveChatScrollMemory}
+              onLoadOlder={onLoadOlderTimeline}
             />
             <Composer
               selectedChat={selectedChat}

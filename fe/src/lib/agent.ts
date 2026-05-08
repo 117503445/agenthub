@@ -1,37 +1,5 @@
 import type { AgentEnvVar, AgentProvider, AgentProviderOption, BackendEnvVar, Chat } from '../types'
 
-export const fallbackAgentProviders: AgentProviderOption[] = [
-  {
-    id: 'claude-code',
-    label: 'Claude Code',
-    models: [
-      { id: 'sonnet', label: 'sonnet', default: true },
-      { id: 'opus', label: 'opus' },
-      { id: 'haiku', label: 'haiku' },
-    ],
-  },
-  {
-    id: 'codex',
-    label: 'Codex',
-    models: [
-      {
-        id: 'gpt-5.5',
-        label: 'gpt-5.5',
-        default: true,
-        reasoningLevels: [
-          { id: 'low', label: 'Low', description: '快速响应，使用较轻推理。' },
-          { id: 'medium', label: 'Medium', description: '默认级别，平衡速度和推理深度。' },
-          { id: 'high', label: 'High', description: '更深入推理，适合复杂问题。' },
-          { id: 'xhigh', label: 'Extra high', description: '最深推理，适合复杂实现和排障。', default: true },
-        ],
-      },
-      { id: 'gpt-5.4-mini', label: 'gpt-5.4-mini' },
-      { id: 'gpt-5.4', label: 'gpt-5.4' },
-      { id: 'gpt-5.3-codex', label: 'gpt-5.3-codex' },
-    ],
-  },
-]
-
 // defaultModelForProvider 使用 providers 和 provider 参数返回默认模型。
 export function defaultModelForProvider(providers: AgentProviderOption[], provider: AgentProvider) {
   const models = providers.find((item) => item.id === provider)?.models ?? []

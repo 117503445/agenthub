@@ -12,11 +12,6 @@ import (
 	"github.com/coder/websocket/wsjson"
 )
 
-// streamCoalescingDonePayload 表示流式合并用例中的消息完成事件。
-type streamCoalescingDonePayload struct {
-	Message wsapp.ChatMessage `json:"message"` // Message 表示已完成的聊天消息。
-}
-
 // runStreamCoalescingCase 使用 ctx 参数验证 Codex 高频 delta 会被合并后再推送前端。
 func runStreamCoalescingCase(ctx E2EContext) (success bool) {
 	events := make([]reportEvent, 0)
@@ -39,15 +34,15 @@ func runStreamCoalescingCase(ctx E2EContext) (success bool) {
 	if err != nil {
 		return fail(err)
 	}
-	snapshot, err := decodeChatDetailLazySnapshot(snapshotMessage.Payload)
+	snapshot, err := decodeChatTimelineSnapshot(snapshotMessage.Payload)
 	if err != nil {
 		return fail(err)
 	}
-	chat, err := firstChatDetailLazyChat(snapshot)
+	chat, err := firstChatTimelineChat(snapshot)
 	if err != nil {
 		return fail(err)
 	}
-	if err := sendChatDetailLazyMessage(conn, "chat.agent.update", wsapp.ChatAgentUpdatePayload{
+	if err := sendE2EClientMessage(conn, "chat.agent.update", wsapp.ChatAgentUpdatePayload{
 		ChatID:    chat.ID,
 		Provider:  wsapp.AgentProviderMockCodex,
 		Model:     "mock-codex-gpt-5.5",
@@ -58,14 +53,11 @@ func runStreamCoalescingCase(ctx E2EContext) (success bool) {
 	if _, err := readPersistenceMessage(conn, "chat.changed", 5*time.Second); err != nil {
 		return fail(err)
 	}
-	if err := sendChatDetailLazyMessage(conn, "chat.detail.get", map[string]string{"chatId": chat.ID}); err != nil {
-		return fail(err)
-	}
-	if _, err := readPersistenceMessage(conn, "chat.detail", 5*time.Second); err != nil {
+	if _, err := requestChatTimeline(conn, chatTimelineFetchPayload{ChatID: chat.ID, Direction: "tail", Limit: 200}); err != nil {
 		return fail(err)
 	}
 
-	if err := sendChatDetailLazyMessage(conn, "chat.send", wsapp.ChatSendPayload{
+	if err := sendE2EClientMessage(conn, "chat.send", wsapp.ChatSendPayload{
 		ChatID: chat.ID,
 		Prompt: "MOCK_CODEX_DELTA_BURST " +
 			strings.Repeat("delta ", 8),
@@ -92,6 +84,8 @@ func runStreamCoalescingCase(ctx E2EContext) (success bool) {
 func waitStreamCoalescingDone(conn *websocket.Conn, timeout time.Duration) (int, string, error) {
 	deadline := time.Now().Add(timeout)
 	deltaCount := 0
+	finalText := ""
+	assistantMessageID := ""
 	for time.Now().Before(deadline) {
 		readCtx, cancel := context.WithTimeout(context.Background(), time.Until(deadline))
 		var message persistenceServerMessage
@@ -100,19 +94,27 @@ func waitStreamCoalescingDone(conn *websocket.Conn, timeout time.Duration) (int,
 		if err != nil {
 			return 0, "", err
 		}
-		if message.Type == "chat.message.delta" {
-			deltaCount += 1
+		if message.Type != "chat.timeline.appended" {
 			continue
 		}
-		if message.Type != "chat.message.done" {
-			continue
-		}
-		var payload streamCoalescingDonePayload
+		var payload chatTimelineAppendedPayload
 		if err := json.Unmarshal(message.Payload, &payload); err != nil {
 			return 0, "", err
 		}
-		if payload.Message.Role == wsapp.MessageRoleAssistant {
-			return deltaCount, payload.Message.Text, nil
+		var item wsapp.ChatTimelineItem
+		if err := json.Unmarshal(payload.Row.Item, &item); err != nil {
+			return 0, "", err
+		}
+		if item.Type == wsapp.ChatTimelineItemMessageStarted && item.Role == wsapp.MessageRoleAssistant {
+			assistantMessageID = item.MessageID
+		}
+		if item.Type == wsapp.ChatTimelineItemAssistantDelta && (assistantMessageID == "" || item.MessageID == assistantMessageID) {
+			deltaCount += 1
+			finalText += item.Delta
+			continue
+		}
+		if item.Type == wsapp.ChatTimelineItemMessageFinished && (assistantMessageID == "" || item.MessageID == assistantMessageID) && item.Status == wsapp.MessageStatusComplete {
+			return deltaCount, finalText, nil
 		}
 	}
 	return 0, "", fmt.Errorf("等待 assistant 完成超时")

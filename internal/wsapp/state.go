@@ -204,7 +204,7 @@ type Chat struct {
 	Usage          *AgentUsage   `json:"usage,omitempty"`          // Usage 表示最近一次 agent 用量和上下文窗口。
 	Plan           *PlanApproval `json:"plan,omitempty"`           // Plan 表示当前待确认或执行中的 plan。
 	DraftText      string        `json:"draftText,omitempty"`      // DraftText 表示聊天输入框尚未发送的文字草稿。
-	Messages       []ChatMessage `json:"messages"`                 // Messages 表示聊天消息列表。
+	Messages       []ChatMessage `json:"messages,omitempty"`       // Messages 表示聊天消息列表。
 	CreatedAt      time.Time     `json:"createdAt"`                // CreatedAt 表示创建时间。
 	UpdatedAt      time.Time     `json:"updatedAt"`                // UpdatedAt 表示更新时间。
 }
@@ -372,6 +372,7 @@ func (s *Store) DeleteProject(id string) ([]string, error) {
 			if chat.ProjectID == id {
 				chatIDs = append(chatIDs, chatID)
 				delete(state.chats, chatID)
+				delete(state.timelines, chatID)
 			}
 		}
 		return nil
@@ -391,6 +392,7 @@ func (s *Store) DeleteChat(id string) (string, error) {
 			return ErrNotFound
 		}
 		delete(state.chats, id)
+		delete(state.timelines, id)
 		projectID = chat.ProjectID
 		return nil
 	}); err != nil {
@@ -426,12 +428,39 @@ func createChatInState(state *storeState, projectID string, now time.Time) Chat 
 		AgentProvider:  lastAgent.Provider,
 		AgentModel:     lastAgent.Model,
 		AgentReasoning: lastAgent.Reasoning,
-		Messages:       []ChatMessage{},
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
 	state.chats[chat.ID] = chat
+	state.timelines[chat.ID] = newChatTimelineState(chat.ID)
 	return chat
+}
+
+// appendChatTimelineItemInState 使用 state、chatID、item 和 now 参数追加 timeline 行。
+func appendChatTimelineItemInState(state *storeState, chatID string, item ChatTimelineItem, now time.Time) (ChatTimelineRow, error) {
+	timeline, ok := state.timelines[chatID]
+	if !ok {
+		if _, chatOK := state.chats[chatID]; !chatOK {
+			return ChatTimelineRow{}, ErrNotFound
+		}
+		timeline = newChatTimelineState(chatID)
+	}
+	timeline.ChatID = chatID
+	row := appendChatTimelineRow(&timeline, item, now)
+	state.timelines[chatID] = timeline
+	return row, nil
+}
+
+// projectChatInState 使用 state 和 chatID 参数刷新并返回聊天页投影。
+func projectChatInState(state *storeState, chatID string) (Chat, error) {
+	chat, ok := state.chats[chatID]
+	if !ok {
+		return Chat{}, ErrNotFound
+	}
+	timeline := state.timelines[chatID]
+	chat = projectChatFromTimeline(chat, timeline.Rows)
+	state.chats[chatID] = chat
+	return chat, nil
 }
 
 // AddAgentModel 使用 provider 和 modelID 参数新增 agent 模型选项。
@@ -792,7 +821,7 @@ func (s *Store) GetProjectAndChat(chatID string) (Project, Chat, error) {
 	return project, cloneChat(chat), nil
 }
 
-// GetChat 使用 chatID 参数读取完整聊天页详情。
+// GetChat 使用 chatID 参数读取聊天页 timeline 投影。
 func (s *Store) GetChat(chatID string) (Chat, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -803,15 +832,29 @@ func (s *Store) GetChat(chatID string) (Chat, error) {
 	return cloneChat(chat), nil
 }
 
+// FetchChatTimeline 使用 chatID、direction、cursor 和 limit 参数读取聊天 timeline。
+func (s *Store) FetchChatTimeline(chatID string, direction string, cursor *ChatTimelineCursor, limit int) (ChatTimelineFetchResult, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if _, ok := s.chats[chatID]; !ok {
+		return ChatTimelineFetchResult{}, ErrNotFound
+	}
+	timeline, ok := s.timelines[chatID]
+	if !ok {
+		timeline = newChatTimelineState(chatID)
+	}
+	return fetchChatTimelineRows(timeline, direction, cursor, limit)
+}
+
 // AddRunMessages 使用 chatID、prompt、images 和 planMode 参数追加用户消息和 assistant 占位消息。
-func (s *Store) AddRunMessages(chatID string, prompt string, images []MessageImagePayload, planMode bool) (Chat, ChatMessage, ChatMessage, error) {
+func (s *Store) AddRunMessages(chatID string, prompt string, images []MessageImagePayload, planMode bool) (Chat, ChatMessage, ChatMessage, []ChatTimelineRow, error) {
 	trimmedPrompt := strings.TrimSpace(prompt)
 	normalizedImages, err := normalizeMessageImages(images)
 	if err != nil {
-		return Chat{}, ChatMessage{}, ChatMessage{}, err
+		return Chat{}, ChatMessage{}, ChatMessage{}, nil, err
 	}
 	if trimmedPrompt == "" && len(normalizedImages) == 0 {
-		return Chat{}, ChatMessage{}, ChatMessage{}, fmt.Errorf("%w: prompt 或图片不能为空", ErrInvalidInput)
+		return Chat{}, ChatMessage{}, ChatMessage{}, nil, fmt.Errorf("%w: prompt 或图片不能为空", ErrInvalidInput)
 	}
 
 	now := time.Now()
@@ -843,6 +886,7 @@ func (s *Store) AddRunMessages(chatID string, prompt string, images []MessageIma
 		UpdatedAt: now,
 	}
 	var chat Chat
+	var rows []ChatTimelineRow
 	if err := s.commit(func(state *storeState) error {
 		var ok bool
 		chat, ok = state.chats[chatID]
@@ -858,8 +902,8 @@ func (s *Store) AddRunMessages(chatID string, prompt string, images []MessageIma
 		} else if currentProfile, ok := AgentProfileByID(state.agentProfiles, chat.AgentProvider); ok {
 			chat.AgentProfile = currentProfile
 		}
-		chat.Messages = append(chat.Messages, userMessage, assistantMessage)
-		if len(chat.Messages) == 2 {
+		timeline := state.timelines[chatID]
+		if len(timeline.Rows) == 0 {
 			if title := deriveChatTitleFromPrompt(displayText); title != "" {
 				chat.Title = title
 			}
@@ -872,19 +916,44 @@ func (s *Store) AddRunMessages(chatID string, prompt string, images []MessageIma
 		chat.DraftText = ""
 		chat.UpdatedAt = now
 		state.chats[chatID] = chat
+		userRow, err := appendChatTimelineItemInState(state, chatID, ChatTimelineItem{
+			Type:      ChatTimelineItemMessageStarted,
+			MessageID: userMessage.ID,
+			Role:      MessageRoleUser,
+			Text:      userMessage.Text,
+			Status:    userMessage.Status,
+			Images:    userMessage.Images,
+		}, now)
+		if err != nil {
+			return err
+		}
+		assistantRow, err := appendChatTimelineItemInState(state, chatID, ChatTimelineItem{
+			Type:      ChatTimelineItemMessageStarted,
+			MessageID: assistantMessage.ID,
+			Role:      MessageRoleAssistant,
+			Status:    MessageStatusStreaming,
+		}, now)
+		if err != nil {
+			return err
+		}
+		rows = []ChatTimelineRow{userRow, assistantRow}
+		chat, err = projectChatInState(state, chatID)
+		if err != nil {
+			return err
+		}
 		return nil
 	}); err != nil {
-		return Chat{}, ChatMessage{}, ChatMessage{}, err
+		return Chat{}, ChatMessage{}, ChatMessage{}, nil, err
 	}
-	return cloneChat(chat), userMessage, assistantMessage, nil
+	return cloneChat(chat), userMessage, assistantMessage, cloneChatTimelineRows(rows), nil
 }
 
 // AddLocalAssistantResponse 使用 chatID、prompt 和 response 参数追加本地命令的用户消息和 assistant 回复。
-func (s *Store) AddLocalAssistantResponse(chatID string, prompt string, response string) (Chat, ChatMessage, ChatMessage, error) {
+func (s *Store) AddLocalAssistantResponse(chatID string, prompt string, response string) (Chat, ChatMessage, ChatMessage, []ChatTimelineRow, error) {
 	trimmedPrompt := strings.TrimSpace(prompt)
 	trimmedResponse := strings.TrimSpace(response)
 	if trimmedPrompt == "" || trimmedResponse == "" {
-		return Chat{}, ChatMessage{}, ChatMessage{}, fmt.Errorf("%w: 本地命令和回复不能为空", ErrInvalidInput)
+		return Chat{}, ChatMessage{}, ChatMessage{}, nil, fmt.Errorf("%w: 本地命令和回复不能为空", ErrInvalidInput)
 	}
 
 	now := time.Now()
@@ -907,14 +976,15 @@ func (s *Store) AddLocalAssistantResponse(chatID string, prompt string, response
 		UpdatedAt: now,
 	}
 	var chat Chat
+	var rows []ChatTimelineRow
 	if err := s.commit(func(state *storeState) error {
 		var ok bool
 		chat, ok = state.chats[chatID]
 		if !ok {
 			return ErrNotFound
 		}
-		chat.Messages = append(chat.Messages, userMessage, assistantMessage)
-		if len(chat.Messages) == 2 {
+		timeline := state.timelines[chatID]
+		if len(timeline.Rows) == 0 {
 			if title := deriveChatTitleFromPrompt(trimmedPrompt); title != "" {
 				chat.Title = title
 			}
@@ -923,68 +993,105 @@ func (s *Store) AddLocalAssistantResponse(chatID string, prompt string, response
 		chat.DraftText = ""
 		chat.UpdatedAt = now
 		state.chats[chatID] = chat
+		userRow, err := appendChatTimelineItemInState(state, chatID, ChatTimelineItem{
+			Type:      ChatTimelineItemMessageStarted,
+			MessageID: userMessage.ID,
+			Role:      MessageRoleUser,
+			Text:      userMessage.Text,
+			Status:    userMessage.Status,
+		}, now)
+		if err != nil {
+			return err
+		}
+		assistantStartRow, err := appendChatTimelineItemInState(state, chatID, ChatTimelineItem{
+			Type:      ChatTimelineItemMessageStarted,
+			MessageID: assistantMessage.ID,
+			Role:      MessageRoleAssistant,
+			Status:    MessageStatusStreaming,
+		}, now)
+		if err != nil {
+			return err
+		}
+		deltaRow, err := appendChatTimelineItemInState(state, chatID, ChatTimelineItem{
+			Type:      ChatTimelineItemAssistantDelta,
+			MessageID: assistantMessage.ID,
+			Delta:     assistantMessage.Text,
+		}, now)
+		if err != nil {
+			return err
+		}
+		finishRow, err := appendChatTimelineItemInState(state, chatID, ChatTimelineItem{
+			Type:      ChatTimelineItemMessageFinished,
+			MessageID: assistantMessage.ID,
+			Status:    MessageStatusComplete,
+		}, now)
+		if err != nil {
+			return err
+		}
+		rows = []ChatTimelineRow{userRow, assistantStartRow, deltaRow, finishRow}
+		chat, err = projectChatInState(state, chatID)
+		if err != nil {
+			return err
+		}
 		return nil
 	}); err != nil {
-		return Chat{}, ChatMessage{}, ChatMessage{}, err
+		return Chat{}, ChatMessage{}, ChatMessage{}, nil, err
 	}
-	return cloneChat(chat), userMessage, assistantMessage, nil
+	return cloneChat(chat), userMessage, assistantMessage, cloneChatTimelineRows(rows), nil
 }
 
 // AppendAssistantDelta 使用 chatID、messageID 和 delta 参数追加 assistant 流式文本。
-func (s *Store) AppendAssistantDelta(chatID string, messageID string, delta string) (ChatMessage, bool) {
+func (s *Store) AppendAssistantDelta(chatID string, messageID string, delta string) (ChatMessage, ChatTimelineRow, bool) {
 	if delta == "" {
-		return ChatMessage{}, false
+		return ChatMessage{}, ChatTimelineRow{}, false
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	chat, ok := s.chats[chatID]
-	if !ok {
-		return ChatMessage{}, false
-	}
-	chat = cloneChat(chat)
-	for index := range chat.Messages {
-		item := &chat.Messages[index]
-		if item.ID != messageID || item.Role != MessageRoleAssistant {
-			continue
+	var message ChatMessage
+	var row ChatTimelineRow
+	err := s.commitWithOptions(storeCommitOptions{deferTimelines: true}, func(state *storeState) error {
+		chat, ok := state.chats[chatID]
+		if !ok {
+			return errStoreUnchanged
 		}
-		if item.Status != MessageStatusStreaming {
-			return ChatMessage{}, false
-		}
-		now := time.Now()
-		item.Text += delta
-		if len(item.Parts) > 0 && item.Parts[len(item.Parts)-1].Type == MessagePartTypeText {
-			part := &item.Parts[len(item.Parts)-1]
-			part.Text += delta
-			part.UpdatedAt = now
-		} else {
-			item.Parts = append(item.Parts, MessagePart{
-				ID:        newID("part"),
-				Type:      MessagePartTypeText,
-				Text:      delta,
-				CreatedAt: now,
-				UpdatedAt: now,
-			})
-		}
-		item.UpdatedAt = now
-		message := cloneChatMessage(*item)
-		if s.persister != nil {
-			if err := s.persister.SaveChanges(PersistedStoreChange{
-				State:            PersistedStoreState{Chats: []Chat{chat}},
-				DirtyChatIDs:     []string{chatID},
-				DeferChatDetails: true,
-			}); err != nil {
-				return ChatMessage{}, false
+		found := false
+		for _, item := range chat.Messages {
+			if item.ID == messageID && item.Role == MessageRoleAssistant && item.Status == MessageStatusStreaming {
+				found = true
+				break
 			}
 		}
-		s.chats[chatID] = chat
-		return message, true
+		if !found {
+			return errStoreUnchanged
+		}
+		var err error
+		row, err = appendChatTimelineItemInState(state, chatID, ChatTimelineItem{
+			Type:      ChatTimelineItemAssistantDelta,
+			MessageID: messageID,
+			Delta:     delta,
+		}, time.Now())
+		if err != nil {
+			return err
+		}
+		chat, err = projectChatInState(state, chatID)
+		if err != nil {
+			return err
+		}
+		for _, item := range chat.Messages {
+			if item.ID == messageID {
+				message = cloneChatMessage(item)
+				return nil
+			}
+		}
+		return errStoreUnchanged
+	})
+	if err != nil {
+		return ChatMessage{}, ChatTimelineRow{}, false
 	}
-	return ChatMessage{}, false
+	return message, cloneChatTimelineRow(row), true
 }
 
 // UpsertToolCall 使用 chatID、messageID 和 tool 参数插入或更新工具调用。
-func (s *Store) UpsertToolCall(chatID string, messageID string, tool ToolCall) (Chat, ChatMessage, bool) {
+func (s *Store) UpsertToolCall(chatID string, messageID string, tool ToolCall) (Chat, ChatMessage, ChatTimelineRow, bool) {
 	tool.Name = strings.TrimSpace(tool.Name)
 	if strings.TrimSpace(tool.ID) == "" {
 		tool.ID = newID("tool")
@@ -995,109 +1102,121 @@ func (s *Store) UpsertToolCall(chatID string, messageID string, tool ToolCall) (
 
 	var chat Chat
 	var toolMessage ChatMessage
+	var row ChatTimelineRow
 	err := s.commit(func(state *storeState) error {
 		var ok bool
 		chat, ok = state.chats[chatID]
 		if !ok {
 			return errStoreUnchanged
 		}
-		for messageIndex := range chat.Messages {
-			message := &chat.Messages[messageIndex]
-			if message.ID != messageID || message.Role != MessageRoleAssistant {
-				continue
-			}
-			now := time.Now()
-			updated := false
-			var mergedTool ToolCall
-			for toolIndex := range message.ToolCalls {
-				if message.ToolCalls[toolIndex].ID != tool.ID {
-					continue
-				}
-				existing := &message.ToolCalls[toolIndex]
-				existing.Name = firstNonEmpty(tool.Name, existing.Name)
-				existing.Status = firstNonEmpty(tool.Status, existing.Status)
-				existing.Input = firstNonEmpty(tool.Input, existing.Input)
-				existing.Output = mergeToolOutput(*existing, tool)
-				if tool.UserInputRequest != nil {
-					request := cloneToolCall(tool).UserInputRequest
-					existing.UserInputRequest = request
-				}
-				existing.UpdatedAt = now
-				mergedTool = *existing
-				updated = true
+		found := false
+		for _, message := range chat.Messages {
+			if message.ID == messageID && message.Role == MessageRoleAssistant {
+				found = true
 				break
 			}
-			if !updated {
-				if tool.Name == "" {
-					return errStoreUnchanged
-				}
-				tool.CreatedAt = now
-				tool.UpdatedAt = now
-				message.ToolCalls = append(message.ToolCalls, tool)
-				mergedTool = tool
+		}
+		if !found || tool.Name == "" && tool.Status == ToolCallStatusRunning {
+			return errStoreUnchanged
+		}
+		now := time.Now()
+		var err error
+		row, err = appendChatTimelineItemInState(state, chatID, ChatTimelineItem{
+			Type:      ChatTimelineItemToolCall,
+			MessageID: messageID,
+			ToolCall:  &tool,
+		}, now)
+		if err != nil {
+			return err
+		}
+		chat.UpdatedAt = now
+		state.chats[chatID] = chat
+		chat, err = projectChatInState(state, chatID)
+		if err != nil {
+			return err
+		}
+		for _, message := range chat.Messages {
+			if message.ID == messageID {
+				toolMessage = cloneChatMessage(message)
+				return nil
 			}
-			upsertMessageToolPart(message, mergedTool, now)
-			message.UpdatedAt = now
-			chat.UpdatedAt = now
-			state.chats[chatID] = chat
-			toolMessage = cloneChatMessage(*message)
-			return nil
 		}
 		return errStoreUnchanged
 	})
 	if err != nil {
-		return Chat{}, ChatMessage{}, false
+		return Chat{}, ChatMessage{}, ChatTimelineRow{}, false
 	}
-	return cloneChat(chat), toolMessage, true
+	return cloneChat(chat), toolMessage, cloneChatTimelineRow(row), true
 }
 
 // FinishAssistantMessage 使用 chatID、messageID 和 status 参数结束 assistant 消息。
-func (s *Store) FinishAssistantMessage(chatID string, messageID string, status string) (Chat, ChatMessage, bool) {
+func (s *Store) FinishAssistantMessage(chatID string, messageID string, status string) (Chat, ChatMessage, ChatTimelineRow, bool) {
 	var chat Chat
 	var message ChatMessage
+	var row ChatTimelineRow
 	err := s.commit(func(state *storeState) error {
 		var ok bool
 		chat, ok = state.chats[chatID]
 		if !ok {
 			return errStoreUnchanged
 		}
-		for index := range chat.Messages {
-			item := &chat.Messages[index]
+		found := false
+		for _, item := range chat.Messages {
 			if item.ID != messageID || item.Role != MessageRoleAssistant {
 				continue
 			}
-			message = *item
 			if item.Status != MessageStatusStreaming {
 				return errStoreUnchanged
 			}
-			now := time.Now()
-			item.Status = status
-			item.UpdatedAt = now
-			if status == MessageStatusError {
-				chat.Status = ChatStatusError
-			} else {
-				chat.Status = ChatStatusIdle
+			found = true
+			break
+		}
+		if !found {
+			return errStoreUnchanged
+		}
+		now := time.Now()
+		var err error
+		row, err = appendChatTimelineItemInState(state, chatID, ChatTimelineItem{
+			Type:      ChatTimelineItemMessageFinished,
+			MessageID: messageID,
+			Status:    status,
+		}, now)
+		if err != nil {
+			return err
+		}
+		if status == MessageStatusError {
+			chat.Status = ChatStatusError
+		} else {
+			chat.Status = ChatStatusIdle
+		}
+		chat.UpdatedAt = now
+		state.chats[chatID] = chat
+		chat, err = projectChatInState(state, chatID)
+		if err != nil {
+			return err
+		}
+		for _, item := range chat.Messages {
+			if item.ID == messageID {
+				message = item
+				return nil
 			}
-			chat.UpdatedAt = now
-			state.chats[chatID] = chat
-			message = *item
-			return nil
 		}
 		return errStoreUnchanged
 	})
 	if err != nil {
 		if chat.ID != "" && message.ID != "" {
-			return cloneChat(chat), message, false
+			return cloneChat(chat), message, ChatTimelineRow{}, false
 		}
-		return Chat{}, ChatMessage{}, false
+		return Chat{}, ChatMessage{}, ChatTimelineRow{}, false
 	}
-	return cloneChat(chat), message, true
+	return cloneChat(chat), message, cloneChatTimelineRow(row), true
 }
 
 // StopStreamingMessage 使用 chatID 和 status 参数停止聊天页中最后一条流式 assistant 消息。
-func (s *Store) StopStreamingMessage(chatID string, status string) (Chat, ChatMessage, bool) {
+func (s *Store) StopStreamingMessage(chatID string, status string) (Chat, ChatMessage, ChatTimelineRow, bool) {
 	var chat Chat
 	var message ChatMessage
+	var row ChatTimelineRow
 	err := s.commit(func(state *storeState) error {
 		var ok bool
 		chat, ok = state.chats[chatID]
@@ -1105,17 +1224,33 @@ func (s *Store) StopStreamingMessage(chatID string, status string) (Chat, ChatMe
 			return errStoreUnchanged
 		}
 		for index := len(chat.Messages) - 1; index >= 0; index-- {
-			item := &chat.Messages[index]
+			item := chat.Messages[index]
 			if item.Role != MessageRoleAssistant || item.Status != MessageStatusStreaming {
 				continue
 			}
 			now := time.Now()
-			item.Status = status
-			item.UpdatedAt = now
+			var err error
+			row, err = appendChatTimelineItemInState(state, chatID, ChatTimelineItem{
+				Type:      ChatTimelineItemMessageFinished,
+				MessageID: item.ID,
+				Status:    status,
+			}, now)
+			if err != nil {
+				return err
+			}
 			chat.Status = ChatStatusIdle
 			chat.UpdatedAt = now
 			state.chats[chatID] = chat
-			message = *item
+			chat, err = projectChatInState(state, chatID)
+			if err != nil {
+				return err
+			}
+			for _, projected := range chat.Messages {
+				if projected.ID == item.ID {
+					message = projected
+					return nil
+				}
+			}
 			return nil
 		}
 		if chat.Status == ChatStatusRunning {
@@ -1128,15 +1263,15 @@ func (s *Store) StopStreamingMessage(chatID string, status string) (Chat, ChatMe
 	})
 	if err != nil {
 		if chat.ID != "" {
-			return cloneChat(chat), ChatMessage{}, false
+			return cloneChat(chat), ChatMessage{}, ChatTimelineRow{}, false
 		}
-		return Chat{}, ChatMessage{}, false
+		return Chat{}, ChatMessage{}, ChatTimelineRow{}, false
 	}
-	return cloneChat(chat), message, true
+	return cloneChat(chat), message, cloneChatTimelineRow(row), true
 }
 
 // AddSystemMessage 使用 chatID、text 和 status 参数追加系统消息。
-func (s *Store) AddSystemMessage(chatID string, text string, status string) (Chat, ChatMessage, error) {
+func (s *Store) AddSystemMessage(chatID string, text string, status string) (Chat, ChatMessage, ChatTimelineRow, error) {
 	now := time.Now()
 	message := ChatMessage{
 		ID:        newID("msg"),
@@ -1148,30 +1283,46 @@ func (s *Store) AddSystemMessage(chatID string, text string, status string) (Cha
 		UpdatedAt: now,
 	}
 	var chat Chat
+	var row ChatTimelineRow
 	if err := s.commit(func(state *storeState) error {
 		var ok bool
 		chat, ok = state.chats[chatID]
 		if !ok {
 			return ErrNotFound
 		}
-		chat.Messages = append(chat.Messages, message)
 		chat.Status = ChatStatusError
 		chat.UpdatedAt = now
 		state.chats[chatID] = chat
+		var err error
+		row, err = appendChatTimelineItemInState(state, chatID, ChatTimelineItem{
+			Type:      ChatTimelineItemSystemMessage,
+			MessageID: message.ID,
+			Role:      MessageRoleSystem,
+			Text:      text,
+			Status:    status,
+		}, now)
+		if err != nil {
+			return err
+		}
+		chat, err = projectChatInState(state, chatID)
+		if err != nil {
+			return err
+		}
 		return nil
 	}); err != nil {
-		return Chat{}, ChatMessage{}, err
+		return Chat{}, ChatMessage{}, ChatTimelineRow{}, err
 	}
-	return cloneChat(chat), message, nil
+	return cloneChat(chat), message, cloneChatTimelineRow(row), nil
 }
 
 // SetChatPlan 使用 chatID、messageID 和 text 参数记录当前待确认 plan。
-func (s *Store) SetChatPlan(chatID string, messageID string, text string) (Chat, bool) {
+func (s *Store) SetChatPlan(chatID string, messageID string, text string) (Chat, ChatTimelineRow, bool) {
 	trimmedText := strings.TrimSpace(text)
 	if trimmedText == "" {
-		return Chat{}, false
+		return Chat{}, ChatTimelineRow{}, false
 	}
 	var chat Chat
+	var row ChatTimelineRow
 	err := s.commit(func(state *storeState) error {
 		var ok bool
 		chat, ok = state.chats[chatID]
@@ -1179,7 +1330,7 @@ func (s *Store) SetChatPlan(chatID string, messageID string, text string) (Chat,
 			return errStoreUnchanged
 		}
 		now := time.Now()
-		chat.Plan = &PlanApproval{
+		plan := PlanApproval{
 			ID:        newID("plan"),
 			MessageID: messageID,
 			Text:      trimmedText,
@@ -1187,20 +1338,34 @@ func (s *Store) SetChatPlan(chatID string, messageID string, text string) (Chat,
 			CreatedAt: now,
 			UpdatedAt: now,
 		}
+		chat.Plan = &plan
 		chat.UpdatedAt = now
 		state.chats[chatID] = chat
+		var err error
+		row, err = appendChatTimelineItemInState(state, chatID, ChatTimelineItem{
+			Type: ChatTimelineItemPlanSet,
+			Plan: &plan,
+		}, now)
+		if err != nil {
+			return err
+		}
+		chat, err = projectChatInState(state, chatID)
+		if err != nil {
+			return err
+		}
 		return nil
 	})
 	if err != nil {
-		return Chat{}, false
+		return Chat{}, ChatTimelineRow{}, false
 	}
-	return cloneChat(chat), true
+	return cloneChat(chat), cloneChatTimelineRow(row), true
 }
 
 // MarkPlanExecuting 使用 chatID 和 planID 参数把 plan 标记为执行中并返回 plan 正文。
-func (s *Store) MarkPlanExecuting(chatID string, planID string) (Chat, PlanApproval, error) {
+func (s *Store) MarkPlanExecuting(chatID string, planID string) (Chat, PlanApproval, ChatTimelineRow, error) {
 	var chat Chat
 	var plan PlanApproval
+	var row ChatTimelineRow
 	if err := s.commit(func(state *storeState) error {
 		var ok bool
 		chat, ok = state.chats[chatID]
@@ -1217,13 +1382,26 @@ func (s *Store) MarkPlanExecuting(chatID string, planID string) (Chat, PlanAppro
 		chat.Plan.Status = "executing"
 		chat.Plan.UpdatedAt = now
 		chat.UpdatedAt = now
-		state.chats[chatID] = chat
 		plan = *chat.Plan
+		state.chats[chatID] = chat
+		var err error
+		row, err = appendChatTimelineItemInState(state, chatID, ChatTimelineItem{
+			Type:   ChatTimelineItemPlanStatusChanged,
+			Status: "executing",
+			Plan:   &plan,
+		}, now)
+		if err != nil {
+			return err
+		}
+		chat, err = projectChatInState(state, chatID)
+		if err != nil {
+			return err
+		}
 		return nil
 	}); err != nil {
-		return Chat{}, PlanApproval{}, err
+		return Chat{}, PlanApproval{}, ChatTimelineRow{}, err
 	}
-	return cloneChat(chat), plan, nil
+	return cloneChat(chat), plan, cloneChatTimelineRow(row), nil
 }
 
 // SetChatSessionID 使用 chatID 和 sessionID 参数记录 Claude 会话标识。
@@ -1250,34 +1428,25 @@ func (s *Store) SetChatSessionID(chatID string, sessionID string) (Chat, bool) {
 }
 
 // HydrateChatHistory 使用 chatID、beforeMessageID 和 messages 参数补齐 provider 原生历史。
-func (s *Store) HydrateChatHistory(chatID string, beforeMessageID string, messages []ChatMessage) (Chat, bool) {
+func (s *Store) HydrateChatHistory(chatID string, beforeMessageID string, messages []ChatMessage) (Chat, []ChatTimelineRow, bool) {
 	if len(messages) == 0 {
-		return Chat{}, false
+		return Chat{}, nil, false
 	}
 	var chat Chat
-	changed := false
+	var rows []ChatTimelineRow
 	err := s.commit(func(state *storeState) error {
 		var ok bool
 		chat, ok = state.chats[chatID]
 		if !ok {
 			return errStoreUnchanged
 		}
-		existing := make(map[string]bool, len(chat.Messages))
-		for _, message := range chat.Messages {
-			key := historyMessageKey(message)
-			if key != "" {
-				existing[key] = true
-			}
+		if len(state.timelines[chatID].Rows) > 0 {
+			return errStoreUnchanged
 		}
-		history := make([]ChatMessage, 0, len(messages))
 		now := time.Now()
 		for _, message := range messages {
 			message.ChatID = chatID
 			message.Status = MessageStatusComplete
-			key := historyMessageKey(message)
-			if key == "" || existing[key] {
-				continue
-			}
 			if message.ID == "" {
 				message.ID = newID("msg")
 			}
@@ -1287,48 +1456,57 @@ func (s *Store) HydrateChatHistory(chatID string, beforeMessageID string, messag
 			if message.UpdatedAt.IsZero() {
 				message.UpdatedAt = message.CreatedAt
 			}
-			history = append(history, message)
-			existing[key] = true
-		}
-		if len(history) == 0 {
-			return errStoreUnchanged
-		}
-		insertAt := len(chat.Messages)
-		for index := range chat.Messages {
-			if chat.Messages[index].ID == beforeMessageID {
-				insertAt = index
-				if index > 0 && chat.Messages[index-1].Role == MessageRoleUser {
-					insertAt = index - 1
+			row, err := appendChatTimelineItemInState(state, chatID, ChatTimelineItem{
+				Type:      ChatTimelineItemMessageStarted,
+				MessageID: message.ID,
+				Role:      message.Role,
+				Text:      message.Text,
+				Status:    message.Status,
+				Images:    message.Images,
+			}, message.CreatedAt)
+			if err != nil {
+				return err
+			}
+			rows = append(rows, row)
+			for _, tool := range message.ToolCalls {
+				tool := tool
+				toolRow, err := appendChatTimelineItemInState(state, chatID, ChatTimelineItem{
+					Type:      ChatTimelineItemToolCall,
+					MessageID: message.ID,
+					ToolCall:  &tool,
+				}, message.UpdatedAt)
+				if err != nil {
+					return err
 				}
-				break
+				rows = append(rows, toolRow)
 			}
 		}
-		nextMessages := make([]ChatMessage, 0, len(chat.Messages)+len(history))
-		nextMessages = append(nextMessages, chat.Messages[:insertAt]...)
-		nextMessages = append(nextMessages, history...)
-		nextMessages = append(nextMessages, chat.Messages[insertAt:]...)
-		chat.Messages = nextMessages
 		chat.UpdatedAt = now
 		state.chats[chatID] = chat
-		changed = true
+		var err error
+		chat, err = projectChatInState(state, chatID)
+		if err != nil {
+			return err
+		}
 		return nil
 	})
 	if err != nil {
-		return Chat{}, false
+		return Chat{}, nil, false
 	}
-	return cloneChat(chat), changed
+	return cloneChat(chat), cloneChatTimelineRows(rows), true
 }
 
 // SetChatUsage 使用 chatID 和 usage 参数记录聊天页最近一次用量。
-func (s *Store) SetChatUsage(chatID string, usage AgentUsage) (Chat, bool) {
+func (s *Store) SetChatUsage(chatID string, usage AgentUsage) (Chat, ChatTimelineRow, bool) {
 	if usage.ContextWindowMaxTokens <= 0 && usage.ContextWindowUsedTokens <= 0 &&
 		usage.InputTokens <= 0 && usage.OutputTokens <= 0 && usage.CachedInputTokens <= 0 {
-		return Chat{}, false
+		return Chat{}, ChatTimelineRow{}, false
 	}
 	if usage.ContextWindowMaxTokens > 0 && usage.ContextWindowUsedTokens > 0 {
 		usage.ContextWindowPercentRounded = int(float64(usage.ContextWindowUsedTokens)/float64(usage.ContextWindowMaxTokens)*100 + 0.5)
 	}
 	var chat Chat
+	var row ChatTimelineRow
 	err := s.commit(func(state *storeState) error {
 		var ok bool
 		chat, ok = state.chats[chatID]
@@ -1340,14 +1518,27 @@ func (s *Store) SetChatUsage(chatID string, usage AgentUsage) (Chat, bool) {
 			return errStoreUnchanged
 		}
 		chat.Usage = &next
-		chat.UpdatedAt = time.Now()
+		now := time.Now()
+		chat.UpdatedAt = now
 		state.chats[chatID] = chat
+		var err error
+		row, err = appendChatTimelineItemInState(state, chatID, ChatTimelineItem{
+			Type:  ChatTimelineItemUsageUpdated,
+			Usage: &next,
+		}, now)
+		if err != nil {
+			return err
+		}
+		chat, err = projectChatInState(state, chatID)
+		if err != nil {
+			return err
+		}
 		return nil
 	})
 	if err != nil {
-		return Chat{}, false
+		return Chat{}, ChatTimelineRow{}, false
 	}
-	return cloneChat(chat), true
+	return cloneChat(chat), cloneChatTimelineRow(row), true
 }
 
 // Snapshot 返回当前内存状态的稳定排序副本。
@@ -1513,11 +1704,12 @@ func cloneChat(chat Chat) Chat {
 	return chat
 }
 
-// cloneChatSummary 使用 chat 参数创建不包含消息和 plan 详情的聊天页摘要。
+// cloneChatSummary 使用 chat 参数创建不包含消息和 plan 正文的聊天页摘要。
 func cloneChatSummary(chat Chat) Chat {
 	chat = cloneChat(chat)
 	chat.Messages = []ChatMessage{}
 	chat.Plan = nil
+	chat.Usage = nil
 	return chat
 }
 

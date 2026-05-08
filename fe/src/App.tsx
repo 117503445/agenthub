@@ -16,13 +16,13 @@ import {
   chatHasStarted,
   defaultModelForProvider,
   defaultReasoningForModel,
-  fallbackAgentProviders,
   normalizeChat,
 } from './lib/agent'
-import { chatVisualStatus, mergeProjectVisualStatus, sortByCreatedAt, sortProjects, upsertById } from './lib/chat'
+import { chatVisualStatus, mergeProjectVisualStatus, projectChatTimeline, sortByCreatedAt, sortProjects, upsertById } from './lib/chat'
 import { parseHashRoute, updateHashRoute, updateSettingsHashRoute } from './lib/routes'
 import type {
   AgentProvider,
+  AgentProviderOption,
   AgentProfile,
   AgentProfilesChangedPayload,
   BackendEnvVar,
@@ -34,12 +34,12 @@ import type {
   Chat,
   ChatChangedPayload,
   ChatDeletedPayload,
-  ChatDetailPayload,
   ChatMessage,
-  ChatMessageDeltaPayload,
-  ChatMessageDonePayload,
   ChatScrollMemory,
   ChatTerminalIndicator,
+  ChatTimelineAppendedPayload,
+  ChatTimelinePayload,
+  ChatTimelineRow,
   ChatVisualStatus,
   ComposerImageAttachment,
   ConnectionState,
@@ -49,7 +49,6 @@ import type {
   ProjectDeletedPayload,
   ProjectsReorderedPayload,
   SnapshotPayload,
-  TimelineCatchUpPayload,
   ToolCall,
 } from './types'
 
@@ -59,28 +58,24 @@ const draftSaveDebounceMs = 400
 
 // normalizeChatSummary 使用 chat 参数生成前端摘要状态。
 function normalizeChatSummary(chat: Chat) {
-  return normalizeChat({ ...chat, messages: [], plan: undefined, detailLoaded: false, detailLoadedAt: undefined })
+  return normalizeChat({ ...chat, messages: [], plan: undefined, timelineLoaded: false, timelineLoadedAt: undefined })
 }
 
-// mergeChatSummary 使用 current 和 summary 参数合并聊天摘要并保留已加载详情。
+// mergeChatSummary 使用 current 和 summary 参数合并聊天摘要并保留已加载 timeline。
 function mergeChatSummary(current: Chat[], summary: Chat) {
   const existing = current.find((chat) => chat.id === summary.id)
   const normalized = normalizeChatSummary(summary)
-  if (!existing?.detailLoaded) {
+  if (!existing?.timelineLoaded) {
     return normalized
   }
   return {
     ...normalized,
     messages: existing.messages,
     plan: existing.plan,
-    detailLoaded: existing.detailLoaded,
-    detailLoadedAt: existing.detailLoadedAt,
+    usage: existing.usage,
+    timelineLoaded: existing.timelineLoaded,
+    timelineLoadedAt: existing.timelineLoadedAt,
   }
-}
-
-// normalizeChatDetail 使用 chat 参数生成前端详情状态。
-function normalizeChatDetail(chat: Chat) {
-  return normalizeChat({ ...chat, detailLoaded: true, detailLoadedAt: chat.updatedAt })
 }
 
 // App 渲染 project 和 agent 聊天主界面。
@@ -91,14 +86,13 @@ function App() {
   const awaitingSendChatIdsRef = useRef<Record<string, true>>({})
   const sendPendingTimersRef = useRef<Record<string, number>>({})
   const chatsRef = useRef<Chat[]>([])
-  const chatDetailLoadingAtRef = useRef<Record<string, string>>({})
-  const chatDetailLoadedAtRef = useRef<Record<string, string>>({})
-  const pendingChatDeltasRef = useRef<Record<string, ChatMessageDeltaPayload>>({})
+  const chatTimelineLoadingRef = useRef<Record<string, boolean>>({})
+  const chatTimelineLoadedRef = useRef<Record<string, boolean>>({})
+  const chatTimelineRowsRef = useRef<Record<string, ChatTimelineRow[]>>({})
+  const chatTimelineCursorsRef = useRef<Record<string, { epoch: string; startSeq: number; endSeq: number }>>({})
+  const chatTimelineHasOlderRef = useRef<Record<string, boolean>>({})
+  const pendingChatTimelineRowsRef = useRef<Record<string, ChatTimelineRow[]>>({})
   const chatDeltaFlushTimerRef = useRef<number | null>(null)
-  const timelineEpochRef = useRef('')
-  const timelineSeqRef = useRef(0)
-  const timelineCatchUpRequestedRef = useRef(false)
-  const timelineBufferedMessagesRef = useRef<Record<number, ServerMessage>>({})
   const pendingDraftValuesRef = useRef<Record<string, string>>({})
   const draftSaveTimersRef = useRef<Record<string, number>>({})
   const chatScrollMemoryRef = useRef<Record<string, ChatScrollMemory>>({})
@@ -114,10 +108,12 @@ function App() {
   const [backendBuildTime, setBackendBuildTime] = useState('')
   const [projects, setProjects] = useState<Project[]>([])
   const [chats, setChats] = useState<Chat[]>([])
-  const [agentProviders, setAgentProviders] = useState(fallbackAgentProviders)
+  const [agentProviders, setAgentProviders] = useState<AgentProviderOption[]>([])
   const [agentProfiles, setAgentProfiles] = useState<AgentProfile[]>([])
   const [backendEnv, setBackendEnv] = useState<BackendEnvVar[]>([])
   const [agentSkills, setAgentSkills] = useState<AgentSkillOption[]>([])
+  const [chatTimelineHasOlder, setChatTimelineHasOlder] = useState<Record<string, boolean>>({})
+  const [chatTimelineLoading, setChatTimelineLoading] = useState<Record<string, boolean>>({})
   const [chatIndicators, setChatIndicators] = useState<Record<string, ChatTerminalIndicator>>({})
   const [routeView, setRouteView] = useState<'chat' | 'settings'>(() => parseHashRoute().view)
   const [selectedProjectId, setSelectedProjectId] = useState(() => parseHashRoute().projectId)
@@ -157,49 +153,102 @@ function App() {
       null,
     [projectChats, rememberedProjectChatId, selectedChatId],
   )
-  // flushPendingChatDeltas 批量应用后端推送的聊天文本 delta。
-  const flushPendingChatDeltas = useCallback(() => {
+  // applyChatTimelineRows 使用 chatID 和 rows 参数投影聊天 timeline。
+  const applyChatTimelineRows = useCallback((chatId: string, rows: ChatTimelineRow[], options?: { replace?: boolean }) => {
+    const sortedRows = [...rows].sort((left, right) => left.seq - right.seq)
+    const currentRows = options?.replace ? [] : (chatTimelineRowsRef.current[chatId] ?? [])
+    const bySeq = new Map<number, ChatTimelineRow>()
+    for (const row of currentRows) {
+      bySeq.set(row.seq, row)
+    }
+    for (const row of sortedRows) {
+      bySeq.set(row.seq, row)
+    }
+    const nextRows = Array.from(bySeq.values()).sort((left, right) => left.seq - right.seq)
+    chatTimelineRowsRef.current = { ...chatTimelineRowsRef.current, [chatId]: nextRows }
+    if (nextRows.length > 0) {
+      chatTimelineCursorsRef.current[chatId] = {
+        epoch: nextRows[0].epoch,
+        startSeq: nextRows[0].seq,
+        endSeq: nextRows[nextRows.length - 1].seq,
+      }
+    }
+    setChats((current) =>
+      current.map((chat) => (chat.id === chatId ? projectChatTimeline(chat, nextRows) : chat)),
+    )
+  }, [])
+
+  // requestChatTimeline 使用参数向后端拉取聊天 timeline。
+  const requestChatTimeline = useCallback(
+    (chatId: string, direction: 'tail' | 'after' | 'before', cursor?: { epoch: string; seq: number }, limit = 200) => {
+      if (!chatId) {
+        return false
+      }
+      chatTimelineLoadingRef.current[chatId] = true
+      setChatTimelineLoading((current) => ({ ...current, [chatId]: true }))
+      const sent = sendClientMessage(wsRef.current, 'chat.timeline.fetch', {
+        chatId,
+        direction,
+        cursor,
+        limit,
+      })
+      if (!sent) {
+        delete chatTimelineLoadingRef.current[chatId]
+        setChatTimelineLoading((current) => {
+          if (!current[chatId]) {
+            return current
+          }
+          const next = { ...current }
+          delete next[chatId]
+          return next
+        })
+      }
+      return sent
+    },
+    [],
+  )
+
+  // flushPendingChatTimelineRows 批量应用后端推送的 timeline 行。
+  const flushPendingChatTimelineRows = useCallback(() => {
     if (chatDeltaFlushTimerRef.current !== null) {
       window.clearTimeout(chatDeltaFlushTimerRef.current)
       chatDeltaFlushTimerRef.current = null
     }
-    const deltas = Object.values(pendingChatDeltasRef.current)
-    pendingChatDeltasRef.current = {}
-    if (deltas.length === 0) {
+    const entries = Object.entries(pendingChatTimelineRowsRef.current)
+    pendingChatTimelineRowsRef.current = {}
+    if (entries.length === 0) {
       return
     }
-    const deltasByChatId = new Map<string, Map<string, ChatMessageDeltaPayload>>()
-    for (const delta of deltas) {
-      const chatDeltas = deltasByChatId.get(delta.chatId) ?? new Map<string, ChatMessageDeltaPayload>()
-      chatDeltas.set(delta.messageId, delta)
-      deltasByChatId.set(delta.chatId, chatDeltas)
+    for (const [chatId, rows] of entries) {
+      applyChatTimelineRows(chatId, rows)
     }
-    setChats((current) =>
-      current.map((chat) => {
-        const chatDeltas = deltasByChatId.get(chat.id)
-        if (!chatDeltas) {
-          return chat
+  }, [applyChatTimelineRows])
+  // enqueueChatTimelineRow 使用 payload 参数把聊天 timeline 行放入短延迟队列。
+  const enqueueChatTimelineRow = useCallback(
+    (payload: ChatTimelineAppendedPayload) => {
+      const cursor = chatTimelineCursorsRef.current[payload.chatId]
+      const pendingRows = pendingChatTimelineRowsRef.current[payload.chatId] ?? []
+      const pendingEndSeq = pendingRows.reduce((maxSeq, row) => Math.max(maxSeq, row.seq), cursor?.endSeq ?? 0)
+      if (cursor) {
+        if (payload.epoch !== cursor.epoch) {
+          requestChatTimeline(payload.chatId, 'tail', undefined, 200)
+          return
         }
-        return {
-          ...chat,
-          messages: chat.messages.map((message) => {
-            const delta = chatDeltas.get(message.id)
-            return delta ? { ...(delta.message ?? message), text: delta.text, status: 'streaming' } : message
-          }),
+        if (payload.row.seq <= cursor.endSeq || pendingRows.some((row) => row.seq === payload.row.seq)) {
+          return
         }
-      }),
-    )
-  }, [])
-  // enqueueChatDelta 使用 payload 参数把聊天文本 delta 放入短延迟队列。
-  const enqueueChatDelta = useCallback(
-    (payload: ChatMessageDeltaPayload) => {
-      pendingChatDeltasRef.current[`${payload.chatId}:${payload.messageId}`] = payload
+        if (payload.row.seq > pendingEndSeq + 1) {
+          requestChatTimeline(payload.chatId, 'after', { epoch: cursor.epoch, seq: cursor.endSeq }, 0)
+          return
+        }
+      }
+      pendingChatTimelineRowsRef.current[payload.chatId] = [...pendingRows, payload.row]
       if (chatDeltaFlushTimerRef.current !== null) {
         return
       }
-      chatDeltaFlushTimerRef.current = window.setTimeout(flushPendingChatDeltas, chatDeltaFlushDelayMs)
+      chatDeltaFlushTimerRef.current = window.setTimeout(flushPendingChatTimelineRows, chatDeltaFlushDelayMs)
     },
-    [flushPendingChatDeltas],
+    [flushPendingChatTimelineRows, requestChatTimeline],
   )
   const selectedComposerValue = selectedChat ? (composerValues[selectedChat.id] ?? selectedChat.draftText ?? '') : ''
   const selectedComposerImages = selectedChat ? (composerImages[selectedChat.id] ?? []) : []
@@ -208,6 +257,8 @@ function App() {
   const selectedChatSendAwaiting = selectedChat ? Boolean(awaitingSendChatIds[selectedChat.id]) : false
   const selectedChatSubmitError = selectedChat ? (chatSubmitErrors[selectedChat.id] ?? '') : ''
   const selectedChatScrollBottomSignal = selectedChat ? (chatScrollBottomSignals[selectedChat.id] ?? 0) : 0
+  const selectedChatTimelineHasOlder = selectedChat ? (chatTimelineHasOlder[selectedChat.id] ?? false) : false
+  const selectedChatTimelineLoading = selectedChat ? (chatTimelineLoading[selectedChat.id] ?? false) : false
   const isRunning = selectedChat?.status === 'running'
   const selectedAgentProvider = selectedChat?.agentProvider ?? 'claude-code'
   const chatBoundAgentProvider = selectedChat?.agentProfile?.id
@@ -257,7 +308,7 @@ function App() {
         window.clearTimeout(chatDeltaFlushTimerRef.current)
         chatDeltaFlushTimerRef.current = null
       }
-      pendingChatDeltasRef.current = {}
+      pendingChatTimelineRowsRef.current = {}
     }
   }, [])
 
@@ -431,12 +482,37 @@ function App() {
     }
   }, [])
 
-  // removeChatDetailState 使用 chatIds 参数移除指定聊天页详情加载记录。
-  const removeChatDetailState = useCallback((chatIds: string[]) => {
+  // removeChatTimelineState 使用 chatIds 参数移除指定聊天页 timeline 状态。
+  const removeChatTimelineState = useCallback((chatIds: string[]) => {
     for (const chatId of chatIds) {
-      delete chatDetailLoadingAtRef.current[chatId]
-      delete chatDetailLoadedAtRef.current[chatId]
+      delete chatTimelineRowsRef.current[chatId]
+      delete chatTimelineCursorsRef.current[chatId]
+      delete chatTimelineLoadedRef.current[chatId]
+      delete chatTimelineLoadingRef.current[chatId]
+      delete chatTimelineHasOlderRef.current[chatId]
     }
+    setChatTimelineHasOlder((current) => {
+      let changed = false
+      const next = { ...current }
+      for (const chatId of chatIds) {
+        if (chatId in next) {
+          delete next[chatId]
+          changed = true
+        }
+      }
+      return changed ? next : current
+    })
+    setChatTimelineLoading((current) => {
+      let changed = false
+      const next = { ...current }
+      for (const chatId of chatIds) {
+        if (chatId in next) {
+          delete next[chatId]
+          changed = true
+        }
+      }
+      return changed ? next : current
+    })
   }, [])
 
   // rememberProjectSelectedChat 使用 projectId 和 chatId 参数记录 project 最近选中的聊天页。
@@ -838,16 +914,11 @@ function App() {
     if (!hasSnapshot || routeView !== 'chat' || connectionState !== 'open' || !selectedChat?.id) {
       return
     }
-    const loadedAt = chatDetailLoadedAtRef.current[selectedChat.id] ?? ''
-    const loadingAt = chatDetailLoadingAtRef.current[selectedChat.id] ?? ''
-    if (loadedAt === selectedChat.updatedAt || loadingAt === selectedChat.updatedAt) {
+    if (chatTimelineLoadedRef.current[selectedChat.id] || chatTimelineLoadingRef.current[selectedChat.id]) {
       return
     }
-    chatDetailLoadingAtRef.current[selectedChat.id] = selectedChat.updatedAt
-    if (!sendClientMessage(wsRef.current, 'chat.detail.get', { chatId: selectedChat.id })) {
-      delete chatDetailLoadingAtRef.current[selectedChat.id]
-    }
-  }, [connectionState, hasSnapshot, routeView, selectedChat?.id, selectedChat?.updatedAt])
+    requestChatTimeline(selectedChat.id, 'tail', undefined, 200)
+  }, [connectionState, hasSnapshot, requestChatTimeline, routeView, selectedChat?.id])
 
   // notifyAgentCompletion 使用 message 参数发送 agent 完成通知。
   const notifyAgentCompletion = useCallback((message: ChatMessage) => {
@@ -876,17 +947,15 @@ function App() {
         const nextProjects = sortProjects(payload.projects ?? [])
         const nextChats = sortByCreatedAt((payload.chats ?? []).map(normalizeChatSummary))
         const nextChatIds = new Set(nextChats.map((chat) => chat.id))
-        if (message.epoch) {
-          timelineEpochRef.current = message.epoch
-        }
-        if (typeof message.seq === 'number') {
-          timelineSeqRef.current = message.seq
-        }
-        timelineBufferedMessagesRef.current = {}
-        timelineCatchUpRequestedRef.current = false
-        chatDetailLoadingAtRef.current = {}
-        chatDetailLoadedAtRef.current = {}
-        setAgentProviders(payload.agentProviders ?? fallbackAgentProviders)
+        chatTimelineLoadingRef.current = {}
+        chatTimelineLoadedRef.current = {}
+        chatTimelineRowsRef.current = {}
+        chatTimelineCursorsRef.current = {}
+        chatTimelineHasOlderRef.current = {}
+        pendingChatTimelineRowsRef.current = {}
+        setChatTimelineHasOlder({})
+        setChatTimelineLoading({})
+        setAgentProviders(payload.agentProviders ?? [])
         setAgentProfiles(payload.agentProfiles ?? [])
         setBackendEnv(payload.backendEnv ?? [])
         setAgentSkills(payload.agentSkills ?? [])
@@ -905,6 +974,10 @@ function App() {
           return next
         })
         setHasSnapshot(true)
+        const nextSelectedChatId = selectedChatId && nextChats.some((chat) => chat.id === selectedChatId) ? selectedChatId : (nextChats[0]?.id ?? '')
+        if (routeView === 'chat' && nextSelectedChatId) {
+          requestChatTimeline(nextSelectedChatId, 'tail', undefined, 200)
+        }
         setSelectedProjectId((current) => {
           if (current && nextProjects.some((project) => project.id === current)) {
             return current
@@ -956,7 +1029,7 @@ function App() {
         setSelectedChatId((current) => (payload.chatIds.includes(current) ? '' : current))
         removeComposerValues(payload.chatIds)
         removeChatScrollMemory(payload.chatIds)
-        removeChatDetailState(payload.chatIds)
+        removeChatTimelineState(payload.chatIds)
         resetProjectForm(null)
         setProjectDialogOpen(false)
         return
@@ -999,43 +1072,55 @@ function App() {
         setSelectedChatId((current) => (current === payload.id ? '' : current))
         removeComposerValues([payload.id])
         removeChatScrollMemory([payload.id])
-        removeChatDetailState([payload.id])
+        removeChatTimelineState([payload.id])
         return
       }
-      if (message.type === 'chat.detail' || message.type === 'chat.detail.changed') {
-        flushPendingChatDeltas()
-        const payload = message.payload as ChatDetailPayload
-        const chat = normalizeChatDetail(payload.chat)
-        delete chatDetailLoadingAtRef.current[chat.id]
-        chatDetailLoadedAtRef.current[chat.id] = chat.updatedAt
-        setChats((current) => sortByCreatedAt(upsertById(current, chat, (item) => item.id)))
+      if (message.type === 'chat.timeline') {
+        flushPendingChatTimelineRows()
+        const payload = message.payload as ChatTimelinePayload
+        delete chatTimelineLoadingRef.current[payload.chatId]
+        setChatTimelineLoading((current) => {
+          if (!current[payload.chatId]) {
+            return current
+          }
+          const next = { ...current }
+          delete next[payload.chatId]
+          return next
+        })
+        chatTimelineLoadedRef.current[payload.chatId] = true
+        chatTimelineHasOlderRef.current[payload.chatId] = payload.hasOlder
+        setChatTimelineHasOlder((current) => ({ ...current, [payload.chatId]: payload.hasOlder }))
+        const existingRows = chatTimelineRowsRef.current[payload.chatId] ?? []
+        const rows =
+          payload.reset || payload.direction === 'tail'
+            ? payload.rows
+            : payload.direction === 'before'
+              ? [...payload.rows, ...existingRows]
+              : [...existingRows, ...payload.rows]
+        applyChatTimelineRows(payload.chatId, rows, { replace: true })
         return
       }
-      if (message.type === 'chat.message.delta') {
-        const payload = message.payload as ChatMessageDeltaPayload
-        enqueueChatDelta(payload)
-        return
-      }
-      if (message.type === 'chat.message.done') {
-        flushPendingChatDeltas()
-        const payload = message.payload as ChatMessageDonePayload
-        if (payload.message.status === 'complete') {
-          markChatIndicator(payload.chatId, 'success')
-        } else if (payload.message.status === 'error') {
-          markChatIndicator(payload.chatId, 'error')
+      if (message.type === 'chat.timeline.appended') {
+        const payload = message.payload as ChatTimelineAppendedPayload
+        enqueueChatTimelineRow(payload)
+        if (payload.row.item.type === 'message_finished') {
+          flushPendingChatTimelineRows()
+          const rows = chatTimelineRowsRef.current[payload.chatId] ?? []
+          if (!rows.some((row) => row.seq === payload.row.seq && row.item.type === 'message_finished')) {
+            return
+          }
+          const chat = chatsRef.current.find((item) => item.id === payload.chatId)
+          const projected = chat ? projectChatTimeline(chat, rows) : null
+          const finished = projected?.messages.find((item) => item.id === payload.row.item.messageId)
+          if (finished?.status === 'complete') {
+            markChatIndicator(payload.chatId, 'success')
+          } else if (finished?.status === 'error') {
+            markChatIndicator(payload.chatId, 'error')
+          }
+          if (finished) {
+            notifyAgentCompletion(finished)
+          }
         }
-        notifyAgentCompletion(payload.message)
-        setChats((current) =>
-          current.map((chat) => {
-            if (chat.id !== payload.chatId) {
-              return chat
-            }
-            return {
-              ...chat,
-              messages: chat.messages.map((item) => (item.id === payload.message.id ? payload.message : item)),
-            }
-          }),
-        )
         return
       }
       if (message.type === 'agent.status') {
@@ -1055,7 +1140,7 @@ function App() {
       }
       if (message.type === 'agent.providers.changed') {
         const payload = message.payload as AgentProvidersChangedPayload
-        setAgentProviders(payload.agentProviders ?? fallbackAgentProviders)
+        setAgentProviders(payload.agentProviders ?? [])
         setNewClaudeModelID('')
         return
       }
@@ -1082,126 +1167,34 @@ function App() {
     },
     [
       clearChatIndicator,
+      applyChatTimelineRows,
+      enqueueChatTimelineRow,
       failPendingChatSends,
       finishChatSendSuccess,
-      flushPendingChatDeltas,
-      enqueueChatDelta,
+      flushPendingChatTimelineRows,
       markChatIndicator,
       notifyAgentCompletion,
       pruneChatScrollMemory,
       pruneProjectSelectedChats,
       pruneComposerValues,
+      requestChatTimeline,
       rememberProjectSelectedChat,
       forgetProjectSelectedChat,
       removeChatScrollMemory,
-      removeChatDetailState,
+      removeChatTimelineState,
       removeComposerValues,
       resetProjectForm,
+      routeView,
+      selectedChatId,
     ],
   )
 
-  // requestTimelineCatchUp 使用 epoch 和 endSeq 参数请求服务端补齐 timeline 缺口。
-  const requestTimelineCatchUp = useCallback((epoch: string, endSeq: number) => {
-    if (!epoch || timelineCatchUpRequestedRef.current) {
-      return
-    }
-    timelineCatchUpRequestedRef.current = true
-    if (!sendClientMessage(wsRef.current, 'timeline.catch_up', { epoch, endSeq })) {
-      timelineCatchUpRequestedRef.current = false
-    }
-  }, [])
-
-  // applyBufferedTimelineMessages 按当前游标继续应用已经缓存的连续消息。
-  const applyBufferedTimelineMessages = useCallback(() => {
-    while (true) {
-      const nextSeq = timelineSeqRef.current + 1
-      const buffered = timelineBufferedMessagesRef.current[nextSeq]
-      if (!buffered) {
-        return
-      }
-      delete timelineBufferedMessagesRef.current[nextSeq]
-      timelineSeqRef.current = nextSeq
-      applyServerMessage(buffered)
-    }
-  }, [applyServerMessage])
-
-  // handleTimelineCatchUp 使用 message 参数应用后端返回的补齐窗口。
-  const handleTimelineCatchUp = useCallback(
-    (message: ServerMessage) => {
-      timelineCatchUpRequestedRef.current = false
-      const payload = message.payload as TimelineCatchUpPayload
-      if (payload.reset) {
-        timelineBufferedMessagesRef.current = {}
-        timelineEpochRef.current = payload.epoch
-        timelineSeqRef.current = payload.endSeq
-        if (payload.snapshot) {
-          applyServerMessage({
-            ...message,
-            type: 'state.snapshot',
-            payload: payload.snapshot,
-            epoch: payload.epoch,
-            seq: payload.endSeq,
-          })
-        }
-        return
-      }
-      const messages = [...(payload.messages ?? [])].sort((left, right) => (left.seq ?? 0) - (right.seq ?? 0))
-      for (const item of messages) {
-        const seq = item.seq ?? 0
-        if (!item.epoch || item.epoch !== timelineEpochRef.current || seq <= timelineSeqRef.current) {
-          continue
-        }
-        if (seq > timelineSeqRef.current + 1) {
-          timelineBufferedMessagesRef.current[seq] = item as ServerMessage
-          requestTimelineCatchUp(timelineEpochRef.current, timelineSeqRef.current)
-          return
-        }
-        timelineSeqRef.current = seq
-        applyServerMessage(item as ServerMessage)
-        applyBufferedTimelineMessages()
-      }
-    },
-    [applyBufferedTimelineMessages, applyServerMessage, requestTimelineCatchUp],
-  )
-
-  // handleServerMessage 使用 message 参数处理 timeline 去重、gap 检测和业务状态归并。
+  // handleServerMessage 使用 message 参数处理服务端事件。
   const handleServerMessage = useCallback(
     (message: ServerMessage) => {
-      if (message.type === 'timeline.catch_up') {
-        handleTimelineCatchUp(message)
-        return
-      }
-      const epoch = message.epoch ?? ''
-      const seq = typeof message.seq === 'number' ? message.seq : 0
-      if (!epoch || seq <= 0) {
-        applyServerMessage(message)
-        return
-      }
-      if (message.type === 'state.snapshot' || !timelineEpochRef.current) {
-        timelineEpochRef.current = epoch
-        timelineSeqRef.current = seq
-        timelineBufferedMessagesRef.current = {}
-        timelineCatchUpRequestedRef.current = false
-        applyServerMessage(message)
-        return
-      }
-      if (epoch !== timelineEpochRef.current) {
-        requestTimelineCatchUp(timelineEpochRef.current, timelineSeqRef.current)
-        return
-      }
-      if (seq <= timelineSeqRef.current) {
-        return
-      }
-      if (seq > timelineSeqRef.current + 1) {
-        timelineBufferedMessagesRef.current[seq] = message
-        requestTimelineCatchUp(timelineEpochRef.current, timelineSeqRef.current)
-        return
-      }
-      timelineSeqRef.current = seq
       applyServerMessage(message)
-      applyBufferedTimelineMessages()
     },
-    [applyBufferedTimelineMessages, applyServerMessage, handleTimelineCatchUp, requestTimelineCatchUp],
+    [applyServerMessage],
   )
 
   useEffect(() => {
@@ -1400,6 +1393,15 @@ function App() {
   // changeAgentReasoning 使用 reasoning 参数切换当前聊天页推理级别。
   const changeAgentReasoning = (reasoning: string) => {
     updateChatAgent(selectedAgentProvider, selectedAgentModel, reasoning)
+  }
+
+  // loadOlderChatTimeline 拉取当前聊天页更早的 timeline 行。
+  const loadOlderChatTimeline = () => {
+    if (!selectedChat) {
+      return
+    }
+    const cursor = chatTimelineCursorsRef.current[selectedChat.id]
+    requestChatTimeline(selectedChat.id, 'before', cursor ? { epoch: cursor.epoch, seq: cursor.startSeq } : undefined, 200)
   }
 
   // openAgentSettings 打开 agent 设置页。
@@ -1688,15 +1690,17 @@ function App() {
             connectionState={connectionState}
             chatIndicators={chatIndicators}
             composerValue={selectedComposerValue}
-        composerImages={selectedComposerImages}
-        planMode={selectedPlanMode}
-        copiedMessageId={copiedMessageId}
-        isRunning={isRunning}
-        isSending={selectedChatSending}
-        isSendAwaiting={selectedChatSendAwaiting}
-        submitErrorText={selectedChatSubmitError}
-        scrollToBottomSignal={selectedChatScrollBottomSignal}
-        agentProviders={visibleAgentProviders}
+            composerImages={selectedComposerImages}
+            planMode={selectedPlanMode}
+            copiedMessageId={copiedMessageId}
+            isRunning={isRunning}
+            isSending={selectedChatSending}
+            isSendAwaiting={selectedChatSendAwaiting}
+            submitErrorText={selectedChatSubmitError}
+            scrollToBottomSignal={selectedChatScrollBottomSignal}
+            timelineHasOlder={selectedChatTimelineHasOlder}
+            timelineLoading={selectedChatTimelineLoading}
+            agentProviders={visibleAgentProviders}
             agentSkills={agentSkills}
             selectedAgentProvider={selectedAgentProvider}
             selectedAgentModels={selectedAgentModels}
@@ -1718,6 +1722,7 @@ function App() {
             onComposerValueChange={updateSelectedComposerValue}
             onComposerDraftFlush={() => selectedChat?.id && flushChatDraft(selectedChat.id)}
             onComposerImagesChange={updateSelectedComposerImages}
+            onLoadOlderTimeline={loadOlderChatTimeline}
             onRefreshAgentSkills={refreshAgentSkills}
             onPlanModeChange={updateSelectedPlanMode}
             onSubmitComposer={submitComposer}

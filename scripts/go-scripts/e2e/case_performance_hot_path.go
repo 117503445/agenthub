@@ -33,15 +33,15 @@ func runPerformanceHotPathCase(ctx E2EContext) (success bool) {
 	if err != nil {
 		return fail(err)
 	}
-	snapshot, err := decodeChatDetailLazySnapshot(snapshotMessage.Payload)
+	snapshot, err := decodeChatTimelineSnapshot(snapshotMessage.Payload)
 	if err != nil {
 		return fail(err)
 	}
-	chat, err := firstChatDetailLazyChat(snapshot)
+	chat, err := firstChatTimelineChat(snapshot)
 	if err != nil {
 		return fail(err)
 	}
-	if err := sendChatDetailLazyMessage(conn, "chat.agent.update", wsapp.ChatAgentUpdatePayload{
+	if err := sendE2EClientMessage(conn, "chat.agent.update", wsapp.ChatAgentUpdatePayload{
 		ChatID:    chat.ID,
 		Provider:  wsapp.AgentProviderMockCodex,
 		Model:     "mock-codex-gpt-5.5",
@@ -52,13 +52,10 @@ func runPerformanceHotPathCase(ctx E2EContext) (success bool) {
 	if _, err := readPersistenceMessage(conn, "chat.changed", 5*time.Second); err != nil {
 		return fail(err)
 	}
-	if err := sendChatDetailLazyMessage(conn, "chat.detail.get", map[string]string{"chatId": chat.ID}); err != nil {
+	if _, err := requestChatTimeline(conn, chatTimelineFetchPayload{ChatID: chat.ID, Direction: "tail", Limit: 200}); err != nil {
 		return fail(err)
 	}
-	if _, err := readPersistenceMessage(conn, "chat.detail", 5*time.Second); err != nil {
-		return fail(err)
-	}
-	if err := sendChatDetailLazyMessage(conn, "chat.send", wsapp.ChatSendPayload{
+	if err := sendE2EClientMessage(conn, "chat.send", wsapp.ChatSendPayload{
 		ChatID: chat.ID,
 		Prompt: "MOCK_CODEX_DUPLICATE_FULL_TEXT",
 	}); err != nil {
@@ -71,10 +68,10 @@ func runPerformanceHotPathCase(ctx E2EContext) (success bool) {
 	if strings.Count(finalText, "Codex 重复输出修复完成") != 1 {
 		return fail(fmt.Errorf("Codex 输出重复或缺失: %q", finalText))
 	}
-	if err := assertPerformanceDetailFile(ctx.DataDir, chat.ID, "Codex 重复输出修复完成"); err != nil {
+	if err := assertPerformanceTimelineFile(ctx.DataDir, chat.ID, "Codex 重复输出修复完成"); err != nil {
 		return fail(err)
 	}
-	events = append(events, reportStep("Codex delta 和完整文本事件合并后只显示一次，聊天详情文件包含最终文本。"))
+	events = append(events, reportStep("Codex delta 和完整文本事件合并后只显示一次，timeline 文件包含最终文本。"))
 
 	conn.CloseNow()
 	ctx.StopServer()
@@ -94,48 +91,31 @@ func runPerformanceHotPathCase(ctx E2EContext) (success bool) {
 	if _, err := readPersistenceMessage(restartConn, "state.snapshot", 5*time.Second); err != nil {
 		return fail(err)
 	}
-	if err := sendChatDetailLazyMessage(restartConn, "chat.detail.get", map[string]string{"chatId": chat.ID}); err != nil {
-		return fail(err)
-	}
-	detailMessage, err := readPersistenceMessage(restartConn, "chat.detail", 5*time.Second)
+	timeline, err := requestChatTimeline(restartConn, chatTimelineFetchPayload{ChatID: chat.ID, Direction: "tail", Limit: 200})
 	if err != nil {
 		return fail(err)
 	}
-	detail, err := decodeChatDetailLazyDetail(detailMessage.Payload)
-	if err != nil {
-		return fail(err)
+	if !chatTimelineRowsContainText(timeline.Rows, "Codex 重复输出修复完成") {
+		return fail(fmt.Errorf("重启后 timeline 缺少最终文本: %#v", timeline.Rows))
 	}
-	if !chatDetailHasAssistantText(detail.Chat, "Codex 重复输出修复完成") {
-		return fail(fmt.Errorf("重启后聊天详情缺少最终文本: %#v", detail.Chat.Messages))
-	}
-	events = append(events, reportStep("服务重启后，聊天详情仍能恢复完整 assistant 文本。"))
+	events = append(events, reportStep("服务重启后，timeline 仍能恢复完整 assistant 文本。"))
 	return true
 }
 
-// assertPerformanceDetailFile 使用 dataDir、chatID 和 expected 参数断言详情文件包含最终文本。
-func assertPerformanceDetailFile(dataDir string, chatID string, expected string) error {
-	data, err := os.ReadFile(filepath.Join(dataDir, "chats", chatID+".json"))
+// assertPerformanceTimelineFile 使用 dataDir、chatID 和 expected 参数断言 timeline 文件包含最终文本。
+func assertPerformanceTimelineFile(dataDir string, chatID string, expected string) error {
+	data, err := os.ReadFile(filepath.Join(dataDir, "timelines", chatID+".json"))
 	if err != nil {
 		return err
 	}
-	var detail wsapp.PersistedChatDetail
-	if err := json.Unmarshal(data, &detail); err != nil {
+	var timeline wsapp.PersistedChatTimeline
+	if err := json.Unmarshal(data, &timeline); err != nil {
 		return err
 	}
-	for _, message := range detail.Messages {
-		if message.Role == wsapp.MessageRoleAssistant && strings.Contains(message.Text, expected) {
+	for _, row := range timeline.Rows {
+		if row.Item.Type == wsapp.ChatTimelineItemAssistantDelta && strings.Contains(row.Item.Delta, expected) {
 			return nil
 		}
 	}
-	return fmt.Errorf("详情文件缺少 assistant 最终文本: %s", expected)
-}
-
-// chatDetailHasAssistantText 使用 chat 和 expected 参数判断聊天详情是否包含 assistant 文本。
-func chatDetailHasAssistantText(chat wsapp.Chat, expected string) bool {
-	for _, message := range chat.Messages {
-		if message.Role == wsapp.MessageRoleAssistant && strings.Contains(message.Text, expected) {
-			return true
-		}
-	}
-	return false
+	return fmt.Errorf("timeline 文件缺少 assistant 最终文本: %s", expected)
 }

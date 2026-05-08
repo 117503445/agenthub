@@ -22,23 +22,22 @@ import (
 
 // AgentConfig 表示启动外部 agent 子进程所需的配置。
 type AgentConfig struct {
-	Command              string                // Command 表示 Claude 命令，保留该字段兼容旧配置。
-	CodexCommand         string                // CodexCommand 表示 Codex 命令。
-	MockClaudeCommand    string                // MockClaudeCommand 表示 Mock Claude Code 命令。
-	MockCodexCommand     string                // MockCodexCommand 表示 Mock Codex 命令。
-	AnthropicBaseURL     string                // AnthropicBaseURL 表示 Anthropic 兼容接口地址。
-	AnthropicModel       string                // AnthropicModel 表示 Claude 使用的模型。
-	AnthropicAPIKey      string                // AnthropicAPIKey 表示 Anthropic API Key。
-	OpenAIBaseURL        string                // OpenAIBaseURL 表示 OpenAI 兼容接口地址。
-	OpenAIAPIKey         string                // OpenAIAPIKey 表示 OpenAI API Key。
-	MockAnthropicBaseURL string                // MockAnthropicBaseURL 表示 Mock Claude 固定使用的后端 Anthropic 兼容接口地址。
-	MockAnthropicAPIKey  string                // MockAnthropicAPIKey 表示 Mock Claude 使用的 API Key。
-	MockOpenAIBaseURL    string                // MockOpenAIBaseURL 表示 Mock Codex 固定使用的后端 OpenAI 兼容接口地址。
-	MockOpenAIAPIKey     string                // MockOpenAIAPIKey 表示 Mock Codex 使用的 API Key。
-	AgentProviders       []AgentProviderOption // AgentProviders 表示可用 agent 和模型选项。
-	AgentProfiles        []AgentProfile        // AgentProfiles 表示可用 Profile 配置。
-	BackendEnv           []BackendEnvVar       // BackendEnv 表示后端启动时捕获的环境变量。
-	EnableMockAgent      bool                  // EnableMockAgent 表示本次启动是否允许添加内置 Mock Profile。
+	Command              string          // Command 表示 Claude 命令。
+	CodexCommand         string          // CodexCommand 表示 Codex 命令。
+	MockClaudeCommand    string          // MockClaudeCommand 表示 Mock Claude Code 命令。
+	MockCodexCommand     string          // MockCodexCommand 表示 Mock Codex 命令。
+	AnthropicBaseURL     string          // AnthropicBaseURL 表示 Anthropic 兼容接口地址。
+	AnthropicModel       string          // AnthropicModel 表示 Claude 使用的模型。
+	AnthropicAPIKey      string          // AnthropicAPIKey 表示 Anthropic API Key。
+	OpenAIBaseURL        string          // OpenAIBaseURL 表示 OpenAI 兼容接口地址。
+	OpenAIAPIKey         string          // OpenAIAPIKey 表示 OpenAI API Key。
+	MockAnthropicBaseURL string          // MockAnthropicBaseURL 表示 Mock Claude 固定使用的后端 Anthropic 兼容接口地址。
+	MockAnthropicAPIKey  string          // MockAnthropicAPIKey 表示 Mock Claude 使用的 API Key。
+	MockOpenAIBaseURL    string          // MockOpenAIBaseURL 表示 Mock Codex 固定使用的后端 OpenAI 兼容接口地址。
+	MockOpenAIAPIKey     string          // MockOpenAIAPIKey 表示 Mock Codex 使用的 API Key。
+	AgentProfiles        []AgentProfile  // AgentProfiles 表示可用 Profile 配置。
+	BackendEnv           []BackendEnvVar // BackendEnv 表示后端启动时捕获的环境变量。
+	EnableMockAgent      bool            // EnableMockAgent 表示本次启动是否允许添加内置 Mock Profile。
 }
 
 // AgentRunCallbacks 表示一次 agent 运行中的回调。
@@ -131,9 +130,6 @@ func NewAgentManager(ctx context.Context, config AgentConfig) *AgentManager {
 	if strings.TrimSpace(config.AnthropicModel) == "" {
 		config.AnthropicModel = DefaultAgentModel(AgentProviderClaudeCode, DefaultAgentProviderOptions())
 	}
-	if len(config.AgentProfiles) == 0 && len(config.AgentProviders) > 0 {
-		config.AgentProfiles = AgentProfilesFromProviderOptions(config.AgentProviders)
-	}
 	if len(config.AgentProfiles) == 0 {
 		config.AgentProfiles = AgentProfiles(AgentOptionsConfig{
 			ClaudeDefaultModel: config.AnthropicModel,
@@ -141,7 +137,6 @@ func NewAgentManager(ctx context.Context, config AgentConfig) *AgentManager {
 		})
 	}
 	config.AgentProfiles = normalizeAgentProfiles(config.AgentProfiles)
-	config.AgentProviders = AgentProviderOptionsFromProfiles(config.AgentProfiles)
 	if len(config.BackendEnv) == 0 {
 		config.BackendEnv = BackendEnvSnapshot()
 	}
@@ -185,7 +180,6 @@ func (m *AgentManager) SetAgentProfiles(profiles []AgentProfile) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.config.AgentProfiles = cloneAgentProfiles(profiles)
-	m.config.AgentProviders = AgentProviderOptionsFromProfiles(profiles)
 }
 
 // agentProfiles 返回当前 agent 可用 Profile 副本。

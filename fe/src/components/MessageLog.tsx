@@ -16,6 +16,10 @@ interface MessageLogProps {
   copiedMessageId: string
   /** scrollToBottomSignal 表示强制滚动到底部的信号。 */
   scrollToBottomSignal: number
+  /** hasOlder 表示当前聊天页是否还有更早 timeline 行。 */
+  hasOlder: boolean
+  /** loadingOlder 表示更早 timeline 是否正在拉取。 */
+  loadingOlder: boolean
   /** onCopyMessage 使用 message 参数复制消息。 */
   onCopyMessage: (message: ChatMessage) => void
   /** onExecutePlan 使用 plan 参数执行已确认 plan。 */
@@ -26,6 +30,8 @@ interface MessageLogProps {
   onReadScrollMemory: (chatId: string) => ChatScrollMemory | undefined
   /** onSaveScrollMemory 使用 chatId 和 memory 参数保存聊天页滚动位置。 */
   onSaveScrollMemory: (chatId: string, memory: ChatScrollMemory) => void
+  /** onLoadOlder 请求拉取更早 timeline。 */
+  onLoadOlder: () => void
 }
 
 // buildChatScrollSignature 使用 chat 参数生成用于判断内容是否变化的签名。
@@ -206,15 +212,19 @@ export function MessageLog({
   projectRoot,
   copiedMessageId,
   scrollToBottomSignal,
+  hasOlder,
+  loadingOlder,
   onCopyMessage,
   onExecutePlan,
   onRespondUserInput,
   onReadScrollMemory,
   onSaveScrollMemory,
+  onLoadOlder,
 }: MessageLogProps) {
   const logRef = useRef<HTMLDivElement | null>(null)
   const scrollSignature = useMemo(() => buildChatScrollSignature(chat), [chat])
   const scrollSignatureRef = useRef(scrollSignature)
+  const prependAnchorRef = useRef<{ scrollTop: number; scrollHeight: number } | null>(null)
   const rowVirtualizer = useVirtualizer({
     count: chat.messages.length,
     getScrollElement: () => logRef.current,
@@ -240,6 +250,19 @@ export function MessageLog({
     [chat.id, onSaveScrollMemory],
   )
 
+  // requestLoadOlder 使用当前滚动高度记录 prepend 锚点后请求更早内容。
+  const requestLoadOlder = useCallback(() => {
+    const element = logRef.current
+    if (element) {
+      prependAnchorRef.current = {
+        scrollTop: element.scrollTop,
+        scrollHeight: element.scrollHeight,
+      }
+      saveCurrentScroll(element)
+    }
+    onLoadOlder()
+  }, [onLoadOlder, saveCurrentScroll])
+
   useLayoutEffect(() => {
     const element = logRef.current
     if (!element) {
@@ -252,7 +275,13 @@ export function MessageLog({
       if (!nextElement) {
         return
       }
-      nextElement.scrollTop = restoreSavedPosition && memory ? memory.scrollTop : nextElement.scrollHeight
+      const prependAnchor = prependAnchorRef.current
+      prependAnchorRef.current = null
+      if (prependAnchor) {
+        nextElement.scrollTop = prependAnchor.scrollTop + (nextElement.scrollHeight - prependAnchor.scrollHeight)
+      } else {
+        nextElement.scrollTop = restoreSavedPosition && memory ? memory.scrollTop : nextElement.scrollHeight
+      }
       saveCurrentScroll(nextElement)
     })
     return () => {
@@ -284,6 +313,20 @@ export function MessageLog({
       aria-live="polite"
       onScroll={(event) => saveCurrentScroll(event.currentTarget)}
     >
+      {hasOlder ? (
+        <div className="mx-auto mb-3 flex max-w-4xl justify-center">
+          <button
+            type="button"
+            data-testid="timeline-load-older"
+            disabled={loadingOlder}
+            onClick={requestLoadOlder}
+            className="inline-flex h-8 items-center gap-2 rounded-md border border-[var(--agenthub-outline)] bg-[var(--agenthub-surface-0)] px-3 text-xs text-[var(--agenthub-muted)] transition hover:bg-[var(--agenthub-surface-1)] hover:text-[var(--agenthub-foreground)] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loadingOlder ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+            <span>加载更早</span>
+          </button>
+        </div>
+      ) : null}
       {chat.messages.length > 0 ? (
         <div className="mx-auto max-w-4xl">
           <div className="relative w-full" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>

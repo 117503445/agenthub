@@ -41,35 +41,6 @@ func AgentProfileByID(profiles []AgentProfile, id string) (AgentProfile, bool) {
 	return AgentProfile{}, false
 }
 
-// AgentProfilesFromProviderOptions 使用 options 参数兼容旧 provider 持久化数据。
-func AgentProfilesFromProviderOptions(options []AgentProviderOption) []AgentProfile {
-	profiles := make([]AgentProfile, 0, len(options))
-	for _, option := range options {
-		profileType := AgentProfileTypeClaudeCode
-		command := "claude"
-		if strings.Contains(option.ID, "codex") {
-			profileType = AgentProfileTypeCodex
-			command = "codex"
-		}
-		profile := AgentProfile{
-			ID:      strings.TrimSpace(option.ID),
-			Label:   strings.TrimSpace(option.Label),
-			Type:    profileType,
-			Command: command,
-			Models:  cloneAgentModels(option.Models),
-			Builtin: option.ID == AgentProviderClaudeCode || option.ID == AgentProviderCodex || option.ID == AgentProviderMockClaudeCode || option.ID == AgentProviderMockCodex,
-		}
-		if profile.Type == AgentProfileTypeClaudeCode {
-			profile.Env = claudeCodeBaseEnv()
-		}
-		normalized, err := normalizeAgentProfile(profile)
-		if err == nil {
-			profiles = append(profiles, normalized)
-		}
-	}
-	return profiles
-}
-
 // BuiltinAgentProfile 使用 kind、config 和 existing 参数创建一个新的内置 Profile。
 func BuiltinAgentProfile(kind string, config AgentOptionsConfig, existing []AgentProfile) (AgentProfile, error) {
 	profiles := AgentProfiles(config)

@@ -301,10 +301,10 @@ export interface Chat {
   draftText?: string
   /** messages 表示消息列表。 */
   messages: ChatMessage[]
-  /** detailLoaded 表示前端是否已经加载该聊天页详情。 */
-  detailLoaded?: boolean
-  /** detailLoadedAt 表示前端加载详情时对应的聊天更新时间。 */
-  detailLoadedAt?: string
+  /** timelineLoaded 表示前端是否已经加载该聊天页 timeline。 */
+  timelineLoaded?: boolean
+  /** timelineLoadedAt 表示前端加载 timeline 时对应的聊天更新时间。 */
+  timelineLoadedAt?: string
   /** createdAt 表示创建时间。 */
   createdAt: string
   /** updatedAt 表示更新时间。 */
@@ -357,11 +357,6 @@ export interface ChatChangedPayload {
   chat: Chat
 }
 
-export interface ChatDetailPayload {
-  /** chat 表示完整聊天页详情。 */
-  chat: Chat
-}
-
 export interface ChatDeletedPayload {
   /** id 表示被删除的聊天页标识。 */
   id: string
@@ -369,58 +364,102 @@ export interface ChatDeletedPayload {
   projectId: string
 }
 
-export interface ChatMessageDeltaPayload {
-  /** chatId 表示聊天页标识。 */
-  chatId: string
-  /** messageId 表示消息标识。 */
-  messageId: string
-  /** delta 表示增量文本。 */
-  delta: string
-  /** text 表示服务端当前完整文本。 */
-  text: string
-  /** message 表示服务端当前完整消息。 */
-  message?: ChatMessage
+export interface ChatTimelineItem {
+  /** type 表示 timeline 事件类型。 */
+  type:
+    | 'message_started'
+    | 'assistant_delta'
+    | 'tool_call'
+    | 'usage_updated'
+    | 'message_finished'
+    | 'plan_set'
+    | 'plan_status_changed'
+    | 'system_message'
+  /** messageId 表示关联消息标识。 */
+  messageId?: string
+  /** role 表示消息角色。 */
+  role?: MessageRole
+  /** text 表示完整文本。 */
+  text?: string
+  /** delta 表示 assistant 文本增量。 */
+  delta?: string
+  /** status 表示消息或 plan 状态。 */
+  status?: MessageStatus | PlanApproval['status']
+  /** toolCall 表示工具调用状态。 */
+  toolCall?: ToolCall
+  /** usage 表示用量信息。 */
+  usage?: AgentUsage
+  /** plan 表示待确认 plan。 */
+  plan?: PlanApproval
+  /** images 表示用户消息图片。 */
+  images?: MessageImage[]
 }
 
-export interface ChatMessageDonePayload {
+export interface ChatTimelineRow {
+  /** id 表示 timeline 行标识。 */
+  id: string
   /** chatId 表示聊天页标识。 */
   chatId: string
-  /** message 表示完成后的消息。 */
-  message: ChatMessage
-}
-
-export interface TimelineCatchUpPayload {
-  /** epoch 表示服务端当前 timeline 标识。 */
+  /** epoch 表示 timeline 世代。 */
   epoch: string
-  /** startSeq 表示补齐窗口起始序号。 */
-  startSeq: number
-  /** endSeq 表示补齐窗口结束序号。 */
-  endSeq: number
-  /** messages 表示按序返回的服务端历史消息。 */
-  messages?: ServerTimelineMessage[]
-  /** reset 表示前端应使用 snapshot 重建 canonical 状态。 */
-  reset: boolean
-  /** snapshot 表示 reset 时返回的权威状态快照。 */
-  snapshot?: SnapshotPayload
+  /** seq 表示单调递增序号。 */
+  seq: number
+  /** timestamp 表示行时间。 */
+  timestamp: string
+  /** item 表示业务事件。 */
+  item: ChatTimelineItem
 }
 
-export interface ServerTimelineMessage {
-  /** type 表示服务端消息类型。 */
-  type: string
-  /** payload 表示服务端消息数据。 */
-  payload?: unknown
-  /** serverTime 表示服务端发送时间。 */
-  serverTime: string
-  /** version 表示服务端构建版本。 */
-  version: string
-  /** buildTime 表示后端构建时间。 */
-  buildTime: string
-  /** hostname 表示后端机器名。 */
-  hostname?: string
-  /** epoch 表示服务端本轮 timeline 标识。 */
-  epoch?: string
-  /** seq 表示服务端 timeline 单调递增序号。 */
-  seq?: number
+export interface ChatTimelineCursor {
+  /** epoch 表示 timeline 世代。 */
+  epoch: string
+  /** seq 表示 timeline 行序号。 */
+  seq: number
+}
+
+export interface ChatTimelineWindow {
+  /** minSeq 表示当前最小序号。 */
+  minSeq: number
+  /** maxSeq 表示当前最大序号。 */
+  maxSeq: number
+  /** nextSeq 表示下一行序号。 */
+  nextSeq: number
+}
+
+export interface ChatTimelinePayload {
+  /** chatId 表示聊天页标识。 */
+  chatId: string
+  /** direction 表示拉取方向。 */
+  direction: 'tail' | 'after' | 'before'
+  /** epoch 表示 timeline 世代。 */
+  epoch: string
+  /** reset 表示前端应重置本地 rows。 */
+  reset: boolean
+  /** staleCursor 表示游标 epoch 过期。 */
+  staleCursor: boolean
+  /** gap 表示游标已落在窗口外。 */
+  gap: boolean
+  /** window 表示服务端窗口。 */
+  window: ChatTimelineWindow
+  /** startCursor 表示返回起点。 */
+  startCursor?: ChatTimelineCursor
+  /** endCursor 表示返回终点。 */
+  endCursor?: ChatTimelineCursor
+  /** hasOlder 表示还有更早内容。 */
+  hasOlder: boolean
+  /** hasNewer 表示还有更新内容。 */
+  hasNewer: boolean
+  /** rows 表示 timeline 行。 */
+  rows: ChatTimelineRow[]
+}
+
+export interface ChatTimelineAppendedPayload {
+  /** chatId 表示聊天页标识。 */
+  chatId: string
+  /** epoch 表示 timeline 世代。 */
+  epoch: string
+  /** row 表示新增行。 */
+  row: ChatTimelineRow
 }
 
 export interface AgentStatusPayload {
