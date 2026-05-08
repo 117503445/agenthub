@@ -189,24 +189,32 @@ type PlanApproval struct {
 	UpdatedAt time.Time `json:"updatedAt"` // UpdatedAt 表示更新时间。
 }
 
+// AgentPersistenceHandle 表示 provider 原生会话恢复句柄。
+type AgentPersistenceHandle struct {
+	Provider     string         `json:"provider"`               // Provider 表示持久化句柄所属 provider。
+	SessionID    string         `json:"sessionId"`              // SessionID 表示 provider 会话标识。
+	NativeHandle string         `json:"nativeHandle,omitempty"` // NativeHandle 表示 provider 原生句柄。
+	Metadata     map[string]any `json:"metadata,omitempty"`     // Metadata 表示恢复时可用的附加信息。
+}
+
 // Chat 表示 project 下的一个聊天页。
 type Chat struct {
-	ID             string        `json:"id"`                       // ID 表示聊天页唯一标识。
-	ProjectID      string        `json:"projectId"`                // ProjectID 表示聊天页所属 project。
-	Title          string        `json:"title"`                    // Title 表示聊天页标题。
-	Status         string        `json:"status"`                   // Status 表示聊天页运行状态。
-	AgentProvider  string        `json:"agentProvider"`            // AgentProvider 表示当前聊天页使用的 Profile 标识。
-	AgentModel     string        `json:"agentModel"`               // AgentModel 表示当前聊天页使用的模型。
-	AgentReasoning string        `json:"agentReasoning,omitempty"` // AgentReasoning 表示当前聊天页使用的推理级别。
-	AgentLocked    bool          `json:"agentLocked"`              // AgentLocked 表示会话开始后 agent 配置是否锁定。
-	AgentSessionID string        `json:"agentSessionId,omitempty"` // AgentSessionID 表示 agent 会话标识。
-	AgentProfile   AgentProfile  `json:"agentProfile,omitempty"`   // AgentProfile 表示聊天页绑定的 Profile 快照。
-	Usage          *AgentUsage   `json:"usage,omitempty"`          // Usage 表示最近一次 agent 用量和上下文窗口。
-	Plan           *PlanApproval `json:"plan,omitempty"`           // Plan 表示当前待确认或执行中的 plan。
-	DraftText      string        `json:"draftText,omitempty"`      // DraftText 表示聊天输入框尚未发送的文字草稿。
-	Messages       []ChatMessage `json:"messages,omitempty"`       // Messages 表示聊天消息列表。
-	CreatedAt      time.Time     `json:"createdAt"`                // CreatedAt 表示创建时间。
-	UpdatedAt      time.Time     `json:"updatedAt"`                // UpdatedAt 表示更新时间。
+	ID               string                  `json:"id"`                         // ID 表示聊天页唯一标识。
+	ProjectID        string                  `json:"projectId"`                  // ProjectID 表示聊天页所属 project。
+	Title            string                  `json:"title"`                      // Title 表示聊天页标题。
+	Status           string                  `json:"status"`                     // Status 表示聊天页运行状态。
+	AgentProvider    string                  `json:"agentProvider"`              // AgentProvider 表示当前聊天页使用的 Profile 标识。
+	AgentModel       string                  `json:"agentModel"`                 // AgentModel 表示当前聊天页使用的模型。
+	AgentReasoning   string                  `json:"agentReasoning,omitempty"`   // AgentReasoning 表示当前聊天页使用的推理级别。
+	AgentLocked      bool                    `json:"agentLocked"`                // AgentLocked 表示会话开始后 agent 配置是否锁定。
+	AgentPersistence *AgentPersistenceHandle `json:"agentPersistence,omitempty"` // AgentPersistence 表示 provider 会话恢复句柄。
+	AgentProfile     AgentProfile            `json:"agentProfile,omitempty"`     // AgentProfile 表示聊天页绑定的 Profile 快照。
+	Usage            *AgentUsage             `json:"usage,omitempty"`            // Usage 表示最近一次 agent 用量和上下文窗口。
+	Plan             *PlanApproval           `json:"plan,omitempty"`             // Plan 表示当前待确认或执行中的 plan。
+	DraftText        string                  `json:"draftText,omitempty"`        // DraftText 表示聊天输入框尚未发送的文字草稿。
+	Messages         []ChatMessage           `json:"messages,omitempty"`         // Messages 表示聊天消息列表。
+	CreatedAt        time.Time               `json:"createdAt"`                  // CreatedAt 表示创建时间。
+	UpdatedAt        time.Time               `json:"updatedAt"`                  // UpdatedAt 表示更新时间。
 }
 
 // LastAgentSelection 表示新聊天页默认继承的 agent 配置。
@@ -1404,19 +1412,20 @@ func (s *Store) MarkPlanExecuting(chatID string, planID string) (Chat, PlanAppro
 	return cloneChat(chat), plan, cloneChatTimelineRow(row), nil
 }
 
-// SetChatSessionID 使用 chatID 和 sessionID 参数记录 Claude 会话标识。
-func (s *Store) SetChatSessionID(chatID string, sessionID string) (Chat, bool) {
-	if strings.TrimSpace(sessionID) == "" {
+// SetChatPersistenceSessionID 使用 chatID 和 sessionID 参数记录 provider 会话恢复标识。
+func (s *Store) SetChatPersistenceSessionID(chatID string, sessionID string) (Chat, bool) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
 		return Chat{}, false
 	}
 	var chat Chat
 	err := s.commit(func(state *storeState) error {
 		var ok bool
 		chat, ok = state.chats[chatID]
-		if !ok || chat.AgentSessionID == sessionID {
+		if !ok || agentPersistenceMatchesSession(chat, sessionID) {
 			return errStoreUnchanged
 		}
-		chat.AgentSessionID = sessionID
+		chat.AgentPersistence = agentPersistenceForChatSession(chat, sessionID)
 		chat.UpdatedAt = time.Now()
 		state.chats[chatID] = chat
 		return nil
@@ -1689,6 +1698,7 @@ func validateProjectInput(projectPath string) (string, string, error) {
 
 // cloneChat 使用 chat 参数创建不会共享消息切片的副本。
 func cloneChat(chat Chat) Chat {
+	chat.AgentPersistence = cloneAgentPersistenceHandle(chat.AgentPersistence)
 	if chat.Plan != nil {
 		plan := *chat.Plan
 		chat.Plan = &plan
@@ -1702,6 +1712,16 @@ func cloneChat(chat Chat) Chat {
 		chat.Messages = []ChatMessage{}
 	}
 	return chat
+}
+
+// cloneAgentPersistenceHandle 使用 handle 参数创建不会共享 metadata 的恢复句柄副本。
+func cloneAgentPersistenceHandle(handle *AgentPersistenceHandle) *AgentPersistenceHandle {
+	if handle == nil {
+		return nil
+	}
+	clone := *handle
+	clone.Metadata = cloneAnyMap(handle.Metadata)
+	return &clone
 }
 
 // cloneChatSummary 使用 chat 参数创建不包含消息和 plan 正文的聊天页摘要。
@@ -1779,6 +1799,91 @@ func cloneStringListMap(values map[string][]string) map[string][]string {
 		result[key] = append([]string(nil), list...)
 	}
 	return result
+}
+
+// cloneAnyMap 使用 values 参数创建不会共享顶层 map 的副本。
+func cloneAnyMap(values map[string]any) map[string]any {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make(map[string]any, len(values))
+	for key, value := range values {
+		result[key] = value
+	}
+	return result
+}
+
+// normalizeChatPersistence 使用 chat 参数规范化 provider 会话恢复句柄。
+func normalizeChatPersistence(chat Chat) Chat {
+	if chat.AgentPersistence != nil {
+		handle := cloneAgentPersistenceHandle(chat.AgentPersistence)
+		handle.Provider = firstNonEmpty(strings.TrimSpace(handle.Provider), chat.AgentProvider)
+		handle.SessionID = firstNonEmpty(strings.TrimSpace(handle.SessionID), strings.TrimSpace(handle.NativeHandle))
+		handle.NativeHandle = firstNonEmpty(strings.TrimSpace(handle.NativeHandle), handle.SessionID)
+		if handle.Metadata == nil {
+			handle.Metadata = map[string]any{}
+		}
+		if _, ok := handle.Metadata["threadId"]; !ok && handle.SessionID != "" {
+			handle.Metadata["threadId"] = handle.SessionID
+		}
+		if handle.SessionID != "" {
+			chat.AgentPersistence = handle
+			return chat
+		}
+		chat.AgentPersistence = nil
+	}
+	return chat
+}
+
+// chatAgentPersistenceSessionID 使用 chat 参数返回可用于恢复 provider 会话的标识。
+func chatAgentPersistenceSessionID(chat Chat) string {
+	if chat.AgentPersistence != nil && strings.TrimSpace(chat.AgentPersistence.SessionID) != "" {
+		return strings.TrimSpace(chat.AgentPersistence.SessionID)
+	}
+	return ""
+}
+
+// agentPersistenceForChatSession 使用 chat 和 sessionID 参数构造恢复句柄。
+func agentPersistenceForChatSession(chat Chat, sessionID string) *AgentPersistenceHandle {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil
+	}
+	metadata := map[string]any{
+		"threadId": sessionID,
+	}
+	if strings.TrimSpace(chat.AgentModel) != "" {
+		metadata["model"] = chat.AgentModel
+	}
+	if strings.TrimSpace(chat.AgentReasoning) != "" {
+		metadata["reasoning"] = chat.AgentReasoning
+	}
+	return &AgentPersistenceHandle{
+		Provider:     firstNonEmpty(strings.TrimSpace(chat.AgentProvider), AgentProviderCodex),
+		SessionID:    sessionID,
+		NativeHandle: sessionID,
+		Metadata:     metadata,
+	}
+}
+
+// agentPersistenceMatchesSession 使用 chat 和 sessionID 参数判断恢复句柄是否已经完整保存。
+func agentPersistenceMatchesSession(chat Chat, sessionID string) bool {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" || chat.AgentPersistence == nil {
+		return false
+	}
+	handle := chat.AgentPersistence
+	return strings.TrimSpace(handle.SessionID) == sessionID &&
+		strings.TrimSpace(handle.NativeHandle) != "" &&
+		strings.TrimSpace(handle.Provider) != ""
+}
+
+// chatUsesCodexAppServer 使用 chat 参数判断聊天页是否使用 Codex app-server。
+func chatUsesCodexAppServer(chat Chat) bool {
+	if chat.AgentProfile.Type == AgentProfileTypeCodex {
+		return true
+	}
+	return chat.AgentProvider == AgentProviderCodex || chat.AgentProvider == AgentProviderMockCodex
 }
 
 // historyMessageKey 使用 message 参数生成 provider 历史去重键。

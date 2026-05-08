@@ -93,6 +93,16 @@ func (m *AgentManager) sendCodexApp(ctx context.Context, input AgentRunInput) er
 
 // ensureCodexAppRuntime 使用 ctx 和 input 参数获取或启动 Codex app-server runtime。
 func (m *AgentManager) ensureCodexAppRuntime(ctx context.Context, input AgentRunInput) (*AgentRuntime, error) {
+	return m.ensureCodexAppRuntimeWithOptions(ctx, input, false)
+}
+
+// ensureCodexAppRuntimeForHistory 使用 ctx 和 input 参数获取只用于历史恢复的 Codex runtime。
+func (m *AgentManager) ensureCodexAppRuntimeForHistory(ctx context.Context, input AgentRunInput) (*AgentRuntime, error) {
+	return m.ensureCodexAppRuntimeWithOptions(ctx, input, true)
+}
+
+// ensureCodexAppRuntimeWithOptions 使用 ctx、input 和 resumeOnly 参数获取或启动 Codex app-server runtime。
+func (m *AgentManager) ensureCodexAppRuntimeWithOptions(ctx context.Context, input AgentRunInput, resumeOnly bool) (*AgentRuntime, error) {
 	var stale *AgentRuntime
 	m.mu.Lock()
 	existing := m.runtimes[input.ChatID]
@@ -127,6 +137,7 @@ func (m *AgentManager) ensureCodexAppRuntime(ctx context.Context, input AgentRun
 		projectPath:          input.ProjectPath,
 		sessionID:            input.SessionID,
 		appServer:            true,
+		appResumeOnly:        resumeOnly,
 		appPendingResponses:  make(map[string]chan codexAppRPCMessage),
 		appPendingUserInputs: make(map[string]codexAppPendingUserInput),
 		appReasoningByItem:   make(map[string]string),
@@ -258,8 +269,20 @@ func (r *AgentRuntime) startCodexAppServer(ctx context.Context) error {
 			r.loadCodexAppThreadHistory(requestCtx, resumeSessionID)
 			return nil
 		} else {
+			r.mu.Lock()
+			resumeOnly := r.appResumeOnly
+			r.mu.Unlock()
+			if resumeOnly {
+				return fmt.Errorf("恢复 Codex app-server thread 失败: %w", err)
+			}
 			log.Ctx(ctx).Warn().Err(err).Str("chatID", r.chatID).Str("threadID", resumeSessionID).Msg("恢复 Codex app-server thread 失败，将创建新 thread")
 		}
+	}
+	r.mu.Lock()
+	resumeOnly := r.appResumeOnly
+	r.mu.Unlock()
+	if resumeOnly {
+		return fmt.Errorf("Codex app-server resume-only 模式缺少可恢复 thread id")
 	}
 	result, err := r.codexAppRequest(requestCtx, "thread/start", map[string]any{
 		"model":          r.model,

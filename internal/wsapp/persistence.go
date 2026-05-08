@@ -15,7 +15,7 @@ import (
 
 const (
 	// persistedStoreSchemaVersion 表示当前 state.json 格式版本。
-	persistedStoreSchemaVersion = 4
+	persistedStoreSchemaVersion = 5
 	// persistedStateFileName 表示状态文件名。
 	persistedStateFileName = "state.json"
 	// persistedTimelinesDirName 表示聊天 timeline 文件目录名。

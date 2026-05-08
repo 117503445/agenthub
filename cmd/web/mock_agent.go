@@ -370,6 +370,17 @@ func mockCodexAppStartTurn(writer *bufio.Writer, pendingTurns map[string]mockCod
 		})
 		return
 	}
+	if !planMode && strings.Contains(prompt, "MOCK_CODEX_RECOVERY_SLOW") {
+		writeMockCodexAppNotify(writer, "item/agentMessage/delta", map[string]any{
+			"threadId": threadID,
+			"turnId":   turnID,
+			"itemId":   "mock-codex-recovery-slow-message",
+			"delta":    "Recovery slow partial",
+		})
+		_ = writer.Flush()
+		time.Sleep(5 * time.Minute)
+		return
+	}
 	mockCodexAppFinishTurn(writer, mockCodexAppPendingTurn{
 		ThreadID:        threadID,
 		TurnID:          turnID,

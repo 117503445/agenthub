@@ -127,7 +127,7 @@ func TestStoreProjectChatLifecycle(t *testing.T) {
 		t.Fatalf("assistant 事件分段顺序不正确: %#v", assistantMessage.Parts)
 	}
 
-	if updatedChat, ok := store.SetChatSessionID(chat.ID, "session-1"); !ok || updatedChat.AgentSessionID != "session-1" {
+	if updatedChat, ok := store.SetChatPersistenceSessionID(chat.ID, "session-1"); !ok || updatedChat.AgentPersistence == nil || updatedChat.AgentPersistence.SessionID != "session-1" {
 		t.Fatalf("设置 session id 失败: ok=%v chat=%#v", ok, updatedChat)
 	}
 
@@ -192,6 +192,42 @@ func TestStoreProjectChatLifecycle(t *testing.T) {
 	snapshot = store.Snapshot()
 	if len(snapshot.Projects) != 0 || len(snapshot.Chats) != 0 {
 		t.Fatalf("删除后的快照不为空: %#v", snapshot)
+	}
+}
+
+// TestStoreHydrateChatHistoryOnlyWhenTimelineEmpty 验证 provider 历史只补齐空 timeline。
+func TestStoreHydrateChatHistoryOnlyWhenTimelineEmpty(t *testing.T) {
+	store := NewStore()
+	project, err := store.CreateProject(t.TempDir())
+	if err != nil {
+		t.Fatalf("创建 project 失败: %v", err)
+	}
+	chat, err := store.CreateChat(project.ID)
+	if err != nil {
+		t.Fatalf("创建聊天页失败: %v", err)
+	}
+	history := []ChatMessage{{
+		ID:     "history-user",
+		Role:   MessageRoleUser,
+		Text:   "历史输入",
+		Status: MessageStatusComplete,
+	}, {
+		ID:     "history-assistant",
+		Role:   MessageRoleAssistant,
+		Text:   "历史输出",
+		Status: MessageStatusComplete,
+	}}
+	chat, rows, ok := store.HydrateChatHistory(chat.ID, "", history)
+	if !ok || len(rows) != 2 || len(chat.Messages) != 2 {
+		t.Fatalf("空 timeline 历史补齐失败: ok=%v rows=%#v chat=%#v", ok, rows, chat)
+	}
+	if _, rows, ok := store.HydrateChatHistory(chat.ID, "", []ChatMessage{{
+		ID:     "history-extra",
+		Role:   MessageRoleAssistant,
+		Text:   "不应写入",
+		Status: MessageStatusComplete,
+	}}); ok || len(rows) != 0 {
+		t.Fatalf("非空 timeline 不应重复补齐: ok=%v rows=%#v", ok, rows)
 	}
 }
 

@@ -125,6 +125,7 @@ func resolveAgentConfig(config webConfig) wsapp.AgentConfig {
 		MockAnthropicAPIKey:  "mock-key",
 		MockOpenAIBaseURL:    mockBaseURL + "/mock/openai/v1",
 		MockOpenAIAPIKey:     "mock-key",
+		AgentProviders:       wsapp.AgentProviderOptionsFromProfiles(agentProfiles),
 		AgentProfiles:        agentProfiles,
 		BackendEnv:           wsapp.BackendEnvSnapshot(),
 		EnableMockAgent:      config.MockAgent,

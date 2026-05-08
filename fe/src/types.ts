@@ -272,6 +272,17 @@ export interface AgentUsage {
   contextWindowPercentRounded?: number
 }
 
+export interface AgentPersistenceHandle {
+  /** provider 表示恢复句柄所属 provider。 */
+  provider: string
+  /** sessionId 表示 provider 会话标识。 */
+  sessionId: string
+  /** nativeHandle 表示 provider 原生句柄。 */
+  nativeHandle?: string
+  /** metadata 表示恢复所需的附加信息。 */
+  metadata?: Record<string, unknown>
+}
+
 export interface Chat {
   /** id 表示聊天页唯一标识。 */
   id: string
@@ -289,8 +300,8 @@ export interface Chat {
   agentReasoning?: string
   /** agentLocked 表示会话开始后 agent 配置是否锁定。 */
   agentLocked: boolean
-  /** agentSessionId 表示 agent 会话标识。 */
-  agentSessionId?: string
+  /** agentPersistence 表示 provider 会话恢复句柄。 */
+  agentPersistence?: AgentPersistenceHandle
   /** agentProfile 表示聊天页绑定的 Profile 快照。 */
   agentProfile?: AgentProfile
   /** usage 表示最近一次 agent 用量和上下文窗口。 */

@@ -242,6 +242,7 @@ func normalizeStoreState(state *storeState) {
 		state.lastAgent = defaultLastAgentSelection(agentProviders)
 	}
 	for chatID, chat := range state.chats {
+		chat = normalizeChatPersistence(chat)
 		timeline, ok := state.timelines[chatID]
 		if !ok {
 			timeline = newChatTimelineState(chatID)

@@ -126,8 +126,8 @@ func readCodexResumeSessionID(dataDir string) (string, error) {
 		return "", err
 	}
 	for _, chat := range state.Chats {
-		if chat.AgentProvider == wsapp.AgentProviderMockCodex && strings.TrimSpace(chat.AgentSessionID) != "" {
-			return chat.AgentSessionID, nil
+		if chat.AgentProvider == wsapp.AgentProviderMockCodex && chat.AgentPersistence != nil && strings.TrimSpace(chat.AgentPersistence.SessionID) != "" {
+			return chat.AgentPersistence.SessionID, nil
 		}
 	}
 	return "", nil

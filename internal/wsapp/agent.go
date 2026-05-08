@@ -22,27 +22,28 @@ import (
 
 // AgentConfig 表示启动外部 agent 子进程所需的配置。
 type AgentConfig struct {
-	Command              string          // Command 表示 Claude 命令。
-	CodexCommand         string          // CodexCommand 表示 Codex 命令。
-	MockClaudeCommand    string          // MockClaudeCommand 表示 Mock Claude Code 命令。
-	MockCodexCommand     string          // MockCodexCommand 表示 Mock Codex 命令。
-	AnthropicBaseURL     string          // AnthropicBaseURL 表示 Anthropic 兼容接口地址。
-	AnthropicModel       string          // AnthropicModel 表示 Claude 使用的模型。
-	AnthropicAPIKey      string          // AnthropicAPIKey 表示 Anthropic API Key。
-	OpenAIBaseURL        string          // OpenAIBaseURL 表示 OpenAI 兼容接口地址。
-	OpenAIAPIKey         string          // OpenAIAPIKey 表示 OpenAI API Key。
-	MockAnthropicBaseURL string          // MockAnthropicBaseURL 表示 Mock Claude 固定使用的后端 Anthropic 兼容接口地址。
-	MockAnthropicAPIKey  string          // MockAnthropicAPIKey 表示 Mock Claude 使用的 API Key。
-	MockOpenAIBaseURL    string          // MockOpenAIBaseURL 表示 Mock Codex 固定使用的后端 OpenAI 兼容接口地址。
-	MockOpenAIAPIKey     string          // MockOpenAIAPIKey 表示 Mock Codex 使用的 API Key。
-	AgentProfiles        []AgentProfile  // AgentProfiles 表示可用 Profile 配置。
-	BackendEnv           []BackendEnvVar // BackendEnv 表示后端启动时捕获的环境变量。
-	EnableMockAgent      bool            // EnableMockAgent 表示本次启动是否允许添加内置 Mock Profile。
+	Command              string                // Command 表示 Claude 命令。
+	CodexCommand         string                // CodexCommand 表示 Codex 命令。
+	MockClaudeCommand    string                // MockClaudeCommand 表示 Mock Claude Code 命令。
+	MockCodexCommand     string                // MockCodexCommand 表示 Mock Codex 命令。
+	AnthropicBaseURL     string                // AnthropicBaseURL 表示 Anthropic 兼容接口地址。
+	AnthropicModel       string                // AnthropicModel 表示 Claude 使用的模型。
+	AnthropicAPIKey      string                // AnthropicAPIKey 表示 Anthropic API Key。
+	OpenAIBaseURL        string                // OpenAIBaseURL 表示 OpenAI 兼容接口地址。
+	OpenAIAPIKey         string                // OpenAIAPIKey 表示 OpenAI API Key。
+	MockAnthropicBaseURL string                // MockAnthropicBaseURL 表示 Mock Claude 固定使用的后端 Anthropic 兼容接口地址。
+	MockAnthropicAPIKey  string                // MockAnthropicAPIKey 表示 Mock Claude 使用的 API Key。
+	MockOpenAIBaseURL    string                // MockOpenAIBaseURL 表示 Mock Codex 固定使用的后端 OpenAI 兼容接口地址。
+	MockOpenAIAPIKey     string                // MockOpenAIAPIKey 表示 Mock Codex 使用的 API Key。
+	AgentProviders       []AgentProviderOption // AgentProviders 表示可用 agent 和模型选项。
+	AgentProfiles        []AgentProfile        // AgentProfiles 表示可用 Profile 配置。
+	BackendEnv           []BackendEnvVar       // BackendEnv 表示后端启动时捕获的环境变量。
+	EnableMockAgent      bool                  // EnableMockAgent 表示本次启动是否允许添加内置 Mock Profile。
 }
 
 // AgentRunCallbacks 表示一次 agent 运行中的回调。
 type AgentRunCallbacks struct {
-	OnSessionID    func(sessionID string)          // OnSessionID 使用 sessionID 参数记录 Claude 会话标识。
+	OnSessionID    func(sessionID string)          // OnSessionID 使用 sessionID 参数记录 provider 会话标识。
 	OnAgentProfile func(profile AgentProfile)      // OnAgentProfile 使用 profile 参数报告运行时发现的 Profile 能力。
 	OnAgentSkills  func(skills []AgentSkillOption) // OnAgentSkills 使用 skills 参数报告运行时发现的 skills。
 	OnHistory      func(messages []ChatMessage)    // OnHistory 使用 messages 参数报告 provider 原生历史。
@@ -103,6 +104,7 @@ type AgentRuntime struct {
 	emittedAssistantText  string
 	callbacks             AgentRunCallbacks
 	appServer             bool
+	appResumeOnly         bool
 	appNextRequestID      int64
 	appPendingResponses   map[string]chan codexAppRPCMessage
 	appPendingUserInputs  map[string]codexAppPendingUserInput
@@ -149,30 +151,77 @@ func NewAgentManager(ctx context.Context, config AgentConfig) *AgentManager {
 
 // Send 使用 input 参数把 prompt 发送到聊天页对应的 agent runtime。
 func (m *AgentManager) Send(ctx context.Context, input AgentRunInput) error {
-	profile, ok := input.Profile, strings.TrimSpace(input.Profile.ID) != ""
-	if !ok {
-		var found bool
-		profile, found = AgentProfileByID(m.agentProfiles(), input.Provider)
-		if !found {
-			return fmt.Errorf("%w: Profile 不存在: %s", ErrInvalidInput, input.Provider)
-		}
-	}
-	options := AgentProviderOptionsFromProfiles([]AgentProfile{profile})
-	provider, model, reasoning, err := NormalizeAgentSelection(input.Provider, input.Model, input.Reasoning, options)
+	var err error
+	input, err = m.normalizeRunInput(input)
 	if err != nil {
 		return err
 	}
-	input.Provider = provider
-	input.Profile = profile
-	input.Model = model
-	input.Reasoning = reasoning
 
-	switch profile.Type {
+	switch input.Profile.Type {
 	case AgentProfileTypeCodex:
 		return m.sendCodex(ctx, input)
 	default:
 		return m.sendClaude(ctx, input)
 	}
+}
+
+// HydrateHistory 使用 ctx 和 input 参数从 provider 原生历史补齐聊天 timeline。
+func (m *AgentManager) HydrateHistory(ctx context.Context, input AgentRunInput) ([]ChatMessage, string, error) {
+	input.SessionID = strings.TrimSpace(input.SessionID)
+	if input.SessionID == "" {
+		return nil, "", nil
+	}
+	var err error
+	input, err = m.normalizeRunInput(input)
+	if err != nil {
+		return nil, "", err
+	}
+	if input.Profile.Type != AgentProfileTypeCodex {
+		return nil, "", nil
+	}
+	runtime, err := m.ensureCodexAppRuntimeForHistory(ctx, input)
+	if err != nil {
+		return nil, "", err
+	}
+	sessionID := strings.TrimSpace(input.SessionID)
+	if sessionID == "" {
+		runtime.mu.Lock()
+		sessionID = strings.TrimSpace(runtime.sessionID)
+		runtime.mu.Unlock()
+	}
+	if sessionID == "" {
+		return nil, "", nil
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, codexAppServerRequestTimeout)
+	defer cancel()
+	runtime.loadCodexAppThreadHistory(requestCtx, sessionID)
+	runtime.mu.Lock()
+	history := cloneChatMessages(runtime.appHistoryMessages)
+	runtime.appHistoryMessages = nil
+	runtime.mu.Unlock()
+	return history, sessionID, nil
+}
+
+// normalizeRunInput 使用 input 参数补齐并校验 agent 运行配置。
+func (m *AgentManager) normalizeRunInput(input AgentRunInput) (AgentRunInput, error) {
+	profile, ok := input.Profile, strings.TrimSpace(input.Profile.ID) != ""
+	if !ok {
+		var found bool
+		profile, found = AgentProfileByID(m.agentProfiles(), input.Provider)
+		if !found {
+			return AgentRunInput{}, fmt.Errorf("%w: Profile 不存在: %s", ErrInvalidInput, input.Provider)
+		}
+	}
+	options := AgentProviderOptionsFromProfiles([]AgentProfile{profile})
+	provider, model, reasoning, err := NormalizeAgentSelection(input.Provider, input.Model, input.Reasoning, options)
+	if err != nil {
+		return AgentRunInput{}, err
+	}
+	input.Provider = provider
+	input.Profile = profile
+	input.Model = model
+	input.Reasoning = reasoning
+	return input, nil
 }
 
 // SetAgentProfiles 使用 profiles 参数更新 agent 可用 Profile。

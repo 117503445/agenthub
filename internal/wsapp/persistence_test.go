@@ -102,6 +102,100 @@ func TestPersistentStoreSaveLoad(t *testing.T) {
 	}
 }
 
+// TestPersistentStoreNormalizesRunningChatAsRecoverable 验证重启后运行中聊天会停止输出但保留恢复句柄。
+func TestPersistentStoreNormalizesRunningChatAsRecoverable(t *testing.T) {
+	dataDir := t.TempDir()
+	store, err := NewPersistentStore(dataDir, AgentProfiles(AgentOptionsConfig{EnableMockAgent: true}))
+	if err != nil {
+		t.Fatalf("创建持久化 Store 失败: %v", err)
+	}
+	project, err := store.CreateProject(t.TempDir())
+	if err != nil {
+		t.Fatalf("创建 project 失败: %v", err)
+	}
+	chat, err := store.CreateChat(project.ID)
+	if err != nil {
+		t.Fatalf("创建聊天页失败: %v", err)
+	}
+	chat, err = store.UpdateChatAgent(chat.ID, AgentProviderMockCodex, "mock-codex-gpt-5.5", "xhigh")
+	if err != nil {
+		t.Fatalf("切换 mock Codex 失败: %v", err)
+	}
+	if _, _, assistant, _, err := store.AddRunMessages(chat.ID, "运行中恢复", nil, false); err != nil {
+		t.Fatalf("追加运行消息失败: %v", err)
+	} else if _, _, ok := store.AppendAssistantDelta(chat.ID, assistant.ID, "partial"); !ok {
+		t.Fatalf("追加 partial 输出失败")
+	}
+	if updatedChat, ok := store.SetChatPersistenceSessionID(chat.ID, "thread-recoverable"); !ok || updatedChat.AgentPersistence == nil {
+		t.Fatalf("保存恢复句柄失败: ok=%v chat=%#v", ok, updatedChat)
+	}
+	if err := store.Flush(context.Background()); err != nil {
+		t.Fatalf("刷新持久化失败: %v", err)
+	}
+
+	loaded, err := NewPersistentStore(dataDir, AgentProfiles(AgentOptionsConfig{EnableMockAgent: true}))
+	if err != nil {
+		t.Fatalf("重新加载 Store 失败: %v", err)
+	}
+	snapshot := loaded.Snapshot()
+	restored := findChatByID(snapshot.Chats, chat.ID)
+	if restored == nil {
+		t.Fatalf("恢复后缺少聊天页: %#v", snapshot.Chats)
+	}
+	if restored.Status != ChatStatusIdle || restored.AgentPersistence == nil || restored.AgentPersistence.SessionID != "thread-recoverable" {
+		t.Fatalf("恢复后的聊天页状态或句柄不正确: %#v", restored)
+	}
+	timeline, err := loaded.FetchChatTimeline(chat.ID, ChatTimelineDirectionTail, nil, 200)
+	if err != nil {
+		t.Fatalf("读取恢复 timeline 失败: %v", err)
+	}
+	if !timelineRowsContainMessageStatus(timeline.Rows, MessageStatusStopped) {
+		t.Fatalf("恢复 timeline 未包含 stopped 终态: %#v", timeline.Rows)
+	}
+}
+
+// TestPersistentStoreIgnoresLegacyAgentSessionID 验证旧 session 字段不会补齐恢复句柄。
+func TestPersistentStoreIgnoresLegacyAgentSessionID(t *testing.T) {
+	dataDir := t.TempDir()
+	now := time.Now()
+	project := Project{ID: "project-legacy", Name: "legacy", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
+	state := map[string]any{
+		"schemaVersion": persistedStoreSchemaVersion,
+		"projects":      []Project{project},
+		"chats": []map[string]any{{
+			"id":             "chat-legacy",
+			"projectId":      project.ID,
+			"title":          "旧聊天",
+			"status":         ChatStatusIdle,
+			"agentProvider":  AgentProviderMockCodex,
+			"agentModel":     "mock-codex-gpt-5.5",
+			"agentReasoning": "xhigh",
+			"agentLocked":    true,
+			"agentSessionId": "legacy-thread",
+			"createdAt":      now.Format(time.RFC3339Nano),
+			"updatedAt":      now.Format(time.RFC3339Nano),
+		}},
+		"agentProfiles":      AgentProfiles(AgentOptionsConfig{EnableMockAgent: true}),
+		"lastAgentSelection": defaultLastAgentSelection(AgentProviderOptionsFromProfiles(AgentProfiles(AgentOptionsConfig{EnableMockAgent: true}))),
+		"nextChatOrdinal":    map[string]int{project.ID: 1},
+	}
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		t.Fatalf("编码旧状态失败: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, persistedStateFileName), append(data, '\n'), 0600); err != nil {
+		t.Fatalf("写入旧状态失败: %v", err)
+	}
+	loaded, err := NewPersistentStore(dataDir, AgentProfiles(AgentOptionsConfig{EnableMockAgent: true}))
+	if err != nil {
+		t.Fatalf("加载旧状态失败: %v", err)
+	}
+	restored := findChatByID(loaded.Snapshot().Chats, "chat-legacy")
+	if restored == nil || restored.AgentPersistence != nil {
+		t.Fatalf("旧 session 字段不应补齐恢复句柄: %#v", restored)
+	}
+}
+
 // TestPersistentStoreDeltaDefersTimelineOnlySave 验证流式 delta 只延迟写对应 timeline，不重写 state.json。
 func TestPersistentStoreDeltaDefersTimelineOnlySave(t *testing.T) {
 	dataDir := t.TempDir()
@@ -192,7 +286,7 @@ func TestJSONStorePersisterSaveChangesWritesOnlyDirtyTimeline(t *testing.T) {
 // TestPersistentStoreRejectsOldSchema 验证旧 schema 不再兼容加载。
 func TestPersistentStoreRejectsOldSchema(t *testing.T) {
 	dataDir := t.TempDir()
-	state := PersistedStoreState{SchemaVersion: 3}
+	state := PersistedStoreState{SchemaVersion: persistedStoreSchemaVersion - 1}
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		t.Fatalf("编码旧状态失败: %v", err)
@@ -297,6 +391,16 @@ func readTimelineFile(t *testing.T, dataDir string, chatID string) []byte {
 		t.Fatalf("读取 timeline 文件失败: %v", err)
 	}
 	return data
+}
+
+// timelineRowsContainMessageStatus 使用 rows 和 status 参数判断 timeline 是否包含指定消息终态。
+func timelineRowsContainMessageStatus(rows []ChatTimelineRow, status string) bool {
+	for _, row := range rows {
+		if row.Item.Type == ChatTimelineItemMessageFinished && row.Item.Status == status {
+			return true
+		}
+	}
+	return false
 }
 
 // timelineWithUserText 使用 chatID、text 和 now 参数构造测试 timeline。

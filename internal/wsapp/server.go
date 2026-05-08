@@ -287,6 +287,9 @@ func (s *Server) handle(ctx context.Context, subscriberID string, outbound chan 
 		if err := decodePayload(msg, &payload); err != nil {
 			return err
 		}
+		if payload.Direction == ChatTimelineDirectionTail || strings.TrimSpace(payload.Direction) == "" {
+			s.hydrateChatHistoryIfNeeded(ctx, payload.ChatID)
+		}
 		result, err := s.store.FetchChatTimeline(payload.ChatID, payload.Direction, payload.Cursor, payload.Limit)
 		if err != nil {
 			return err
@@ -471,6 +474,7 @@ func (s *Server) respondAgentSkillsCommand(ctx context.Context, chatID string, p
 
 // startChatRun 使用 ctx、chatID 和 prompt 参数启动或替换聊天页 agent 输出。
 func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string, images []MessageImagePayload, planMode bool, outputSchema map[string]any) error {
+	s.hydrateChatHistoryIfNeeded(ctx, chatID)
 	project, chat, err := s.store.GetProjectAndChat(chatID)
 	if err != nil {
 		return err
@@ -496,7 +500,7 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string,
 	})
 	callbacks := AgentRunCallbacks{
 		OnSessionID: func(sessionID string) {
-			if updatedChat, ok := s.store.SetChatSessionID(chatID, sessionID); ok {
+			if updatedChat, ok := s.store.SetChatPersistenceSessionID(chatID, sessionID); ok {
 				s.broadcastChatChanged(updatedChat)
 			}
 		},
@@ -582,7 +586,7 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string,
 		Images:             userMessage.Images,
 		PlanMode:           planMode,
 		OutputSchema:       outputSchema,
-		SessionID:          chat.AgentSessionID,
+		SessionID:          chatAgentPersistenceSessionID(chat),
 		AssistantMessageID: assistantMessage.ID,
 		Callbacks:          callbacks,
 	}); err != nil {
@@ -590,6 +594,48 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string,
 		return err
 	}
 	return nil
+}
+
+// hydrateChatHistoryIfNeeded 使用 ctx 和 chatID 参数在空 timeline 时懒加载 provider 原生历史。
+func (s *Server) hydrateChatHistoryIfNeeded(ctx context.Context, chatID string) {
+	project, chat, err := s.store.GetProjectAndChat(chatID)
+	if err != nil {
+		return
+	}
+	sessionID := chatAgentPersistenceSessionID(chat)
+	if sessionID == "" || !chatUsesCodexAppServer(chat) {
+		return
+	}
+	result, err := s.store.FetchChatTimeline(chatID, ChatTimelineDirectionTail, nil, 1)
+	if err != nil {
+		return
+	}
+	if result.Window.MaxSeq > 0 || len(result.Rows) > 0 {
+		return
+	}
+	messages, restoredSessionID, err := s.agents.HydrateHistory(ctx, AgentRunInput{
+		ChatID:      chatID,
+		ProjectPath: project.Path,
+		Provider:    chat.AgentProvider,
+		Profile:     chat.AgentProfile,
+		Model:       chat.AgentModel,
+		Reasoning:   chat.AgentReasoning,
+		SessionID:   sessionID,
+		Callbacks:   AgentRunCallbacks{},
+	})
+	if err != nil {
+		log.Ctx(ctx).Warn().Err(err).Str("chatID", chatID).Str("threadID", sessionID).Msg("懒加载 Codex 原生历史失败")
+		return
+	}
+	if restoredSessionID != "" && restoredSessionID != sessionID {
+		if updatedChat, ok := s.store.SetChatPersistenceSessionID(chatID, restoredSessionID); ok {
+			s.broadcastChatChanged(updatedChat)
+		}
+	}
+	if historyChat, rows, ok := s.store.HydrateChatHistory(chatID, "", messages); ok {
+		s.broadcastChatChanged(historyChat)
+		s.broadcastChatTimelineRows(chatID, rows)
+	}
 }
 
 // startPlanExecution 使用 ctx、chatID 和 planID 参数执行已确认 plan。
