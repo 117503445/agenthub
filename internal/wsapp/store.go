@@ -21,6 +21,7 @@ type Store struct {
 	persister       StorePersister
 	skillsMu        sync.Mutex
 	skillsCache     agentSkillCache
+	runtimeSkills   []AgentSkillOption
 }
 
 // StorePersister 表示 Store 状态持久化接口。
@@ -326,6 +327,8 @@ func applyProfileToChats(state *storeState, profile AgentProfile) {
 			_, _, reasoning, err := NormalizeAgentSelection(chat.AgentProvider, chat.AgentModel, chat.AgentReasoning, options)
 			if err == nil {
 				chat.AgentReasoning = reasoning
+			} else {
+				chat.AgentReasoning = DefaultAgentReasoning(profile.ID, chat.AgentModel, options)
 			}
 		}
 		if chat.AgentLocked {

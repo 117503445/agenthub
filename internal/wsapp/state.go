@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -517,6 +518,39 @@ func (s *Store) UpdateAgentProfile(profile AgentProfile) ([]AgentProfile, error)
 	return profiles, nil
 }
 
+// UpdateAgentProfileCapabilities 使用 profile 参数更新运行时发现的 Profile 能力。
+func (s *Store) UpdateAgentProfileCapabilities(profile AgentProfile) ([]AgentProfile, bool, error) {
+	normalized, err := normalizeAgentProfile(profile)
+	if err != nil {
+		return nil, false, err
+	}
+	var profiles []AgentProfile
+	changed := false
+	if err := s.commit(func(state *storeState) error {
+		for index := range state.agentProfiles {
+			if state.agentProfiles[index].ID != normalized.ID {
+				continue
+			}
+			if reflect.DeepEqual(state.agentProfiles[index].Models, normalized.Models) {
+				profiles = cloneAgentProfiles(state.agentProfiles)
+				return errStoreUnchanged
+			}
+			state.agentProfiles[index].Models = cloneAgentModels(normalized.Models)
+			applyProfileToChats(state, state.agentProfiles[index])
+			profiles = cloneAgentProfiles(state.agentProfiles)
+			changed = true
+			return nil
+		}
+		return ErrNotFound
+	}); err != nil {
+		if errors.Is(err, errStoreUnchanged) {
+			return profiles, false, nil
+		}
+		return nil, false, err
+	}
+	return profiles, changed, nil
+}
+
 // DeleteAgentProfile 使用 profileID 参数删除 Profile。
 func (s *Store) DeleteAgentProfile(profileID string) ([]AgentProfile, error) {
 	normalizedID := strings.TrimSpace(profileID)
@@ -983,7 +1017,7 @@ func (s *Store) UpsertToolCall(chatID string, messageID string, tool ToolCall) (
 				existing.Name = firstNonEmpty(tool.Name, existing.Name)
 				existing.Status = firstNonEmpty(tool.Status, existing.Status)
 				existing.Input = firstNonEmpty(tool.Input, existing.Input)
-				existing.Output = firstNonEmpty(tool.Output, existing.Output)
+				existing.Output = mergeToolOutput(*existing, tool)
 				if tool.UserInputRequest != nil {
 					request := cloneToolCall(tool).UserInputRequest
 					existing.UserInputRequest = request
@@ -1215,6 +1249,76 @@ func (s *Store) SetChatSessionID(chatID string, sessionID string) (Chat, bool) {
 	return cloneChat(chat), true
 }
 
+// HydrateChatHistory 使用 chatID、beforeMessageID 和 messages 参数补齐 provider 原生历史。
+func (s *Store) HydrateChatHistory(chatID string, beforeMessageID string, messages []ChatMessage) (Chat, bool) {
+	if len(messages) == 0 {
+		return Chat{}, false
+	}
+	var chat Chat
+	changed := false
+	err := s.commit(func(state *storeState) error {
+		var ok bool
+		chat, ok = state.chats[chatID]
+		if !ok {
+			return errStoreUnchanged
+		}
+		existing := make(map[string]bool, len(chat.Messages))
+		for _, message := range chat.Messages {
+			key := historyMessageKey(message)
+			if key != "" {
+				existing[key] = true
+			}
+		}
+		history := make([]ChatMessage, 0, len(messages))
+		now := time.Now()
+		for _, message := range messages {
+			message.ChatID = chatID
+			message.Status = MessageStatusComplete
+			key := historyMessageKey(message)
+			if key == "" || existing[key] {
+				continue
+			}
+			if message.ID == "" {
+				message.ID = newID("msg")
+			}
+			if message.CreatedAt.IsZero() {
+				message.CreatedAt = now
+			}
+			if message.UpdatedAt.IsZero() {
+				message.UpdatedAt = message.CreatedAt
+			}
+			history = append(history, message)
+			existing[key] = true
+		}
+		if len(history) == 0 {
+			return errStoreUnchanged
+		}
+		insertAt := len(chat.Messages)
+		for index := range chat.Messages {
+			if chat.Messages[index].ID == beforeMessageID {
+				insertAt = index
+				if index > 0 && chat.Messages[index-1].Role == MessageRoleUser {
+					insertAt = index - 1
+				}
+				break
+			}
+		}
+		nextMessages := make([]ChatMessage, 0, len(chat.Messages)+len(history))
+		nextMessages = append(nextMessages, chat.Messages[:insertAt]...)
+		nextMessages = append(nextMessages, history...)
+		nextMessages = append(nextMessages, chat.Messages[insertAt:]...)
+		chat.Messages = nextMessages
+		chat.UpdatedAt = now
+		state.chats[chatID] = chat
+		changed = true
+		return nil
+	})
+	if err != nil {
+		return Chat{}, false
+	}
+	return cloneChat(chat), changed
+}
+
 // SetChatUsage 使用 chatID 和 usage 参数记录聊天页最近一次用量。
 func (s *Store) SetChatUsage(chatID string, usage AgentUsage) (Chat, bool) {
 	if usage.ContextWindowMaxTokens <= 0 && usage.ContextWindowUsedTokens <= 0 &&
@@ -1331,6 +1435,15 @@ func (s *Store) RefreshAgentSkills() []AgentSkillOption {
 	return skills
 }
 
+// SetRuntimeAgentSkills 使用 skills 参数更新 agent 运行时发现的 skill 列表。
+func (s *Store) SetRuntimeAgentSkills(skills []AgentSkillOption) []AgentSkillOption {
+	s.skillsMu.Lock()
+	s.runtimeSkills = cloneAgentSkillOptions(skills)
+	s.skillsMu.Unlock()
+	merged, _ := s.agentSkills(false)
+	return merged
+}
+
 // AgentSkillSearchPaths 返回当前 project 和用户目录对应的 skill 搜索路径。
 func (s *Store) AgentSkillSearchPaths() []string {
 	_, paths := s.agentSkills(false)
@@ -1351,7 +1464,7 @@ func (s *Store) agentSkills(refresh bool) ([]AgentSkillOption, []string) {
 	s.skillsMu.Lock()
 	defer s.skillsMu.Unlock()
 	if !refresh && s.skillsCache.loaded && s.skillsCache.key == cacheKey {
-		return cloneAgentSkillOptions(s.skillsCache.skills), append([]string(nil), s.skillsCache.paths...)
+		return mergeAgentSkillOptions(s.skillsCache.skills, s.runtimeSkills), append([]string(nil), s.skillsCache.paths...)
 	}
 	skills := LoadAgentSkillOptions(projectPaths)
 	s.skillsCache = agentSkillCache{
@@ -1360,7 +1473,7 @@ func (s *Store) agentSkills(refresh bool) ([]AgentSkillOption, []string) {
 		paths:  append([]string(nil), paths...),
 		loaded: true,
 	}
-	return cloneAgentSkillOptions(skills), append([]string(nil), paths...)
+	return mergeAgentSkillOptions(skills, s.runtimeSkills), append([]string(nil), paths...)
 }
 
 // validateProjectInput 使用 projectPath 参数校验 project 输入，并返回派生名称和绝对路径。
@@ -1476,6 +1589,20 @@ func cloneStringListMap(values map[string][]string) map[string][]string {
 	return result
 }
 
+// historyMessageKey 使用 message 参数生成 provider 历史去重键。
+func historyMessageKey(message ChatMessage) string {
+	text := strings.TrimSpace(message.Text)
+	if text == "" && len(message.ToolCalls) == 0 {
+		return ""
+	}
+	toolNames := make([]string, 0, len(message.ToolCalls))
+	for _, tool := range message.ToolCalls {
+		toolNames = append(toolNames, strings.TrimSpace(tool.Name)+":"+strings.TrimSpace(tool.Input)+":"+strings.TrimSpace(tool.Output))
+	}
+	sort.Strings(toolNames)
+	return message.Role + "\x00" + text + "\x00" + strings.Join(toolNames, "\x00")
+}
+
 // cloneMessageParts 使用 parts 参数创建不会共享工具调用指针的片段副本。
 func cloneMessageParts(parts []MessagePart) []MessagePart {
 	if len(parts) == 0 {
@@ -1549,6 +1676,20 @@ func upsertMessageToolPart(message *ChatMessage, tool ToolCall, now time.Time) {
 		CreatedAt: now,
 		UpdatedAt: now,
 	})
+}
+
+// mergeToolOutput 使用 existing 和 incoming 参数合并工具输出。
+func mergeToolOutput(existing ToolCall, incoming ToolCall) string {
+	if strings.TrimSpace(incoming.Output) == "" {
+		return existing.Output
+	}
+	if existing.Output == "" {
+		return incoming.Output
+	}
+	if incoming.Status == ToolCallStatusRunning && existing.Status == ToolCallStatusRunning && !strings.Contains(existing.Output, incoming.Output) {
+		return existing.Output + incoming.Output
+	}
+	return incoming.Output
 }
 
 // cloneAgentProviderOptions 使用 options 参数创建不会共享模型和推理级别切片的副本。

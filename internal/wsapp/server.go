@@ -436,7 +436,7 @@ func (s *Server) handle(ctx context.Context, subscriberID string, outbound chan 
 		if isAgentSkillsCommand(payload.Prompt) {
 			return s.respondAgentSkillsCommand(ctx, payload.ChatID, payload.Prompt)
 		}
-		return s.startChatRun(ctx, payload.ChatID, payload.Prompt, payload.Images, payload.PlanMode)
+		return s.startChatRun(ctx, payload.ChatID, payload.Prompt, payload.Images, payload.PlanMode, payload.OutputSchema)
 	case "chat.plan.execute":
 		var payload ChatPlanExecutePayload
 		if err := decodePayload(msg, &payload); err != nil {
@@ -490,7 +490,7 @@ func (s *Server) respondAgentSkillsCommand(ctx context.Context, chatID string, p
 }
 
 // startChatRun 使用 ctx、chatID 和 prompt 参数启动或替换聊天页 agent 输出。
-func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string, images []MessageImagePayload, planMode bool) error {
+func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string, images []MessageImagePayload, planMode bool, outputSchema map[string]any) error {
 	project, chat, err := s.store.GetProjectAndChat(chatID)
 	if err != nil {
 		return err
@@ -524,6 +524,25 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string,
 		OnSessionID: func(sessionID string) {
 			if updatedChat, ok := s.store.SetChatSessionID(chatID, sessionID); ok {
 				s.broadcastChatChanged(updatedChat)
+			}
+		},
+		OnAgentProfile: func(profile AgentProfile) {
+			if _, changed, err := s.store.UpdateAgentProfileCapabilities(profile); err != nil {
+				log.Ctx(ctx).Debug().Err(err).Str("profileID", profile.ID).Msg("更新 Codex 运行时 Profile 能力失败")
+			} else if changed {
+				s.broadcastAgentProfilesChanged()
+			}
+		},
+		OnAgentSkills: func(skills []AgentSkillOption) {
+			mergedSkills := s.store.SetRuntimeAgentSkills(skills)
+			if s.updateLastAgentSkills(mergedSkills) {
+				s.broadcast("agent.skills.changed", map[string]any{"agentSkills": mergedSkills})
+			}
+		},
+		OnHistory: func(messages []ChatMessage) {
+			if historyChat, ok := s.store.HydrateChatHistory(chatID, assistantMessage.ID, messages); ok {
+				s.broadcastChatChanged(historyChat)
+				s.broadcastChatDetailChanged(chatID, historyChat)
 			}
 		},
 		OnDelta: func(delta string) {
@@ -589,6 +608,7 @@ func (s *Server) startChatRun(ctx context.Context, chatID string, prompt string,
 		Prompt:             prompt,
 		Images:             userMessage.Images,
 		PlanMode:           planMode,
+		OutputSchema:       outputSchema,
 		SessionID:          chat.AgentSessionID,
 		AssistantMessageID: assistantMessage.ID,
 		Callbacks:          callbacks,
@@ -615,7 +635,7 @@ func (s *Server) startPlanExecution(ctx context.Context, chatID string, planID s
 		"",
 		"请按该 plan 开始实现，不要重新生成 plan，除非遇到阻塞。",
 	}, "\n")
-	return s.startChatRun(ctx, chatID, prompt, nil, false)
+	return s.startChatRun(ctx, chatID, prompt, nil, false, nil)
 }
 
 // stopChatRun 使用 chatID 参数停止聊天页当前输出。

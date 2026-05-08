@@ -43,12 +43,15 @@ type AgentConfig struct {
 
 // AgentRunCallbacks 表示一次 agent 运行中的回调。
 type AgentRunCallbacks struct {
-	OnSessionID func(sessionID string) // OnSessionID 使用 sessionID 参数记录 Claude 会话标识。
-	OnDelta     func(delta string)     // OnDelta 使用 delta 参数追加 assistant 流式文本。
-	OnToolCall  func(tool ToolCall)    // OnToolCall 使用 tool 参数报告工具调用状态。
-	OnUsage     func(usage AgentUsage) // OnUsage 使用 usage 参数报告最近一次用量。
-	OnDone      func()                 // OnDone 表示当前轮次完成。
-	OnError     func(message string)   // OnError 使用 message 参数报告当前轮次失败。
+	OnSessionID    func(sessionID string)          // OnSessionID 使用 sessionID 参数记录 Claude 会话标识。
+	OnAgentProfile func(profile AgentProfile)      // OnAgentProfile 使用 profile 参数报告运行时发现的 Profile 能力。
+	OnAgentSkills  func(skills []AgentSkillOption) // OnAgentSkills 使用 skills 参数报告运行时发现的 skills。
+	OnHistory      func(messages []ChatMessage)    // OnHistory 使用 messages 参数报告 provider 原生历史。
+	OnDelta        func(delta string)              // OnDelta 使用 delta 参数追加 assistant 流式文本。
+	OnToolCall     func(tool ToolCall)             // OnToolCall 使用 tool 参数报告工具调用状态。
+	OnUsage        func(usage AgentUsage)          // OnUsage 使用 usage 参数报告最近一次用量。
+	OnDone         func()                          // OnDone 表示当前轮次完成。
+	OnError        func(message string)            // OnError 使用 message 参数报告当前轮次失败。
 }
 
 // AgentRunInput 表示发送 prompt 到 agent 的参数。
@@ -62,6 +65,7 @@ type AgentRunInput struct {
 	Prompt             string            // Prompt 表示用户输入。
 	Images             []MessageImage    // Images 表示用户输入携带的图片附件。
 	PlanMode           bool              // PlanMode 表示本轮是否只生成计划。
+	OutputSchema       map[string]any    // OutputSchema 表示可选结构化输出 JSON schema。
 	SessionID          string            // SessionID 表示已有 agent 会话标识。
 	AssistantMessageID string            // AssistantMessageID 表示本轮 assistant 消息标识。
 	Callbacks          AgentRunCallbacks // Callbacks 表示运行过程回调。
@@ -77,34 +81,37 @@ type AgentManager struct {
 
 // AgentRuntime 表示一个聊天页中的 Claude 子进程。
 type AgentRuntime struct {
-	manager              *AgentManager
-	ctx                  context.Context
-	cancel               context.CancelFunc
-	chatID               string
-	provider             string
-	profile              AgentProfile
-	model                string
-	reasoning            string
-	planMode             bool
-	projectPath          string
-	sessionID            string
-	cmd                  *exec.Cmd
-	stdin                io.WriteCloser
-	stderrDone           chan struct{}
-	mu                   sync.Mutex
-	running              bool
-	stopping             bool
-	stderrLines          []string
-	imageTempDir         string
-	currentMessageID     string
-	emittedAssistantText string
-	callbacks            AgentRunCallbacks
-	appServer            bool
-	appNextRequestID     int64
-	appPendingResponses  map[string]chan codexAppRPCMessage
-	appPendingUserInputs map[string]codexAppPendingUserInput
-	appReasoningByItem   map[string]string
-	appWriteMu           sync.Mutex
+	manager               *AgentManager
+	ctx                   context.Context
+	cancel                context.CancelFunc
+	chatID                string
+	provider              string
+	profile               AgentProfile
+	model                 string
+	reasoning             string
+	planMode              bool
+	projectPath           string
+	sessionID             string
+	cmd                   *exec.Cmd
+	stdin                 io.WriteCloser
+	stderrDone            chan struct{}
+	mu                    sync.Mutex
+	running               bool
+	stopping              bool
+	stderrLines           []string
+	imageTempDir          string
+	currentMessageID      string
+	emittedAssistantText  string
+	callbacks             AgentRunCallbacks
+	appServer             bool
+	appNextRequestID      int64
+	appPendingResponses   map[string]chan codexAppRPCMessage
+	appPendingUserInputs  map[string]codexAppPendingUserInput
+	appReasoningByItem    map[string]string
+	appCollaborationModes []codexAppCollaborationMode
+	appSkills             []AgentSkillOption
+	appHistoryMessages    []ChatMessage
+	appWriteMu            sync.Mutex
 }
 
 // NewAgentManager 使用 ctx 和 config 参数创建 AgentManager。

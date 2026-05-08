@@ -88,11 +88,25 @@ type mockCodexAppRPCMessage struct {
 
 // mockCodexAppPendingTurn 表示等待用户输入响应的 mock Codex turn。
 type mockCodexAppPendingTurn struct {
-	ThreadID string // ThreadID 表示 Codex thread 标识。
-	TurnID   string // TurnID 表示 Codex turn 标识。
-	Model    string // Model 表示本轮模型。
-	Prompt   string // Prompt 表示本轮用户输入。
-	PlanMode bool   // PlanMode 表示本轮是否运行在 plan 模式。
+	ThreadID        string // ThreadID 表示 Codex thread 标识。
+	TurnID          string // TurnID 表示 Codex turn 标识。
+	Model           string // Model 表示本轮模型。
+	Prompt          string // Prompt 表示本轮用户输入。
+	PlanMode        bool   // PlanMode 表示本轮是否运行在 plan 模式。
+	SkillName       string // SkillName 表示结构化 skill 输入名称。
+	SkillArgs       string // SkillArgs 表示结构化 skill 输入参数。
+	HasOutputSchema bool   // HasOutputSchema 表示 turn/start 是否携带 outputSchema。
+}
+
+// mockCodexAppTurnInputPayload 表示 mock Codex turn/start 中解析出的关键输入。
+type mockCodexAppTurnInputPayload struct {
+	Model           string // Model 表示本轮模型。
+	Prompt          string // Prompt 表示文本输入。
+	PlanMode        bool   // PlanMode 表示是否处于 plan 模式。
+	HasMode         bool   // HasMode 表示请求中是否带 collaborationMode。
+	SkillName       string // SkillName 表示结构化 skill 输入名称。
+	SkillArgs       string // SkillArgs 表示结构化 skill 参数文本。
+	HasOutputSchema bool   // HasOutputSchema 表示请求中是否带 outputSchema。
 }
 
 // runMockCodexCLI 使用 args、stdin、stdout 和 stderr 参数运行 Codex mock。
@@ -200,6 +214,63 @@ func runMockCodexAppServerCLI(args []string, stdin io.Reader, stdout io.Writer, 
 		case "initialized":
 			// initialized 是客户端通知，不需要响应。
 			_ = message.Method
+		case "collaborationMode/list":
+			writeMockCodexAppResponse(writer, message.ID, map[string]any{
+				"data": []map[string]any{
+					{
+						"name":             "Code",
+						"mode":             "code",
+						"model":            "mock-codex-gpt-5.5",
+						"reasoning_effort": "medium",
+					},
+					{
+						"name":             "Plan",
+						"mode":             "plan",
+						"model":            "mock-codex-gpt-5.5",
+						"reasoning_effort": "medium",
+					},
+				},
+			})
+		case "skills/list":
+			writeMockCodexAppResponse(writer, message.ID, map[string]any{
+				"data": []map[string]any{{
+					"cwd": ".",
+					"skills": []map[string]any{{
+						"name":        "e2e-codex-skill",
+						"description": "Codex app-server E2E skill。",
+						"path":        "/mock/codex/skills/e2e-codex-skill/SKILL.md",
+					}},
+				}},
+			})
+		case "model/list":
+			writeMockCodexAppResponse(writer, message.ID, map[string]any{
+				"data": []map[string]any{
+					{
+						"id":                     "mock-codex-gpt-5.5",
+						"displayName":            "mock-codex-gpt-5.5",
+						"isDefault":              true,
+						"defaultReasoningEffort": "xhigh",
+						"supportedReasoningEfforts": []map[string]string{
+							{"reasoningEffort": "low", "description": "Mock low reasoning。"},
+							{"reasoningEffort": "medium", "description": "Mock medium reasoning。"},
+							{"reasoningEffort": "high", "description": "Mock high reasoning。"},
+							{"reasoningEffort": "xhigh", "description": "Mock extra high reasoning。"},
+						},
+					},
+					{
+						"id":                     "mock-codex-dynamic",
+						"displayName":            "mock-codex-dynamic",
+						"isDefault":              false,
+						"defaultReasoningEffort": "medium",
+						"supportedReasoningEfforts": []string{
+							"medium",
+							"high",
+						},
+					},
+				},
+			})
+		case "thread/loaded/list":
+			writeMockCodexAppResponse(writer, message.ID, map[string]any{"data": []string{threadID}})
 		case "thread/start":
 			writeMockCodexAppResponse(writer, message.ID, map[string]any{
 				"thread": map[string]any{"id": threadID},
@@ -211,12 +282,14 @@ func runMockCodexAppServerCLI(args []string, stdin io.Reader, stdout io.Writer, 
 			writeMockCodexAppResponse(writer, message.ID, map[string]any{
 				"thread": map[string]any{"id": threadID},
 			})
+		case "thread/read":
+			writeMockCodexAppResponse(writer, message.ID, mockCodexAppThreadReadResponse(threadID))
 		case "turn/start":
-			_, _, planMode, hasCollaborationMode := mockCodexAppTurnInput(message.Params)
-			if planMode {
+			turnInput := mockCodexAppTurnInput(message.Params)
+			if turnInput.PlanMode {
 				stickyPlanMode = true
 			}
-			forcedPlanMode := stickyPlanMode && !hasCollaborationMode
+			forcedPlanMode := stickyPlanMode && !turnInput.HasMode
 			mockCodexAppStartTurn(writer, pendingTurns, threadID, message, forcedPlanMode)
 		default:
 			if message.ID != nil {
@@ -235,7 +308,10 @@ func runMockCodexAppServerCLI(args []string, stdin io.Reader, stdout io.Writer, 
 
 // mockCodexAppStartTurn 使用 writer、pendingTurns、threadID、message 和 forcedPlanMode 参数启动一个 mock turn。
 func mockCodexAppStartTurn(writer *bufio.Writer, pendingTurns map[string]mockCodexAppPendingTurn, threadID string, message mockCodexAppRPCMessage, forcedPlanMode bool) {
-	model, prompt, planMode, _ := mockCodexAppTurnInput(message.Params)
+	turnInput := mockCodexAppTurnInput(message.Params)
+	model := turnInput.Model
+	prompt := turnInput.Prompt
+	planMode := turnInput.PlanMode
 	if forcedPlanMode {
 		planMode = true
 	}
@@ -266,11 +342,14 @@ func mockCodexAppStartTurn(writer *bufio.Writer, pendingTurns map[string]mockCod
 	if planMode && strings.Contains(prompt, "request_user_input") {
 		requestID := fmt.Sprintf("mock-request-user-input-%d", time.Now().UnixNano())
 		pendingTurns[requestID] = mockCodexAppPendingTurn{
-			ThreadID: threadID,
-			TurnID:   turnID,
-			Model:    model,
-			Prompt:   prompt,
-			PlanMode: planMode,
+			ThreadID:        threadID,
+			TurnID:          turnID,
+			Model:           model,
+			Prompt:          prompt,
+			PlanMode:        planMode,
+			SkillName:       turnInput.SkillName,
+			SkillArgs:       turnInput.SkillArgs,
+			HasOutputSchema: turnInput.HasOutputSchema,
 		}
 		writeMockCodexAppRequest(writer, requestID, "item/tool/requestUserInput", map[string]any{
 			"threadId": threadID,
@@ -292,11 +371,14 @@ func mockCodexAppStartTurn(writer *bufio.Writer, pendingTurns map[string]mockCod
 		return
 	}
 	mockCodexAppFinishTurn(writer, mockCodexAppPendingTurn{
-		ThreadID: threadID,
-		TurnID:   turnID,
-		Model:    model,
-		Prompt:   prompt,
-		PlanMode: planMode,
+		ThreadID:        threadID,
+		TurnID:          turnID,
+		Model:           model,
+		Prompt:          prompt,
+		PlanMode:        planMode,
+		SkillName:       turnInput.SkillName,
+		SkillArgs:       turnInput.SkillArgs,
+		HasOutputSchema: turnInput.HasOutputSchema,
 	})
 }
 
@@ -320,6 +402,94 @@ func mockCodexAppFinishTurn(writer *bufio.Writer, pending mockCodexAppPendingTur
 	prompt := pending.Prompt
 	if pending.PlanMode {
 		prompt = mockPlanModePrompt(prompt)
+	}
+	if !pending.PlanMode && pending.SkillName != "" {
+		writeMockCodexAppCommand(writer, pending.ThreadID, pending.TurnID, "completed", ".")
+		writeMockCodexAppNotify(writer, "item/completed", map[string]any{
+			"threadId": pending.ThreadID,
+			"turnId":   pending.TurnID,
+			"item": map[string]any{
+				"id":   "mock-codex-structured-skill-message",
+				"type": "agentMessage",
+				"text": "结构化 skill " + pending.SkillName + " 参数：" + strings.TrimSpace(pending.SkillArgs),
+			},
+		})
+		writeMockCodexAppUsage(writer, pending.ThreadID)
+		writeMockCodexAppNotify(writer, "turn/completed", map[string]any{
+			"threadId": pending.ThreadID,
+			"turn": map[string]any{
+				"id":     pending.TurnID,
+				"status": "completed",
+			},
+		})
+		return
+	}
+	if !pending.PlanMode && strings.Contains(prompt, "MOCK_CODEX_CAPABILITY_BOOTSTRAP") {
+		writeMockCodexAppCommand(writer, pending.ThreadID, pending.TurnID, "completed", ".")
+		writeMockCodexAppNotify(writer, "item/completed", map[string]any{
+			"threadId": pending.ThreadID,
+			"turnId":   pending.TurnID,
+			"item": map[string]any{
+				"id":   "mock-codex-capability-message",
+				"type": "agentMessage",
+				"text": "Capability discovery complete",
+			},
+		})
+		writeMockCodexAppUsage(writer, pending.ThreadID)
+		writeMockCodexAppNotify(writer, "turn/completed", map[string]any{
+			"threadId": pending.ThreadID,
+			"turn": map[string]any{
+				"id":     pending.TurnID,
+				"status": "completed",
+			},
+		})
+		return
+	}
+	if !pending.PlanMode && strings.Contains(prompt, "MOCK_CODEX_OUTPUT_SCHEMA") {
+		writeMockCodexAppCommand(writer, pending.ThreadID, pending.TurnID, "completed", ".")
+		text := "Output schema missing"
+		if pending.HasOutputSchema {
+			text = "Output schema received"
+		}
+		writeMockCodexAppNotify(writer, "item/completed", map[string]any{
+			"threadId": pending.ThreadID,
+			"turnId":   pending.TurnID,
+			"item": map[string]any{
+				"id":   "mock-codex-output-schema-message",
+				"type": "agentMessage",
+				"text": text,
+			},
+		})
+		writeMockCodexAppUsage(writer, pending.ThreadID)
+		writeMockCodexAppNotify(writer, "turn/completed", map[string]any{
+			"threadId": pending.ThreadID,
+			"turn": map[string]any{
+				"id":     pending.TurnID,
+				"status": "completed",
+			},
+		})
+		return
+	}
+	if !pending.PlanMode && strings.Contains(prompt, "MOCK_CODEX_HISTORY_HYDRATE") {
+		writeMockCodexAppCommand(writer, pending.ThreadID, pending.TurnID, "completed", ".")
+		writeMockCodexAppNotify(writer, "item/completed", map[string]any{
+			"threadId": pending.ThreadID,
+			"turnId":   pending.TurnID,
+			"item": map[string]any{
+				"id":   "mock-codex-history-hydrate-message",
+				"type": "agentMessage",
+				"text": "History hydrate complete",
+			},
+		})
+		writeMockCodexAppUsage(writer, pending.ThreadID)
+		writeMockCodexAppNotify(writer, "turn/completed", map[string]any{
+			"threadId": pending.ThreadID,
+			"turn": map[string]any{
+				"id":     pending.TurnID,
+				"status": "completed",
+			},
+		})
+		return
 	}
 	if !pending.PlanMode && strings.Contains(prompt, "MOCK_CODEX_DELTA_BURST") {
 		writeMockCodexAppCommand(writer, pending.ThreadID, pending.TurnID, "completed", ".")
@@ -582,28 +752,81 @@ func writeMockCodexAppUsage(writer *bufio.Writer, threadID string) {
 	})
 }
 
-// mockCodexAppTurnInput 使用 params 参数提取模型、用户输入、plan 模式标记和协作模式是否存在。
-func mockCodexAppTurnInput(params json.RawMessage) (string, string, bool, bool) {
+// mockCodexAppTurnInput 使用 params 参数提取模型、用户输入、plan 模式和结构化输入。
+func mockCodexAppTurnInput(params json.RawMessage) mockCodexAppTurnInputPayload {
 	var payload struct {
 		Model string `json:"model"` // Model 表示本轮模型。
 		Input []struct {
 			Type string `json:"type"` // Type 表示输入项类型。
 			Text string `json:"text"` // Text 表示文本输入。
+			Name string `json:"name"` // Name 表示 skill 输入名称。
+			Path string `json:"path"` // Path 表示 skill 输入路径。
 		} `json:"input"` // Input 表示输入项列表。
 		CollaborationMode struct {
 			Mode string `json:"mode"` // Mode 表示协作模式名称。
 		} `json:"collaborationMode"` // CollaborationMode 表示 app-server 协作模式。
+		OutputSchema map[string]any `json:"outputSchema"` // OutputSchema 表示结构化输出要求。
 	}
 	if err := json.Unmarshal(params, &payload); err != nil {
-		return "", "", false, false
+		return mockCodexAppTurnInputPayload{}
 	}
 	parts := make([]string, 0, len(payload.Input))
+	skillName := ""
+	skillArgs := ""
+	seenSkill := false
 	for _, item := range payload.Input {
 		if item.Type == "text" && strings.TrimSpace(item.Text) != "" {
-			parts = append(parts, item.Text)
+			if seenSkill && skillArgs == "" {
+				skillArgs = item.Text
+			} else {
+				parts = append(parts, item.Text)
+			}
+			continue
+		}
+		if (item.Type == "skill" || item.Type == "localSkill") && strings.TrimSpace(item.Name) != "" {
+			skillName = strings.TrimSpace(item.Name)
+			seenSkill = true
 		}
 	}
-	return payload.Model, strings.Join(parts, "\n"), payload.CollaborationMode.Mode == "plan", strings.TrimSpace(payload.CollaborationMode.Mode) != ""
+	return mockCodexAppTurnInputPayload{
+		Model:           payload.Model,
+		Prompt:          strings.Join(parts, "\n"),
+		PlanMode:        payload.CollaborationMode.Mode == "plan",
+		HasMode:         strings.TrimSpace(payload.CollaborationMode.Mode) != "",
+		SkillName:       skillName,
+		SkillArgs:       skillArgs,
+		HasOutputSchema: len(payload.OutputSchema) > 0,
+	}
+}
+
+// mockCodexAppThreadReadResponse 使用 threadID 参数返回可恢复的 mock Codex 原生历史。
+func mockCodexAppThreadReadResponse(threadID string) map[string]any {
+	return map[string]any{
+		"thread": map[string]any{
+			"id": threadID,
+			"turns": []map[string]any{{
+				"items": []map[string]any{
+					{
+						"id":      "mock-history-user",
+						"type":    "userMessage",
+						"content": []map[string]string{{"type": "input_text", "text": "历史中的用户输入"}},
+					},
+					{
+						"id":   "mock-history-agent",
+						"type": "agentMessage",
+						"text": "历史中恢复的 Codex 消息",
+					},
+					{
+						"id":               "mock-history-command",
+						"type":             "commandExecution",
+						"command":          "pwd",
+						"status":           "completed",
+						"aggregatedOutput": ".",
+					},
+				},
+			}},
+		},
+	}
 }
 
 // writeMockCodexAppRequest 使用 writer、id、method 和 params 参数输出 app-server 请求。

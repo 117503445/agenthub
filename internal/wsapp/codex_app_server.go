@@ -46,6 +46,15 @@ type codexAppPendingUserInput struct {
 	Input     string              // Input 表示展示用问题摘要。
 }
 
+// codexAppCollaborationMode 表示 Codex app-server 暴露的协作模式。
+type codexAppCollaborationMode struct {
+	Name                  string // Name 表示协作模式展示名称。
+	Mode                  string // Mode 表示 turn/start 使用的模式标识。
+	Model                 string // Model 表示该模式推荐模型。
+	ReasoningEffort       string // ReasoningEffort 表示该模式推荐推理级别。
+	DeveloperInstructions string // DeveloperInstructions 表示该模式附带的开发者指令。
+}
+
 // sendCodexApp 使用 ctx 和 input 参数通过 Codex app-server 启动单轮运行。
 func (m *AgentManager) sendCodexApp(ctx context.Context, input AgentRunInput) error {
 	runtime, err := m.ensureCodexAppRuntime(ctx, input)
@@ -71,7 +80,8 @@ func (m *AgentManager) sendCodexApp(ctx context.Context, input AgentRunInput) er
 	if input.Callbacks.OnSessionID != nil && strings.TrimSpace(sessionID) != "" && sessionID != input.SessionID {
 		input.Callbacks.OnSessionID(sessionID)
 	}
-	if err := runtime.startCodexAppTurn(ctx, agentPrompt(input.Prompt, input.Images), input.Images); err != nil {
+	runtime.emitCodexAppDiscoveredState(input.Callbacks)
+	if err := runtime.startCodexAppTurn(ctx, agentPrompt(input.Prompt, input.Images), input.Images, input.OutputSchema); err != nil {
 		runtime.mu.Lock()
 		runtime.running = false
 		runtime.mu.Unlock()
@@ -241,9 +251,11 @@ func (r *AgentRuntime) startCodexAppServer(ctx context.Context) error {
 	if err := r.codexAppNotify("initialized", nil); err != nil {
 		return err
 	}
+	r.loadCodexAppCapabilities(requestCtx)
 	resumeSessionID := strings.TrimSpace(r.sessionID)
 	if resumeSessionID != "" {
 		if err := r.resumeCodexAppThread(requestCtx, resumeSessionID); err == nil {
+			r.loadCodexAppThreadHistory(requestCtx, resumeSessionID)
 			return nil
 		} else {
 			log.Ctx(ctx).Warn().Err(err).Str("chatID", r.chatID).Str("threadID", resumeSessionID).Msg("恢复 Codex app-server thread 失败，将创建新 thread")
@@ -278,6 +290,12 @@ func (r *AgentRuntime) resumeCodexAppThread(ctx context.Context, sessionID strin
 		"model":    r.model,
 		"cwd":      r.projectPath,
 	}
+	if r.codexAppThreadAlreadyLoaded(ctx, sessionID) {
+		r.mu.Lock()
+		r.sessionID = sessionID
+		r.mu.Unlock()
+		return nil
+	}
 	if _, err := r.codexAppRequest(ctx, "thread/resume", params); err != nil {
 		return err
 	}
@@ -287,20 +305,240 @@ func (r *AgentRuntime) resumeCodexAppThread(ctx context.Context, sessionID strin
 	return nil
 }
 
-// startCodexAppTurn 使用 ctx、prompt 和 images 参数启动 Codex app-server 单轮运行。
-func (r *AgentRuntime) startCodexAppTurn(ctx context.Context, prompt string, images []MessageImage) error {
+// loadCodexAppCapabilities 使用 ctx 参数读取 Codex app-server 暴露的能力。
+func (r *AgentRuntime) loadCodexAppCapabilities(ctx context.Context) {
+	r.loadCodexAppCollaborationModes(ctx)
+	r.refreshCodexAppSkills(ctx)
+	r.loadCodexAppModels(ctx)
+}
+
+// loadCodexAppCollaborationModes 使用 ctx 参数读取协作模式列表。
+func (r *AgentRuntime) loadCodexAppCollaborationModes(ctx context.Context) {
+	result, err := r.codexAppRequest(ctx, "collaborationMode/list", map[string]any{})
+	if err != nil {
+		log.Ctx(ctx).Debug().Err(err).Str("chatID", r.chatID).Msg("读取 Codex collaboration modes 失败")
+		return
+	}
+	items := listFromJSON(mapValueFromJSON(result, "")["data"])
+	modes := make([]codexAppCollaborationMode, 0, len(items))
+	for _, item := range items {
+		object := mapValue(item)
+		mode := codexAppCollaborationMode{
+			Name:                  stringValue(object["name"]),
+			Mode:                  stringValue(object["mode"]),
+			Model:                 stringValue(object["model"]),
+			ReasoningEffort:       stringValue(object["reasoning_effort"]),
+			DeveloperInstructions: stringValue(object["developer_instructions"]),
+		}
+		if mode.Name == "" && mode.Mode == "" {
+			continue
+		}
+		modes = append(modes, mode)
+	}
+	r.mu.Lock()
+	r.appCollaborationModes = modes
+	r.mu.Unlock()
+}
+
+// refreshCodexAppSkills 使用 ctx 参数读取 Codex app-server skills 列表。
+func (r *AgentRuntime) refreshCodexAppSkills(ctx context.Context) {
+	requestCtx, cancel := context.WithTimeout(ctx, codexAppServerRequestTimeout)
+	defer cancel()
+	result, err := r.codexAppRequest(requestCtx, "skills/list", map[string]any{"cwd": []string{r.projectPath}})
+	if err != nil {
+		log.Ctx(ctx).Debug().Err(err).Str("chatID", r.chatID).Msg("读取 Codex skills 失败")
+		return
+	}
+	skills := codexAppSkillsFromResult(result)
+	r.mu.Lock()
+	r.appSkills = skills
+	r.mu.Unlock()
+}
+
+// loadCodexAppModels 使用 ctx 参数读取 Codex 模型和思考深度列表。
+func (r *AgentRuntime) loadCodexAppModels(ctx context.Context) {
+	result, err := r.codexAppRequest(ctx, "model/list", map[string]any{})
+	if err != nil {
+		log.Ctx(ctx).Debug().Err(err).Str("chatID", r.chatID).Msg("读取 Codex models 失败")
+		return
+	}
+	models := codexAppModelsFromResult(result)
+	if len(models) == 0 {
+		return
+	}
+	r.mu.Lock()
+	profile := r.profile
+	profile.Models = mergeCodexDiscoveredModels(profile.Models, models, r.model)
+	if normalized, err := normalizeAgentProfile(profile); err == nil {
+		r.profile = normalized
+	}
+	r.mu.Unlock()
+}
+
+// codexAppThreadAlreadyLoaded 使用 ctx 和 sessionID 参数判断 app-server 是否已加载目标 thread。
+func (r *AgentRuntime) codexAppThreadAlreadyLoaded(ctx context.Context, sessionID string) bool {
+	result, err := r.codexAppRequest(ctx, "thread/loaded/list", map[string]any{})
+	if err != nil {
+		return false
+	}
+	data := listFromJSON(mapValueFromJSON(result, "")["data"])
+	for _, item := range data {
+		if stringValue(item) == sessionID {
+			return true
+		}
+	}
+	return false
+}
+
+// loadCodexAppThreadHistory 使用 ctx 和 sessionID 参数读取 Codex 原生 thread 历史。
+func (r *AgentRuntime) loadCodexAppThreadHistory(ctx context.Context, sessionID string) {
+	result, err := r.codexAppRequest(ctx, "thread/read", map[string]any{"threadId": sessionID})
+	if err != nil {
+		log.Ctx(ctx).Debug().Err(err).Str("chatID", r.chatID).Str("threadID", sessionID).Msg("读取 Codex thread 历史失败")
+		return
+	}
+	messages := codexAppHistoryMessages(r.chatID, result)
+	r.mu.Lock()
+	r.appHistoryMessages = messages
+	r.mu.Unlock()
+}
+
+// emitCodexAppDiscoveredState 使用 callbacks 参数报告已发现的运行时能力。
+func (r *AgentRuntime) emitCodexAppDiscoveredState(callbacks AgentRunCallbacks) {
+	r.mu.Lock()
+	profile := cloneAgentProfile(r.profile)
+	skills := cloneAgentSkillOptions(r.appSkills)
+	history := cloneChatMessages(r.appHistoryMessages)
+	r.appHistoryMessages = nil
+	r.mu.Unlock()
+	if callbacks.OnAgentProfile != nil && profile.ID != "" {
+		callbacks.OnAgentProfile(profile)
+	}
+	if callbacks.OnAgentSkills != nil && len(skills) > 0 {
+		callbacks.OnAgentSkills(skills)
+	}
+	if callbacks.OnHistory != nil && len(history) > 0 {
+		callbacks.OnHistory(history)
+	}
+}
+
+// codexAppInputItems 使用 prompt 参数构造 Codex app-server input 列表。
+func (r *AgentRuntime) codexAppInputItems(prompt string) []map[string]any {
+	if skillName, skillPath, args, ok := r.codexAppSlashSkill(prompt); ok {
+		items := []map[string]any{{
+			"type": "skill",
+			"name": skillName,
+			"path": skillPath,
+		}}
+		if strings.TrimSpace(args) != "" {
+			items = append(items, map[string]any{
+				"type":          "text",
+				"text":          strings.TrimSpace(args),
+				"text_elements": []any{},
+			})
+		}
+		return items
+	}
+	if strings.TrimSpace(prompt) == "" {
+		return []map[string]any{}
+	}
+	return []map[string]any{{
+		"type":          "text",
+		"text":          prompt,
+		"text_elements": []any{},
+	}}
+}
+
+// codexAppSlashSkill 使用 prompt 参数匹配结构化 slash skill 输入。
+func (r *AgentRuntime) codexAppSlashSkill(prompt string) (string, string, string, bool) {
+	trimmed := strings.TrimSpace(prompt)
+	if !strings.HasPrefix(trimmed, "/") || len(trimmed) <= 1 {
+		return "", "", "", false
+	}
+	withoutPrefix := strings.TrimPrefix(trimmed, "/")
+	name, args, _ := strings.Cut(withoutPrefix, " ")
+	name = strings.TrimSpace(name)
+	if name == "" || strings.Contains(name, "/") {
+		return "", "", "", false
+	}
+	r.mu.Lock()
+	skills := cloneAgentSkillOptions(r.appSkills)
+	r.mu.Unlock()
+	for _, skill := range skills {
+		if skill.ID == name || skill.Label == name {
+			return skill.ID, skill.Path, strings.TrimSpace(args), true
+		}
+	}
+	return "", "", "", false
+}
+
+// codexAppCollaborationMode 使用 planMode 和 effort 参数返回 turn/start 协作模式参数。
+func (r *AgentRuntime) codexAppCollaborationMode(planMode bool, effort string) map[string]any {
+	mode := r.matchCodexAppCollaborationMode(planMode)
+	if mode.Mode == "" && mode.Name == "" {
+		if !planMode {
+			return nil
+		}
+		settings := map[string]any{
+			"model":                  r.model,
+			"reasoning_effort":       nil,
+			"developer_instructions": nil,
+		}
+		if effort != "" {
+			settings["reasoning_effort"] = effort
+		}
+		return map[string]any{"mode": "plan", "settings": settings}
+	}
+	settings := map[string]any{}
+	settings["model"] = firstNonEmpty(mode.Model, r.model)
+	if reasoning := firstNonEmpty(effort, mode.ReasoningEffort); reasoning != "" {
+		settings["reasoning_effort"] = reasoning
+	}
+	if mode.DeveloperInstructions != "" {
+		settings["developer_instructions"] = mode.DeveloperInstructions
+	}
+	return map[string]any{
+		"mode":     firstNonEmpty(mode.Mode, "code"),
+		"settings": settings,
+	}
+}
+
+// matchCodexAppCollaborationMode 使用 planMode 参数选择最合适的协作模式。
+func (r *AgentRuntime) matchCodexAppCollaborationMode(planMode bool) codexAppCollaborationMode {
+	r.mu.Lock()
+	modes := append([]codexAppCollaborationMode(nil), r.appCollaborationModes...)
+	r.mu.Unlock()
+	for _, mode := range modes {
+		name := strings.ToLower(mode.Name + " " + mode.Mode)
+		if planMode && (strings.Contains(name, "plan") || strings.Contains(name, "read")) {
+			return mode
+		}
+		if !planMode && (strings.Contains(name, "code") || strings.Contains(name, "auto")) {
+			return mode
+		}
+	}
+	if !planMode {
+		for _, mode := range modes {
+			name := strings.ToLower(mode.Name + " " + mode.Mode)
+			if !strings.Contains(name, "plan") && !strings.Contains(name, "read") {
+				return mode
+			}
+		}
+	}
+	if len(modes) > 0 {
+		return modes[0]
+	}
+	return codexAppCollaborationMode{}
+}
+
+// startCodexAppTurn 使用 ctx、prompt、images 和 outputSchema 参数启动 Codex app-server 单轮运行。
+func (r *AgentRuntime) startCodexAppTurn(ctx context.Context, prompt string, images []MessageImage, outputSchema map[string]any) error {
 	imagePaths, err := r.prepareImageFiles(images)
 	if err != nil {
 		return err
 	}
-	inputItems := make([]map[string]any, 0, len(imagePaths)+1)
-	if strings.TrimSpace(prompt) != "" {
-		inputItems = append(inputItems, map[string]any{
-			"type":          "text",
-			"text":          prompt,
-			"text_elements": []any{},
-		})
-	}
+	r.refreshCodexAppSkills(ctx)
+	inputItems := r.codexAppInputItems(prompt)
 	for _, imagePath := range imagePaths {
 		inputItems = append(inputItems, map[string]any{
 			"type": "localImage",
@@ -316,25 +554,17 @@ func (r *AgentRuntime) startCodexAppTurn(ctx context.Context, prompt string, ima
 		"input":          inputItems,
 		"cwd":            r.projectPath,
 		"approvalPolicy": "never",
-		"sandboxPolicy":  codexAppSandboxPolicy(planMode),
+		"sandboxPolicy":  codexAppSandboxPolicy(),
 		"model":          r.model,
 	}
-	if planMode {
-		settings := map[string]any{
-			"model":                  r.model,
-			"reasoning_effort":       nil,
-			"developer_instructions": nil,
-		}
-		if effort != "" {
-			settings["reasoning_effort"] = effort
-		}
-		params["collaborationMode"] = map[string]any{
-			"mode":     "plan",
-			"settings": settings,
-		}
+	if collaborationMode := r.codexAppCollaborationMode(planMode, effort); collaborationMode != nil {
+		params["collaborationMode"] = collaborationMode
 	}
 	if effort != "" {
 		params["effort"] = effort
+	}
+	if len(outputSchema) > 0 {
+		params["outputSchema"] = outputSchema
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, codexAppServerRequestTimeout)
 	defer cancel()
@@ -943,6 +1173,268 @@ func codexAppReasoningText(item map[string]any) string {
 	)
 }
 
+// codexAppSkillsFromResult 使用 result 参数提取 app-server skills。
+func codexAppSkillsFromResult(result json.RawMessage) []AgentSkillOption {
+	root := mapValueFromJSON(result, "")
+	entries := listFromJSON(root["data"])
+	byID := make(map[string]AgentSkillOption)
+	for _, entry := range entries {
+		for _, item := range listFromJSON(mapValue(entry)["skills"]) {
+			skill := mapValue(item)
+			name := strings.TrimSpace(stringValue(skill["name"]))
+			path := strings.TrimSpace(stringValue(skill["path"]))
+			if name == "" || path == "" {
+				continue
+			}
+			description := strings.TrimSpace(stringValue(skill["description"]))
+			if description == "" {
+				description = name
+			}
+			if _, exists := byID[name]; !exists {
+				byID[name] = AgentSkillOption{
+					ID:          name,
+					Label:       name,
+					Description: description,
+					Path:        path,
+				}
+			}
+		}
+	}
+	resultSkills := make([]AgentSkillOption, 0, len(byID))
+	for _, skill := range byID {
+		resultSkills = append(resultSkills, skill)
+	}
+	return resultSkills
+}
+
+// codexAppModelsFromResult 使用 result 参数提取模型和思考深度列表。
+func codexAppModelsFromResult(result json.RawMessage) []AgentModelOption {
+	root := mapValueFromJSON(result, "")
+	items := listFromJSON(root["data"])
+	models := make([]AgentModelOption, 0, len(items))
+	for _, item := range items {
+		raw := mapValue(item)
+		id := firstNonEmpty(stringValue(raw["id"]), stringValue(raw["model"]))
+		if id == "" {
+			continue
+		}
+		models = append(models, AgentModelOption{
+			ID:              id,
+			Label:           id,
+			Default:         boolValue(raw["isDefault"], raw["default"]),
+			ReasoningLevels: codexAppReasoningLevels(raw),
+		})
+	}
+	return models
+}
+
+// codexAppReasoningLevels 使用 model 参数提取模型支持的思考深度。
+func codexAppReasoningLevels(model map[string]any) []AgentReasoningOption {
+	defaultEffort := firstNonEmpty(stringValue(model["defaultReasoningEffort"]), stringValue(model["default_reasoning_effort"]))
+	items := firstNonNil(model["supportedReasoningEfforts"], model["supported_reasoning_efforts"])
+	values := listFromJSON(items)
+	levels := make([]AgentReasoningOption, 0, len(values))
+	seen := make(map[string]bool)
+	for _, value := range values {
+		entry := mapValue(value)
+		id := firstNonEmpty(
+			stringValue(value),
+			stringValue(entry["id"]),
+			stringValue(entry["reasoningEffort"]),
+			stringValue(entry["reasoning_effort"]),
+		)
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		label := codexAppReasoningLabel(id)
+		if rawLabel := strings.TrimSpace(stringValue(entry["label"])); rawLabel != "" {
+			label = rawLabel
+		}
+		levels = append(levels, AgentReasoningOption{
+			ID:          id,
+			Label:       label,
+			Description: strings.TrimSpace(stringValue(entry["description"])),
+			Default:     id == defaultEffort,
+		})
+	}
+	if len(levels) == 0 && defaultEffort != "" {
+		levels = append(levels, AgentReasoningOption{
+			ID:      defaultEffort,
+			Label:   codexAppReasoningLabel(defaultEffort),
+			Default: true,
+		})
+	}
+	return normalizeReasoningLevels(levels)
+}
+
+// mergeCodexDiscoveredModels 使用 existing、discovered 和 selectedModel 参数合并模型列表。
+func mergeCodexDiscoveredModels(existing []AgentModelOption, discovered []AgentModelOption, selectedModel string) []AgentModelOption {
+	if len(discovered) == 0 {
+		return cloneAgentModels(existing)
+	}
+	result := cloneAgentModels(discovered)
+	selectedModel = strings.TrimSpace(selectedModel)
+	if selectedModel != "" {
+		found := false
+		for _, model := range result {
+			if model.ID == selectedModel {
+				found = true
+				break
+			}
+		}
+		if !found {
+			for _, model := range existing {
+				if model.ID == selectedModel {
+					result = append([]AgentModelOption{model}, result...)
+					found = true
+					break
+				}
+			}
+			if !found {
+				result = append([]AgentModelOption{{ID: selectedModel, Label: selectedModel}}, result...)
+			}
+		}
+	}
+	if !hasDefaultAgentModel(result) && len(result) > 0 {
+		result[0].Default = true
+	}
+	return result
+}
+
+// codexAppHistoryMessages 使用 chatID 和 result 参数转换 Codex 原生历史。
+func codexAppHistoryMessages(chatID string, result json.RawMessage) []ChatMessage {
+	thread := mapValue(mapValueFromJSON(result, "")["thread"])
+	turns := listFromJSON(thread["turns"])
+	messages := make([]ChatMessage, 0, len(turns)*2)
+	for _, turn := range turns {
+		var assistant *ChatMessage
+		for _, rawItem := range listFromJSON(mapValue(turn)["items"]) {
+			item := mapValue(rawItem)
+			itemType := normalizeCodexAppItemType(stringValue(item["type"]))
+			switch itemType {
+			case "userMessage":
+				if assistant != nil {
+					messages = append(messages, *assistant)
+					assistant = nil
+				}
+				if text := extractCodexAppUserText(item["content"]); text != "" {
+					messages = append(messages, newCodexAppHistoryTextMessage(chatID, MessageRoleUser, text))
+				}
+			case "agentMessage", "plan":
+				if assistant == nil {
+					message := newCodexAppHistoryTextMessage(chatID, MessageRoleAssistant, "")
+					assistant = &message
+				}
+				text := stringValue(item["text"])
+				if text != "" {
+					assistant.Text += text
+					assistant.Parts = append(assistant.Parts, MessagePart{
+						ID:        newID("part"),
+						Type:      MessagePartTypeText,
+						Text:      text,
+						CreatedAt: assistant.CreatedAt,
+						UpdatedAt: assistant.UpdatedAt,
+					})
+				}
+			case "reasoning", "commandExecution", "fileChange", "collabAgentToolCall", "subAgent", "sub_agent":
+				if assistant == nil {
+					message := newCodexAppHistoryTextMessage(chatID, MessageRoleAssistant, "")
+					assistant = &message
+				}
+				if event := codexAppEventFromItem("item/completed", rawJSON(map[string]any{"item": rawItem})); len(event.ToolCalls) > 0 {
+					for _, tool := range event.ToolCalls {
+						now := assistant.UpdatedAt
+						tool.CreatedAt = now
+						tool.UpdatedAt = now
+						assistant.ToolCalls = append(assistant.ToolCalls, tool)
+						upsertMessageToolPart(assistant, tool, now)
+					}
+				}
+			}
+		}
+		if assistant != nil && (assistant.Text != "" || len(assistant.ToolCalls) > 0 || len(assistant.Parts) > 0) {
+			messages = append(messages, *assistant)
+		}
+	}
+	return messages
+}
+
+// newCodexAppHistoryTextMessage 使用 chatID、role 和 text 参数构造历史消息。
+func newCodexAppHistoryTextMessage(chatID string, role string, text string) ChatMessage {
+	now := time.Now()
+	message := ChatMessage{
+		ID:        newID("msg"),
+		ChatID:    chatID,
+		Role:      role,
+		Text:      text,
+		Status:    MessageStatusComplete,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if role == MessageRoleAssistant && text != "" {
+		message.Parts = []MessagePart{{
+			ID:        newID("part"),
+			Type:      MessagePartTypeText,
+			Text:      text,
+			CreatedAt: now,
+			UpdatedAt: now,
+		}}
+	}
+	return message
+}
+
+// extractCodexAppUserText 使用 value 参数提取用户历史文本。
+func extractCodexAppUserText(value any) string {
+	if text := stringValue(value); text != "" {
+		return text
+	}
+	parts := listFromJSON(value)
+	texts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		item := mapValue(part)
+		if text := firstNonEmpty(stringValue(item["text"]), stringValue(item["content"])); text != "" {
+			texts = append(texts, text)
+		}
+	}
+	return strings.Join(texts, "")
+}
+
+// normalizeCodexAppItemType 使用 itemType 参数归一化 Codex 历史 item 类型。
+func normalizeCodexAppItemType(itemType string) string {
+	switch itemType {
+	case "user_message", "userMessage":
+		return "userMessage"
+	case "agent_message", "agentMessage":
+		return "agentMessage"
+	case "command_execution", "commandExecution":
+		return "commandExecution"
+	case "file_change", "fileChange":
+		return "fileChange"
+	case "collab_agent_tool_call", "collabAgentToolCall":
+		return "collabAgentToolCall"
+	default:
+		return itemType
+	}
+}
+
+// codexAppReasoningLabel 使用 id 参数返回思考深度展示名。
+func codexAppReasoningLabel(id string) string {
+	switch id {
+	case "low":
+		return "Low"
+	case "medium":
+		return "Medium"
+	case "high":
+		return "High"
+	case "xhigh":
+		return "Extra high"
+	default:
+		return id
+	}
+}
+
 // normalizeUserInputQuestions 使用 questions 参数清理 request_user_input 问题。
 func normalizeUserInputQuestions(questions []UserInputQuestion) []UserInputQuestion {
 	result := make([]UserInputQuestion, 0, len(questions))
@@ -1069,16 +1561,19 @@ func intValue(value any) int {
 	return 0
 }
 
-// codexAppSandboxPolicy 使用 planMode 参数返回当前 turn 的沙箱策略。
-func codexAppSandboxPolicy(planMode bool) map[string]any {
-	if !planMode {
-		return map[string]any{"type": "dangerFullAccess"}
+// boolValue 返回 values 中第一个布尔值。
+func boolValue(values ...any) bool {
+	for _, value := range values {
+		if typed, ok := value.(bool); ok {
+			return typed
+		}
 	}
-	return map[string]any{
-		"type":          "readOnly",
-		"access":        map[string]any{"type": "fullAccess"},
-		"networkAccess": false,
-	}
+	return false
+}
+
+// codexAppSandboxPolicy 返回允许 Codex 任意操作的沙箱策略。
+func codexAppSandboxPolicy() map[string]any {
+	return map[string]any{"type": "dangerFullAccess"}
 }
 
 // codexAppRPCIDKey 使用 id 参数生成稳定的请求标识 key。
@@ -1156,6 +1651,30 @@ func rawJSONValue(value any) ([]byte, bool) {
 		}
 		return data, true
 	}
+}
+
+// rawJSON 使用 value 参数生成 JSON 原始消息，失败时返回空对象。
+func rawJSON(value any) json.RawMessage {
+	data, ok := rawJSONValue(value)
+	if !ok {
+		return json.RawMessage(`{}`)
+	}
+	return data
+}
+
+// listFromJSON 使用 value 参数读取数组。
+func listFromJSON(value any) []any {
+	raw, ok := rawJSONValue(value)
+	if !ok {
+		return nil
+	}
+	var list []any
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&list); err != nil {
+		return nil
+	}
+	return list
 }
 
 // stringSliceValue 使用 value 参数读取字符串切片。

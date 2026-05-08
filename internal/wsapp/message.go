@@ -43,10 +43,11 @@ type ChatCreatePayload struct {
 
 // ChatSendPayload 表示向聊天页发送 prompt 的请求参数。
 type ChatSendPayload struct {
-	ChatID   string                `json:"chatId"`           // ChatID 表示目标聊天页标识。
-	Prompt   string                `json:"prompt"`           // Prompt 表示用户输入内容。
-	Images   []MessageImagePayload `json:"images,omitempty"` // Images 表示随 prompt 发送的图片附件。
-	PlanMode bool                  `json:"planMode"`         // PlanMode 表示本轮是否只生成 plan。
+	ChatID       string                `json:"chatId"`                 // ChatID 表示目标聊天页标识。
+	Prompt       string                `json:"prompt"`                 // Prompt 表示用户输入内容。
+	Images       []MessageImagePayload `json:"images,omitempty"`       // Images 表示随 prompt 发送的图片附件。
+	PlanMode     bool                  `json:"planMode"`               // PlanMode 表示本轮是否只生成 plan。
+	OutputSchema map[string]any        `json:"outputSchema,omitempty"` // OutputSchema 表示可选结构化输出 JSON schema。
 }
 
 // ChatStopPayload 表示停止聊天页当前输出的请求参数。

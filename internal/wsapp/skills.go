@@ -48,6 +48,33 @@ func LoadAgentSkillOptions(projectPaths []string) []AgentSkillOption {
 	return options
 }
 
+// mergeAgentSkillOptions 使用 filesystem 和 runtime 参数合并去重后的 skill 列表。
+func mergeAgentSkillOptions(filesystem []AgentSkillOption, runtime []AgentSkillOption) []AgentSkillOption {
+	byID := make(map[string]AgentSkillOption, len(filesystem)+len(runtime))
+	for _, skill := range filesystem {
+		if strings.TrimSpace(skill.ID) == "" {
+			continue
+		}
+		byID[skill.ID] = skill
+	}
+	for _, skill := range runtime {
+		if strings.TrimSpace(skill.ID) == "" {
+			continue
+		}
+		if _, exists := byID[skill.ID]; !exists {
+			byID[skill.ID] = skill
+		}
+	}
+	result := make([]AgentSkillOption, 0, len(byID))
+	for _, skill := range byID {
+		result = append(result, skill)
+	}
+	sort.Slice(result, func(i int, j int) bool {
+		return result[i].ID < result[j].ID
+	})
+	return result
+}
+
 // AgentSkillSearchPaths 使用 projectPaths 参数返回需要扫描的 skill 目录。
 func AgentSkillSearchPaths(projectPaths []string) []string {
 	dirs := make([]string, 0)
