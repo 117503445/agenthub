@@ -1,0 +1,3 @@
+2026/06/01 15:53:46 INFO - E2E 目标地址: http://127.0.0.1:44397
+2026/06/01 15:53:46 INFO - 开始运行用例: case_stream_coalescing
+2026/06/01 15:53:47 INFO - 用例 case_stream_coalescing 结果: 通过

@@ -1,0 +1,4 @@
+2026-06-01 15:53:35.772 INF cmd/web/main.go:53 > 构建信息 BuildDir=/src BuildTime=2026-06-01T15:50:23Z GitBranch=master GitCommit=44c2a366d84c5284cfe8782137a0898d7edab77d GitDirty=true GitTag= GitVersion=44c2a36
+2026-06-01 15:53:35.773 INF cmd/web/data_lock.go:44 > 已持有数据目录锁 dataDir=/src/data/e2e/case_mock_agent_gate/mock-enabled-data lockPath=/src/data/e2e/case_mock_agent_gate/mock-enabled-data/agenthub.lock
+2026-06-01 15:53:35.782 INF internal/wsapp/server.go:108 > 已自动添加后端工作目录 project chatID=chat_1bf117b48d8cd0ef projectID=project_d79fd69d80989d34 workdir=/src
+2026-06-01 15:53:35.784 INF cmd/web/server.go:180 > Web 服务已启动 addr=[::]:38541 dataDir=/src/data/e2e/case_mock_agent_gate/mock-enabled-data

@@ -1,0 +1,4 @@
+2026/06/01 15:53:26 INFO - E2E 目标地址: http://127.0.0.1:44231
+2026/06/01 15:53:26 INFO - 开始运行用例: case_codex_timeline_events
+2026/06/01 15:53:26 INFO - 打开页面: http://127.0.0.1:44231
+2026/06/01 15:53:28 INFO - 用例 case_codex_timeline_events 结果: 通过

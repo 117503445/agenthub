@@ -1,0 +1,4 @@
+2026/06/01 15:53:44 INFO - E2E 目标地址: http://127.0.0.1:41133
+2026/06/01 15:53:44 INFO - 开始运行用例: case_settings_backend_version
+2026/06/01 15:53:44 INFO - 打开页面: http://127.0.0.1:41133
+2026/06/01 15:53:45 INFO - 用例 case_settings_backend_version 结果: 通过
